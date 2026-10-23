@@ -61,7 +61,7 @@ from kitaru_post_import_insights.profiling_state import (
     SessionReferences,
 )
 
-ANALYSIS_VERSION = "2026-09-09.1"
+ANALYSIS_VERSION = "2026-10-22.1"
 MAX_DISTRIBUTION_EXAMPLES = 5
 MAX_LABEL_LENGTH = 120
 MAX_ROLE_LENGTH = 32
@@ -209,7 +209,7 @@ class CandidateFinding(_ProfilingModel):
 class ProfilingResult(_ProfilingModel):
     """Stable candidate envelope produced without a model or evaluations."""
 
-    analysis_version: Literal["2026-09-09.1"] = ANALYSIS_VERSION
+    analysis_version: Literal["2026-10-22.1"] = ANALYSIS_VERSION
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     coverage: Coverage
     candidates: list[CandidateFinding]
@@ -410,6 +410,7 @@ class _DistributionSpec:
     session_ids: SessionReferences
     sessions_analyzed: int
     unit: str
+    caveat: str = "Activity volume is not evidence of outcome quality."
 
 
 @dataclass
@@ -421,6 +422,7 @@ class _State:
     counts_store: CountsStore = field(default_factory=CountsStore)
     analyzed_session_ids: SessionReferences = field(init=False)
     node_session_ids: SessionReferences = field(init=False)
+    tool_count_session_ids: SessionReferences = field(init=False)
     signals: dict[str, _Aggregate] = field(default_factory=dict)
     statuses: Counter[str] = field(default_factory=Counter)
     status_sessions: dict[str, SessionReferences] = field(default_factory=dict)
@@ -448,6 +450,7 @@ class _State:
     timing_available: int = 0
     identity_available: int = 0
     tool_calls: int = 0
+    tool_requests_available: bool = False
     ambiguous_tool_outputs: int = 0
     contribution_truncated: bool = False
     maximum_contributors_available: int = 0
@@ -458,6 +461,9 @@ class _State:
             self.config.max_contributing_sessions
         )
         self.node_session_ids = SessionReferences(self.config.max_contributing_sessions)
+        self.tool_count_session_ids = SessionReferences(
+            self.config.max_contributing_sessions
+        )
         self.duration_session_ids = SessionReferences(
             self.config.max_contributing_sessions
         )
@@ -868,6 +874,34 @@ def _find_cycles(
     return retained
 
 
+def _count_output_tool_requests(
+    nodes: Sequence[SessionNodeResponse], budget: _PayloadBudget
+) -> int | None:
+    """Count explicit tool-call parts in assistant outputs within payload bounds."""
+    count = 0
+    for node in nodes:
+        if not isinstance(node.outputs, (list, dict)):
+            continue
+        stack: list[tuple[Any, int, bool]] = [(node.outputs, 0, False)]
+        while stack:
+            current, depth, in_parts = stack.pop()
+            if not budget.consume(current, depth=depth):
+                return None
+            if not isinstance(current, (list, dict)):
+                continue
+            if isinstance(current, list):
+                if not budget.can_enter(len(current)):
+                    return None
+                stack.extend((item, depth + 1, in_parts) for item in current)
+            elif in_parts:
+                count += current.get("type") == "tool_call"
+            elif current.get("role") == "assistant":
+                stack.append((current.get("parts"), depth + 1, True))
+            elif "role" not in current and "messages" in current:
+                stack.append((current["messages"], depth + 1, False))
+    return count
+
+
 def _scan_session(
     state: _State,
     session: SessionWithNodesResponse,
@@ -887,8 +921,17 @@ def _scan_session(
     llm_calls = [node for node in nodes if node.node_type is NodeType.LLM_CALL]
     state.node_session_ids.add(session_id)
     state.tool_calls += len(calls)
-    state.tool_counts.add(len(calls))
-    state.highest_tool_counts.add(session_id, len(calls))
+    tool_count = (
+        len(calls)
+        if calls
+        else _count_output_tool_requests(llm_calls, state.payload_budget)
+    )
+    if tool_count is not None:
+        state.tool_count_session_ids.add(session_id)
+        state.tool_counts.add(tool_count)
+        state.highest_tool_counts.add(session_id, tool_count)
+        if not calls and tool_count:
+            state.tool_requests_available = True
     state.model_counts.add(len(llm_calls))
     state.highest_model_counts.add(session_id, len(llm_calls))
     state.activity_counts.add(len(nodes))
@@ -1171,7 +1214,9 @@ def _build_signal_briefing(
         look_first = (
             "Open the sessions named in evidence_locators; when a locator's node_id "
             "is null the matching text is in the session's recorded inputs, "
-            "otherwise it is in that node's inputs. Compare them with sessions from "
+            "otherwise it is in that node's inputs. First confirm that the matching "
+            "text is customer input rather than agent policy or harness instructions. "
+            "Compare them with sessions from "
             "the same import that have no occurrence, and read the agent turn "
             "immediately before each flagged user message."
         )
@@ -1688,13 +1733,15 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             "correction-language",
             "language",
             60,
-            "USERS CORRECTING THE AGENT",
-            "{share}% of sessions with fully inspected user text include explicit "
-            "correction language",
+            "LITERAL CORRECTION MARKERS",
+            "{share}% of sessions with fully inspected selected text contain literal "
+            "correction markers",
             "A literal correction marker appears {count} times across {affected} "
             "sessions.",
-            "user messages containing literal correction phrases",
-            "Language markers are literal leads, not judgments of sentiment or intent.",
+            "selected input text containing literal correction phrases",
+            "Language markers are literal leads, not judgments of sentiment or intent. "
+            "Recorded user-role messages can include agent policy or harness "
+            "instructions.",
         ),
         (
             "empty-tool-results",
@@ -1833,22 +1880,38 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             )
         )
 
+    tool_unit = "requests" if state.tool_requests_available else "calls"
+    tool_caveat = "Activity volume is not evidence of outcome quality."
+    if state.tool_requests_available:
+        tool_caveat += (
+            " Counts use recorded tool nodes where available, otherwise explicit tool "
+            "requests in model outputs. Tool requests may not have executed."
+        )
+    if len(state.tool_count_session_ids) < len(state.node_session_ids):
+        tool_caveat += (
+            " Sessions with incompletely inspected tool-request payloads were excluded."
+        )
     distribution_specs = (
         _DistributionSpec(
             candidate_id="tool-call-distribution",
             family="activity",
             rank=120,
-            eyebrow="TOOL-CALL DISTRIBUTION",
-            title="Tool calls per session have a measurable spread",
+            eyebrow=(
+                "TOOL-REQUEST DISTRIBUTION"
+                if state.tool_requests_available
+                else "TOOL-CALL DISTRIBUTION"
+            ),
+            title=f"Tool {tool_unit} per session have a measurable spread",
             description=(
                 "The distribution shows sessions where repeated tool use may warrant "
                 "closer inspection."
             ),
             values=state.tool_counts,
             highest_values=state.highest_tool_counts,
-            session_ids=state.node_session_ids,
-            sessions_analyzed=len(state.node_session_ids),
-            unit="calls",
+            session_ids=state.tool_count_session_ids,
+            sessions_analyzed=len(state.tool_count_session_ids),
+            unit=tool_unit,
+            caveat=tool_caveat,
         ),
         _DistributionSpec(
             candidate_id="model-call-distribution",
@@ -1897,6 +1960,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             session_ids=state.duration_session_ids,
             sessions_analyzed=analyzed_sessions,
             unit="seconds",
+            caveat="Recorded timestamps may omit uninstrumented work.",
         ),
     )
     for spec in distribution_specs:
@@ -1921,8 +1985,9 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
         )
         if not contributing:
             continue
+        unit = spec.unit.removesuffix("s") if spec.values.minimum == 1 else spec.unit
         title = (
-            f"All recorded observations have {spec.values.minimum:g} {spec.unit}"
+            f"All recorded observations have {spec.values.minimum:g} {unit}"
             if uniform
             else spec.title
         )
@@ -1939,11 +2004,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 eyebrow=spec.eyebrow,
                 title=title,
                 fallback_description=description,
-                caveat=(
-                    "Recorded timestamps may omit uninstrumented work."
-                    if spec.family == "timing"
-                    else "Activity volume is not evidence of outcome quality."
-                ),
+                caveat=spec.caveat,
                 data=_build_binned(spec.values, unit=spec.unit),
                 facts=[
                     DeterministicFact(name="observations", value=len(spec.values)),
@@ -1980,20 +2041,21 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 rank=160,
                 eyebrow="MODEL MIX",
                 title=(
-                    f"{len(state.models)} recorded model"
+                    f"{len(state.models)} recorded model identifier"
                     f"{' appears' if len(state.models) == 1 else 's appear'} in "
                     "these sessions"
                 ),
                 fallback_description=(
-                    "This exact model mix can seed a cohort for cost, latency, or "
+                    "This identifier mix can seed a cohort for cost, latency, or "
                     "quality comparisons."
                 ),
                 caveat=(
-                    "Requested and served model fields may be absent from some "
-                    "recorded calls."
+                    "Identifiers prefer the served model, falling back to the "
+                    "requested model. Different identifiers may refer to the same "
+                    "model."
                     + (
-                        " The chart shows the 20 most frequent models and combines "
-                        "the remaining models."
+                        " The chart shows the 20 most frequent identifiers and "
+                        "combines the remaining identifiers."
                         if len(state.models) > 20
                         else ""
                     )
