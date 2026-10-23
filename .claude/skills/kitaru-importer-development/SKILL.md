@@ -14,7 +14,7 @@ First decide whether the request needs a reusable package. A one-off conversion 
 Implement `parse(payload: bytes, params: dict[str, Any])` as an iterator of `ImportedSession` or `ImportFailure`.
 
 - Choose and document the source-to-session boundary.
-- Derive a stable source `external_id`; Kitaru deduplicates using the importer provider and this ID.
+- Derive a stable source `external_id` and use a nonempty importer provider. Kitaru 0.24.0 and later deduplicates on `(imported_from, external_id, agent_id)`, across all versions of the destination logical agent. Kitaru 0.23.0 used a global provider/external-ID key; verify the destination server's contract when supporting older or unknown versions.
 - Preserve source inputs and outputs. Populate selectors, models, tokens, costs, reasoning selectors, framework, attributes, and metadata only when the export supports them without guessing.
 - Yield `ImportFailure` for an isolated bad record. An exception raised while starting or advancing the parser ends the import task.
 - Preserve valid node ordering and graph relationships. Use either nested nodes or the flat indexed form accepted by `flatten_nodes`; follow that function's validation rules.
