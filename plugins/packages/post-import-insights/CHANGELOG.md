@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Count explicit tool requests in LLM output messages when a session has no separate tool nodes, label the fallback as requests, and exclude incomplete request scans from the distribution.
+- Describe correction signals as literal text markers and call out that recorded user-role messages may contain agent policy or harness instructions.
+- Label the model-mix card as recorded model identifiers without normalizing aliases or changing counts.
+
 ## 0.1.2 - 2026-10-08
 
 - Simplify internal return syntax without changing insight generation.
