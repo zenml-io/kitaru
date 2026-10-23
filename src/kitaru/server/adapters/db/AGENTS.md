@@ -30,10 +30,10 @@ This file covers repository, ORM, and transaction mechanics.
   explicit length via `String(...)`.
 - `from_domain` passes the id and never timestamps. `to_domain` passes both
   timestamps. Immutable resources whose domain model has no `updated` field
-  pass only `created`. Nothing outside a repository touches ORM models.
+  pass only `created`.
 - Repositories live one module per resource under `repositories/`, implement
   the application-layer Protocol, and take the session in the constructor.
-- Repository and ORM syntax gates run in `just python-standards-check` (KIT001-KIT004).
+- Repository and ORM syntax gates run in `just python-standards-check` (KIT001-KIT004). Import-linter allows ORM imports only inside the DB adapter and migrations.
 - Write methods end with `flush()` so the SQL runs and constraint violations surface inside the repository method. The request session commits at the REST boundary, through `KitaruAPIRoute` (`adapters/rest/route.py`) after the route handler succeeds and before the response is returned. Any exception skips the commit and pending writes roll back when the session closes.
 - Session-number allocation deliberately uses an independent `engine.begin()` transaction. It commits the counter before session creation and releases the agent lock; a failed creation leaves a gap.
 - `query` methods build a filtered, unordered `Select` and pass it to the
@@ -65,5 +65,4 @@ This file covers repository, ORM, and transaction mechanics.
 - A column the database itself generates (`server_default`, trigger) must be
   fetched in the flush via `eager_defaults` RETURNING. A post-flush attribute
   access on an expired column raises `MissingGreenlet` on async sessions.
-- Every schema change ships a matching Alembic revision under
-  `database/migrations/versions/`.
+- Every schema change ships a matching Alembic revision under `database/migrations/versions/`. CI runs `just migration-check`, which fails when the migrated schema differs from the ORM; run it locally after `docker compose up -d db`.

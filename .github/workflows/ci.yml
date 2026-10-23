@@ -493,6 +493,7 @@ jobs:
           - name: py314-base-1
             python-version: '3.14'
             postgres: true
+            migration-check: true
             coverage: true
             shard-index: '0'
             shard-count: '2'
@@ -578,6 +579,9 @@ jobs:
         run: >-
           uv run python -c "import importlib.util; import kitaru; import kitaru.client;
           assert importlib.util.find_spec('mcp') is None"
+      - name: Check Alembic migrations against the ORM schema
+        if: ${{ matrix.migration-check }}
+        run: uv run python scripts/check_migrations.py
       - run: ${{ matrix.pytest-command }}
         env:
           # File grouping preserves module fixtures and test order within each file.

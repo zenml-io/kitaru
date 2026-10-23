@@ -272,6 +272,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+xfail_strict = true
 markers = ["mcp_fuzz: generated-input MCP property tests"]
 
 [tool.coverage.run]
@@ -287,6 +288,8 @@ precision = 1
 
 [tool.importlinter]
 root_packages = ["kitaru"]
+# Lets contracts name third-party packages such as sqlalchemy.
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "client and server are independent, both sit on the shared packages"
@@ -319,3 +322,35 @@ layers = [
     "kitaru.server.application",
     "kitaru.server.domain",
 ]
+
+[[tool.importlinter.contracts]]
+name = "domain has no framework, persistence, or outer server dependencies"
+type = "forbidden"
+source_modules = ["kitaru.server.domain"]
+forbidden_modules = [
+    "alembic",
+    "fastapi",
+    "sqlalchemy",
+    "starlette",
+    "kitaru.cli",
+    "kitaru.client",
+    "kitaru.server.api",
+    "kitaru.server.config",
+    "kitaru.server.database",
+]
+broken_contract_guidance = """
+Domain entities enforce their own invariants without frameworks or storage.
+Move the persistence or HTTP concern into an adapter, or depend on a shared
+primitive from kitaru.server.base instead.
+"""
+
+[[tool.importlinter.contracts]]
+name = "only the DB adapter and migrations import ORM models"
+type = "protected"
+protected_modules = ["kitaru.server.adapters.db.orm"]
+allowed_importers = ["kitaru.server.adapters.db", "kitaru.server.database.migrations"]
+broken_contract_guidance = """
+Read and write rows through the resource's repository under
+kitaru.server.adapters.db.repositories, which converts ORM rows to domain
+objects with to_domain().
+"""
