@@ -25,4 +25,4 @@
 - Route docstrings state the status codes clients observe, including error
   cases.
 
-`tests/server/test_route_conventions.py` fails for a route built without `KitaruAPIRoute` or without an `authorize` dependency, unless the route is listed there with a reason.
+`tests/server/test_route_conventions.py` fails for a route built without `KitaruAPIRoute`, and for a route without an `authorize` dependency unless it is listed there as public with a reason.

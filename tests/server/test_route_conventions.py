@@ -20,6 +20,7 @@ import pytest
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute, iter_route_contexts
 
+from conftest import local_settings
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_task_only,
@@ -30,7 +31,6 @@ from kitaru.server.adapters.rest.dependencies import (
 )
 from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.api.app import create_app
-from kitaru.server.api.config import APISettings
 
 AUTHORIZE_DEPENDENCIES: set[Callable[..., Any]] = {
     authorize,
@@ -41,22 +41,17 @@ AUTHORIZE_DEPENDENCIES: set[Callable[..., Any]] = {
     authorize_worker_only,
 }
 
-# Only KitaruAPIRoute commits the request session, so a plain route that
-# writes would answer success and then roll the write back.
-PLAIN_ROUTES: dict[str, str] = {
-    "/health": "Probe that only pings the database.",
-    "/health/live": "Probe with no database access.",
-    "/api/v1/info": "Static server metadata with no database session.",
-}
-
-PUBLIC_ROUTES: dict[str, str] = {
-    "/health": "Readiness probe.",
-    "/health/live": "Liveness probe.",
-    "/api/v1/info": "Server metadata clients read before logging in.",
-    "/api/v1/login": "Issues the credential.",
-    "/api/v1/logout": "Only clears the auth cookie.",
-    "/api/v1/device_authorization": "Starts the device login flow.",
-    "/api/v1/users/{account_id}/activate": "Authenticated by the activation token.",
+PUBLIC_ROUTES: dict[tuple[str, str], str] = {
+    ("GET", "/health"): "Readiness probe.",
+    ("GET", "/health/live"): "Liveness probe.",
+    ("GET", "/api/v1/info"): "Server metadata clients read before logging in.",
+    ("POST", "/api/v1/login"): "Issues the credential.",
+    ("POST", "/api/v1/logout"): "Only clears the auth cookie.",
+    ("POST", "/api/v1/device_authorization"): "Starts the device login flow.",
+    (
+        "POST",
+        "/api/v1/users/{account_id}/activate",
+    ): "Authenticated by the activation token.",
 }
 
 # Guards against a FastAPI change that hides nested routes from the walk below,
@@ -67,26 +62,19 @@ MIN_ROUTE_COUNT = 150
 @pytest.fixture(scope="module")
 def routes() -> list[tuple[str, APIRoute]]:
     """Return every API route on the application with its full path."""
-    app = create_app(
-        APISettings(
-            DB_HOST="localhost",
-            SECRET_ENCRYPTION_KEY="test-encryption-key",
-            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
-        )
-    )
     # app.routes holds included-router wrappers; only the walk reaches APIRoutes.
     found = [
         (context.path or route.path, route)
-        for context in iter_route_contexts(app.routes)
+        for context in iter_route_contexts(create_app(local_settings()).routes)
         if isinstance(route := context.original_route, APIRoute)
     ]
     assert len(found) >= MIN_ROUTE_COUNT
     return found
 
 
-def _get_dependency_calls(dependant: Dependant) -> set[Callable[..., Any]]:
+def _get_dependency_calls(node: Dependant) -> set[Callable[..., Any]]:
     calls: set[Callable[..., Any]] = set()
-    for dependency in dependant.dependencies:
+    for dependency in node.dependencies:
         if dependency.call is not None:
             calls.add(dependency.call)
         calls |= _get_dependency_calls(dependency)
@@ -96,24 +84,24 @@ def _get_dependency_calls(dependant: Dependant) -> set[Callable[..., Any]]:
 def test_routes_commit_through_kitaru_route(
     routes: list[tuple[str, APIRoute]],
 ) -> None:
-    """Build every route with KitaruAPIRoute unless it is listed as plain."""
+    """Build every route with KitaruAPIRoute, which commits the request session."""
     plain = {path for path, route in routes if not isinstance(route, KitaruAPIRoute)}
-    assert plain == set(PLAIN_ROUTES), (
+    assert not plain, (
         "Build the router with APIRouter(route_class=KitaruAPIRoute) from "
-        "kitaru.server.adapters.rest.route, or add the path to PLAIN_ROUTES "
-        "with the reason it needs no commit."
+        "kitaru.server.adapters.rest.route; a plain route rolls back its writes."
     )
 
 
 def test_routes_require_authorization(routes: list[tuple[str, APIRoute]]) -> None:
     """Depend on an authorize variant unless the route is listed as public."""
     public = {
-        path
+        (method, path)
         for path, route in routes
         if not _get_dependency_calls(route.dependant) & AUTHORIZE_DEPENDENCIES
+        for method in route.methods or ()
     }
     assert public == set(PUBLIC_ROUTES), (
         "Add an authorize dependency from kitaru.server.adapters.rest.dependencies "
-        "and pass actor=actor to the service, or add the path to PUBLIC_ROUTES "
-        "with the reason it is reachable without credentials."
+        "and pass actor=actor to the service, or add the method and path to "
+        "PUBLIC_ROUTES with the reason it is reachable without credentials."
     )

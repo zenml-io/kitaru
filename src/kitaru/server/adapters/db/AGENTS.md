@@ -65,4 +65,4 @@ This file covers repository, ORM, and transaction mechanics.
 - A column the database itself generates (`server_default`, trigger) must be
   fetched in the flush via `eager_defaults` RETURNING. A post-flush attribute
   access on an expired column raises `MissingGreenlet` on async sessions.
-- Every schema change ships a matching Alembic revision under `database/migrations/versions/`. CI runs `just migration-check`, which fails when the migrated schema differs from the ORM; run it locally after `docker compose up -d db`.
+- Every schema change ships a matching Alembic revision under `database/migrations/versions/`. CI runs `scripts/check_migrations.py`, which fails when the migrated schema differs from the ORM; run it locally with `just migration-check` after `docker compose up -d db`.

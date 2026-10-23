@@ -333,7 +333,6 @@ forbidden_modules = [
     "sqlalchemy",
     "starlette",
     "kitaru.cli",
-    "kitaru.client",
     "kitaru.server.api",
     "kitaru.server.config",
     "kitaru.server.database",
