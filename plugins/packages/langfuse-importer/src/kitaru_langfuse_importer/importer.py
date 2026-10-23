@@ -40,6 +40,9 @@ from kitaru.task.importer import (
 
 SOURCE_PARENT_LINK_KIND = "source_parent"
 TOOL_DEFINITIONS_METADATA_KEY = "kitaru.tool_definitions"
+REQUEST_PARAMETERS_METADATA_KEY = "langfuse.model_request_parameters"
+# Tool lists are already normalized under TOOL_DEFINITIONS_METADATA_KEY.
+_REQUEST_PARAMETER_TOOL_LISTS = frozenset({"function_tools", "output_tools"})
 MAX_TREE_DEPTH = 64
 MAX_TOOL_SCAN_DEPTH = 64
 _TRACE_SHAPE = "trace"
@@ -745,7 +748,24 @@ def _node_metadata(record: dict[str, Any], node_type: NodeType) -> dict[str, Any
         definitions = _get_tool_definitions(record)
         if definitions:
             metadata[TOOL_DEFINITIONS_METADATA_KEY] = definitions
+        if request_parameters := _get_request_parameters(record):
+            metadata[REQUEST_PARAMETERS_METADATA_KEY] = request_parameters
     return metadata
+
+
+def _get_request_parameters(record: dict[str, Any]) -> dict[str, Any]:
+    """Return PydanticAI's `model_request_parameters` without its tool lists.
+
+    Fields such as `allow_text_output` decide request controls the provider
+    received (PydanticAI sends `tool_choice: required` when text output is
+    not allowed) but never appear in the generation input.
+    """
+    request_parameters = _dict(_metadata_value(record, "model_request_parameters"))
+    return {
+        key: value
+        for key, value in request_parameters.items()
+        if key not in _REQUEST_PARAMETER_TOOL_LISTS
+    }
 
 
 def _tool_definition(value: Any) -> dict[str, Any] | None:

@@ -33,6 +33,7 @@ from typing import Any, Literal
 from kitaru.api_models.v1.session_node import NodeStatus, SessionNodeResponse
 
 TOOL_DEFINITIONS_METADATA_KEY = "kitaru.tool_definitions"
+_REQUEST_PARAMETERS_KEY = "model_request_parameters"
 
 SkipReason = Literal[
     "failed_recorded_call",
@@ -92,7 +93,9 @@ class ReplayRequest:
     dropped_reasoning_parts: int = 0
     controls: Mapping[str, Any] = field(default_factory=dict)
     """Recorded `tool_choice`, `parallel_tool_calls` and `response_format`,
-    in chat-completions form, which constrain what the model could answer."""
+    in chat-completions form, which constrain what the model could answer.
+    A Pydantic AI call that could not answer in text carries the
+    `tool_choice: required` it sent."""
 
 
 @dataclass(frozen=True)
@@ -182,6 +185,15 @@ def build_replay_request(
                 name, _infer_schema(name, messages, recorded), None
             )
         schema_source = "inferred"
+    if (
+        "tool_choice" not in raw_controls
+        and definitions
+        and _text_output_disallowed(node)
+    ):
+        # Pydantic AI sends `tool_choice: required` whenever tools are offered
+        # and the agent may only answer through a tool; without it, models
+        # answer output-tool steps in plain text.
+        raw_controls["tool_choice"] = "required"
     try:
         controls = _normalize_controls(raw_controls, definitions.keys())
     except UnsupportedShapeError as error:
@@ -222,6 +234,40 @@ def _recorded_controls(inputs: Any, model_params: Any) -> dict[str, Any]:
                 controls[key] = scope[key]
                 break
     return controls
+
+
+def _text_output_disallowed(node: SessionNodeResponse) -> bool:
+    """Tell whether Pydantic AI recorded that the call could not answer in text.
+
+    Importers keep `model_request_parameters` in different places: Logfire
+    and Phoenix nest the raw span attributes under their own attribute key,
+    and Langfuse keeps it in metadata under a prefixed key.
+    """
+    scopes: list[Any] = []
+    for container in (node.attributes, node.metadata):
+        if isinstance(container, dict):
+            scopes.append(container)
+            scopes.extend(v for v in container.values() if isinstance(v, dict))
+    for scope in scopes:
+        for key, value in scope.items():
+            if key != _REQUEST_PARAMETERS_KEY and not key.endswith(
+                f".{_REQUEST_PARAMETERS_KEY}"
+            ):
+                continue
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    continue
+            # Pydantic AI forces a tool only when it can accept neither text
+            # nor an image as the answer.
+            if (
+                isinstance(value, dict)
+                and value.get("allow_text_output") is False
+                and not value.get("allow_image_output")
+            ):
+                return True
+    return False
 
 
 def _normalize_controls(

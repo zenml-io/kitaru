@@ -1733,6 +1733,11 @@ def test_falls_back_to_model_request_parameters_tools() -> None:
             "function": {"name": "final_result", "parameters": result_schema},
         },
     ]
+    # The flags decide the recorded `tool_choice`; the tool lists are already
+    # normalized above.
+    assert _generation_node(session).metadata[
+        langfuse_module.REQUEST_PARAMETERS_METADATA_KEY
+    ] == {"output_mode": "tool", "allow_text_output": False}
 
 
 def test_falls_back_to_genai_tool_definitions() -> None:

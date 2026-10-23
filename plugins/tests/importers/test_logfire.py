@@ -660,6 +660,9 @@ def test_model_request_parameters_become_tool_definitions() -> None:
             },
         },
     ]
+    # Model-swap reads `allow_text_output` from the raw span attributes.
+    raw = json.loads(node.attributes["logfire.attributes"]["model_request_parameters"])
+    assert raw["allow_text_output"] is False
 
 
 def test_model_request_parameters_alone_are_not_model_params() -> None:

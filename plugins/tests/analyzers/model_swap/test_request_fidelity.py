@@ -20,7 +20,11 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from kitaru.api_models.v1.session_node import SessionNodeResponse
+from kitaru.api_models.v1.session_node import (
+    NodeType,
+    SessionNodeResponse,
+    SessionWithNodesResponse,
+)
 from kitaru.task.importer import ImportedSession, flatten_nodes
 from kitaru_langfuse_importer.importer import LangfuseJSONLImporter
 from kitaru_model_swap.endpoint import build_body, build_responses_body
@@ -63,7 +67,12 @@ SCHEMA_FORMAT = {
 
 
 def rebuild(
-    inputs: Any, outputs: Any, *, model_params: dict[str, Any] | None = None
+    inputs: Any,
+    outputs: Any,
+    *,
+    model_params: dict[str, Any] | None = None,
+    attributes: Any = None,
+    metadata: dict[str, Any] | None = None,
 ) -> ReplayRequest | Skipped:
     node = SessionNodeResponse.model_validate(
         {
@@ -77,7 +86,8 @@ def rebuild(
             "inputs": inputs,
             "outputs": outputs,
             "model_params": model_params,
-            "metadata": {},
+            "attributes": attributes,
+            "metadata": metadata or {},
         }
     )
     return build_replay_request(
@@ -197,6 +207,112 @@ def test_controls_that_cannot_be_sent_skip_the_call(
     assert isinstance(result, Skipped)
     assert result.reason == "unsupported_request_control"
     assert detail in result.detail
+
+
+NO_TEXT_OUTPUT = {"output_mode": "tool", "allow_text_output": False}
+
+
+def test_quickstart_output_tool_steps_require_a_tool(
+    quickstart_sessions: list[SessionWithNodesResponse],
+) -> None:
+    """Every quickstart call disallows text, so Pydantic AI forced a tool."""
+    requests = []
+    for session in quickstart_sessions:
+        for node in session.nodes:
+            if node.node_type is NodeType.LLM_CALL:
+                request = build_replay_request(
+                    node,
+                    tool_schemas={},
+                    tool_descriptions={},
+                    use_recorded_tools=True,
+                    infer_missing_schemas=False,
+                )
+                assert isinstance(request, ReplayRequest), request
+                requests.append(request)
+    final_steps = [
+        request
+        for request in requests
+        if [call.name for call in request.recorded.tool_calls] == ["final_result"]
+    ]
+    assert len(requests) == 33
+    assert len(final_steps) == 10
+    for request in requests:
+        assert request.controls == {"tool_choice": "required"}
+        chat = build_body(CHAT, request.messages, request.tools, request.controls)
+        responses = build_responses_body(
+            RESPONSES, request.messages, request.tools, request.controls
+        )
+        assert chat["tool_choice"] == responses["tool_choice"] == "required"
+
+
+@pytest.mark.parametrize(
+    ("attributes", "metadata"),
+    [
+        ({"logfire.attributes": {"model_request_parameters": NO_TEXT_OUTPUT}}, {}),
+        (
+            {
+                "phoenix.attributes": {
+                    "model_request_parameters": json.dumps(NO_TEXT_OUTPUT)
+                }
+            },
+            {},
+        ),
+        (None, {"langfuse.model_request_parameters": NO_TEXT_OUTPUT}),
+    ],
+    ids=["logfire", "phoenix", "langfuse"],
+)
+def test_text_output_disallowed_requires_a_tool(
+    attributes: Any, metadata: dict[str, Any]
+) -> None:
+    result = rebuild(
+        {"messages": MESSAGES, "tools": [TOOL]},
+        "done",
+        attributes=attributes,
+        metadata=metadata,
+    )
+    assert isinstance(result, ReplayRequest), result
+    assert result.controls == {"tool_choice": "required"}
+
+
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {"output_mode": "text", "allow_text_output": True},
+        {**NO_TEXT_OUTPUT, "allow_image_output": True},
+    ],
+)
+def test_text_or_image_output_leaves_tool_choice_unset(
+    parameters: dict[str, Any],
+) -> None:
+    result = rebuild(
+        {"messages": MESSAGES, "tools": [TOOL]},
+        "done",
+        metadata={"langfuse.model_request_parameters": parameters},
+    )
+    assert isinstance(result, ReplayRequest), result
+    assert result.controls == {}
+
+
+def test_recorded_tool_choice_wins_over_disallowed_text() -> None:
+    choice = {"type": "function", "function": {"name": "final_result"}}
+    result = rebuild(
+        {"messages": MESSAGES, "tools": [TOOL]},
+        "done",
+        model_params={"tool_choice": choice},
+        metadata={"langfuse.model_request_parameters": NO_TEXT_OUTPUT},
+    )
+    assert isinstance(result, ReplayRequest), result
+    assert result.controls == {"tool_choice": choice}
+
+
+def test_disallowed_text_without_tools_is_still_replayed() -> None:
+    result = rebuild(
+        {"messages": MESSAGES},
+        "done",
+        metadata={"langfuse.model_request_parameters": NO_TEXT_OUTPUT},
+    )
+    assert isinstance(result, ReplayRequest), result
+    assert result.controls == {}
 
 
 def test_tool_choice_without_tools_is_not_sent() -> None:

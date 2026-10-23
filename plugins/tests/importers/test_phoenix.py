@@ -937,6 +937,9 @@ def test_model_request_parameters_tools_become_tool_definitions() -> None:
             "function": {"name": "final_result", "parameters": result_schema},
         },
     ]
+    # Model-swap reads Pydantic AI's flags from the raw span attributes.
+    raw = json.loads(node.attributes["phoenix.attributes"]["model_request_parameters"])
+    assert raw["output_mode"] == "tool"
 
 
 def test_anthropic_custom_tools_become_tool_definitions() -> None:
