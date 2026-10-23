@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """HTML insight report rendering and its CLI command."""
 
+import html
 import json
 import uuid
 from collections.abc import AsyncIterator
@@ -40,6 +41,7 @@ def insight(
     created: datetime = NOW,
     metadata: dict[str, Any] | None = None,
     analyzer_version_id: uuid.UUID | None = None,
+    analyzer_params: dict[str, Any] | None = None,
 ) -> InsightResponse:
     return InsightResponse.model_validate(
         {
@@ -50,6 +52,7 @@ def insight(
             "agent_id": uuid.uuid4(),
             "import_id": IMPORT_ID,
             "analyzer_version_id": analyzer_version_id,
+            "analyzer_params": analyzer_params,
             "name": name,
             "title": name.title(),
             "description": None,
@@ -70,12 +73,14 @@ def analyzer_insight(
     *,
     created: datetime = NOW,
     analyzer_version_id: uuid.UUID = ANALYZER_VERSION_ID,
+    analyzer_params: dict[str, Any] | None = None,
 ) -> InsightResponse:
     return insight(
         name,
         created=created,
         metadata=section(html, covers or []) if html is not None else None,
         analyzer_version_id=analyzer_version_id,
+        analyzer_params=analyzer_params,
     )
 
 
@@ -120,6 +125,25 @@ def test_only_the_latest_section_per_name_is_embedded() -> None:
 
     assert "new run" in document
     assert "old run" not in document
+
+
+def test_batches_with_different_params_are_all_embedded_and_labeled() -> None:
+    batch_a = analyzer_insight(
+        "swap-summary",
+        "<p>batch A</p>",
+        created=NOW - timedelta(minutes=5),
+        analyzer_params={"candidates": ["a"]},
+    )
+    batch_b = analyzer_insight(
+        "swap-summary", "<p>batch B</p>", analyzer_params={"candidates": ["b"]}
+    )
+
+    document = render_insight_report([batch_b, batch_a], import_id=IMPORT_ID)
+
+    assert document.index("batch A") < document.index("batch B")
+    assert "Run 1 of 2" in document
+    assert "Run 2 of 2" in document
+    assert html.escape('{"candidates": ["b"]}') in document
 
 
 def test_page_forbids_scripts_and_escapes_card_content() -> None:
