@@ -33,6 +33,32 @@ for node in nodes.items:
 
 `requested_model` vs `model` is worth watching: it shows an alias or a replay [override](replay-and-overrides.md) resolving to the model that served the call.
 
+## Tool definitions
+
+Some importers keep the tools that were offered to the model on imported `llm_call` nodes, under the reserved node metadata key `kitaru.tool_definitions`, so a replay against a different model can present the same tools. The value is a list in the OpenAI chat-completions form:
+
+```json
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "lookup_order",
+      "description": "Look up an order by exact order number or customer email.",
+      "parameters": {"type": "object", "properties": {"order_id": {"type": "string"}}}
+    }
+  }
+]
+```
+
+`description` is omitted when the source has none. Output tools, such as PydanticAI's `final_result`, appear like any other function tool. The Langfuse, Logfire, and Phoenix importers set the key only when the trace carries real JSON schemas: Langfuse reads the generation's `input.tools`, then PydanticAI's `model_request_parameters`, then `gen_ai.tool.definitions`; Logfire reads `model_request_parameters`, then `gen_ai.tool.definitions`; Phoenix reads OpenInference `llm.tools.N.tool.json_schema`, then `gen_ai.tool.definitions`, then `model_request_parameters`. Anthropic `custom` tools, which keep their schema under `input_schema`, are normalized the same way. A call with no tool schemas in its source has no `kitaru.tool_definitions` key.
+
+```python
+for node in nodes.items:
+    if node.node_type == "llm_call":
+        tools = node.metadata.get("kitaru.tool_definitions", [])
+        print([tool["function"]["name"] for tool in tools])
+```
+
 ## Cost as an experiment metric
 
 Cost earns its place in the loop as a _delta_. Every replay's result session carries its own rollups, so "did the cheaper model hold?" is a pass-rate comparison and a cost comparison from the same rows:

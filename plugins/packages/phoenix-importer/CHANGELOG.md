@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Stop reading Pydantic AI's `model_request_parameters` attribute as model parameters. It lists the tools offered to the model, not sampling settings.
+- Keep LLM span tool definitions under the `kitaru.tool_definitions` node metadata key, normalized to the OpenAI chat-completions form, from OpenInference `llm.tools.N.tool.json_schema` or `gen_ai.tool.definitions`.
+
 ## 0.4.0 - 2026-09-21
 
 - Stream API imports in ordered trace batches, fetch each batch with one Phoenix request, and stop fetching when `max_sessions` is reached.

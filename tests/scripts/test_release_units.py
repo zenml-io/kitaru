@@ -39,6 +39,7 @@ EXPECTED_UNITS = {
     "langsmith-importer": "kitaru-langsmith-importer",
     "mastra-importer": "kitaru-mastra-importer",
     "mlflow-importer": "kitaru-mlflow-importer",
+    "model-swap": "kitaru-model-swap",
     "openai-agents": "kitaru-openai-agents",
     "phoenix-importer": "kitaru-phoenix-importer",
     "post-import-insights": "kitaru-post-import-insights",
@@ -47,6 +48,7 @@ EXPECTED_UNITS = {
 }
 
 EXPECTED_DEFAULT_DISTRIBUTIONS = {
+    "kitaru-model-swap",
     "kitaru-post-import-insights",
     "kitaru-braintrust-importer",
     "kitaru-evaluator",
@@ -145,6 +147,7 @@ def test_inventory_describes_core_and_plugin_distributions() -> None:
 def test_default_requirements_are_derived_from_release_units() -> None:
     inventory = load_inventory()
     assert set(default_requirements(inventory).values()) == {
+        "kitaru-model-swap==0.1.0",
         "kitaru-post-import-insights==0.1.2",
         "kitaru-braintrust-importer==0.4.0",
         "kitaru-evaluator==0.2.1",
@@ -630,7 +633,7 @@ def test_plugin_matrix_is_generated_from_the_plugin_units_in_three_shards() -> N
 
     shards = matrix["include"]
     assert [shard["shard"] for shard in shards] == ["1/3", "2/3", "3/3"]
-    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [6, 5, 5]
+    assert [len(shard["package_paths"].splitlines()) for shard in shards] == [6, 6, 5]
     assert [
         package_path
         for shard in shards
@@ -896,7 +899,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 17 release units."),
+        (["validate"], "Validated 18 release units."),
         (
             [
                 "propose-core-version",

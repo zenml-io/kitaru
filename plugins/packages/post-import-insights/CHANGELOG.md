@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Point the model mix card at choosing the right model: its description, button label ("Investigate model choice") and briefing now lead to comparing candidate models on the import's recorded calls with the `kitaru-model-swap` skill instead of a single replay. The analysis version is bumped to `2026-10-23.1` because the briefing text is part of each candidate's content hash.
 - Count explicit tool requests in LLM output messages when a session has no separate tool nodes, label the fallback as requests, and exclude incomplete request scans from the distribution.
 - Describe correction signals as literal text markers and call out that recorded user-role messages may contain agent policy or harness instructions.
 - Label the model-mix card as recorded model identifiers without normalizing aliases or changing counts.

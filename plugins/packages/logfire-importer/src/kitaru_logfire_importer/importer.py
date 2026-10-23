@@ -35,6 +35,7 @@ from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportedNode, ImportedSession
 
 MAX_PARENT_DEPTH = 64
+TOOL_DEFINITIONS_METADATA_KEY = "kitaru.tool_definitions"
 _DEFAULT_JOIN_PATHS = (
     "attributes.session.id",
     "attributes.session_id",
@@ -365,6 +366,74 @@ def _node_status(record: dict[str, Any]) -> NodeStatus:
 def _payload(record: dict[str, Any], *names: str) -> Any:
     """Return the first decoded payload attribute."""
     return _attribute(record, *names)
+
+
+def _tool_definition(value: Any) -> dict[str, Any] | None:
+    """Normalize one tool definition to the OpenAI chat-completions form."""
+    value = _decode_json(value)
+    # Anthropic marks its client tools `custom` and keeps the schema under
+    # `input_schema`; both forms describe a callable function.
+    if not isinstance(value, dict) or value.get("type") not in (
+        None,
+        "function",
+        "custom",
+    ):
+        return None
+    nested = value.get("function")
+    function = nested if isinstance(nested, dict) else value
+    name = function.get("name")
+    parameters = next(
+        (
+            _decode_json(function[key])
+            for key in ("parameters", "parameters_json_schema", "input_schema")
+            if key in function
+        ),
+        None,
+    )
+    # Keep only definitions that carry a real schema; a bare name cannot be
+    # replayed against another model.
+    if not isinstance(name, str) or not name or not isinstance(parameters, dict):
+        return None
+    normalized: dict[str, Any] = {"name": name}
+    description = function.get("description")
+    if isinstance(description, str) and description:
+        normalized["description"] = description
+    normalized["parameters"] = parameters
+    return {"type": "function", "function": normalized}
+
+
+def _tool_definitions(values: Any) -> list[dict[str, Any]]:
+    """Normalize a list of tool definitions, dropping entries without schemas."""
+    values = _decode_json(values)
+    if not isinstance(values, list):
+        return []
+    return [
+        definition
+        for value in values
+        if (definition := _tool_definition(value)) is not None
+    ]
+
+
+def _get_tool_definitions(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the tool definitions offered to the model in one span."""
+    request_parameters = _dict(_attribute(record, "model_request_parameters"))
+    definitions = [
+        *_tool_definitions(request_parameters.get("function_tools")),
+        *_tool_definitions(request_parameters.get("output_tools")),
+    ]
+    if definitions:
+        return definitions
+    return _tool_definitions(_attribute(record, "gen_ai.tool.definitions"))
+
+
+def _node_metadata(record: dict[str, Any], node_type: NodeType) -> dict[str, Any]:
+    """Return source metadata plus normalized tool definitions for model calls."""
+    metadata = _source_metadata(record)
+    if node_type is NodeType.LLM_CALL:
+        definitions = _get_tool_definitions(record)
+        if definitions:
+            metadata[TOOL_DEFINITIONS_METADATA_KEY] = definitions
+    return metadata
 
 
 def _tokens(record: dict[str, Any]) -> TokenUsage | None:
@@ -778,7 +847,6 @@ class LogfireRecordsImporter:
                                     row,
                                     "gen_ai.request.parameters",
                                     "model_parameters",
-                                    "model_request_parameters",
                                     "model_settings",
                                 )
                             )
@@ -790,7 +858,7 @@ class LogfireRecordsImporter:
                                 "logfire.message": row.get("message"),
                                 "logfire.attributes": _attributes(row),
                             },
-                            metadata=_source_metadata(row),
+                            metadata=_node_metadata(row, node_type),
                             children=[],
                         ),
                         parent_external_id,

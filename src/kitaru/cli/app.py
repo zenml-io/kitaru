@@ -48,6 +48,7 @@ from kitaru.cli import (
     experiment_runs,
     experiments,
     imports,
+    insight_report,
     insights,
     investigations,
     jobs,
@@ -2403,6 +2404,41 @@ async def insight_delete(
     """Delete one insight by UUID."""
     async with _open_asset_client() as client:
         return await insights.delete_insight(client, insight, force=force)
+
+
+@_register(
+    insight_app,
+    _spec(
+        ("insight", "report"),
+        "Render an import's insights as a self-contained HTML file.",
+        parameters=(
+            ParameterSpec(
+                "--import-id",
+                "UUID",
+                "option",
+                True,
+                "Import whose insights to render.",
+            ),
+            ParameterSpec(
+                "--out", "path", "option", False, "HTML file to write (report.html)."
+            ),
+        ),
+        read_only=False,
+        side_effects=("writes_local_file",),
+        idempotency="idempotent",
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def insight_report_command(
+    *,
+    import_id: Annotated[uuid.UUID, Parameter(name="--import-id")],
+    out: Annotated[Path, Parameter(name="--out")] = Path("report.html"),
+) -> CommandResult:
+    """Render the insights of one import to an HTML file."""
+    async with _open_asset_client() as client:
+        return await insight_report.write_insight_report(
+            client, import_id=import_id, out=out
+        )
 
 
 @_register(

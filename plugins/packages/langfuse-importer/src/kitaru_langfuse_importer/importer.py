@@ -39,6 +39,10 @@ from kitaru.task.importer import (
 )
 
 SOURCE_PARENT_LINK_KIND = "source_parent"
+TOOL_DEFINITIONS_METADATA_KEY = "kitaru.tool_definitions"
+REQUEST_PARAMETERS_METADATA_KEY = "langfuse.model_request_parameters"
+# Tool lists are already normalized under TOOL_DEFINITIONS_METADATA_KEY.
+_REQUEST_PARAMETER_TOOL_LISTS = frozenset({"function_tools", "output_tools"})
 MAX_TREE_DEPTH = 64
 MAX_TOOL_SCAN_DEPTH = 64
 _TRACE_SHAPE = "trace"
@@ -735,6 +739,98 @@ def _source_metadata(record: dict[str, Any]) -> dict[str, Any]:
         if source_field in record and record[source_field] not in (None, ""):
             selected[f"langfuse.{target_field}"] = record[source_field]
     return selected
+
+
+def _node_metadata(record: dict[str, Any], node_type: NodeType) -> dict[str, Any]:
+    """Return source metadata plus normalized tool definitions for model calls."""
+    metadata = _source_metadata(record)
+    if node_type is NodeType.LLM_CALL:
+        definitions = _get_tool_definitions(record)
+        if definitions:
+            metadata[TOOL_DEFINITIONS_METADATA_KEY] = definitions
+        if request_parameters := _get_request_parameters(record):
+            metadata[REQUEST_PARAMETERS_METADATA_KEY] = request_parameters
+    return metadata
+
+
+def _get_request_parameters(record: dict[str, Any]) -> dict[str, Any]:
+    """Return PydanticAI's `model_request_parameters` without its tool lists.
+
+    Fields such as `allow_text_output` decide request controls the provider
+    received (PydanticAI sends `tool_choice: required` when text output is
+    not allowed) but never appear in the generation input.
+    """
+    request_parameters = _dict(_metadata_value(record, "model_request_parameters"))
+    return {
+        key: value
+        for key, value in request_parameters.items()
+        if key not in _REQUEST_PARAMETER_TOOL_LISTS
+    }
+
+
+def _tool_definition(value: Any) -> dict[str, Any] | None:
+    """Normalize one tool definition to the OpenAI chat-completions form."""
+    value = _decode_json(value)
+    # Anthropic marks its client tools `custom` and keeps the schema under
+    # `input_schema`; both forms describe a callable function.
+    if not isinstance(value, dict) or value.get("type") not in (
+        None,
+        "function",
+        "custom",
+    ):
+        return None
+    nested = value.get("function")
+    function = nested if isinstance(nested, dict) else value
+    name = function.get("name")
+    parameters = _decode_json(
+        _first(function, "parameters", "parameters_json_schema", "input_schema")
+    )
+    # OpenAI lets a function that takes no arguments omit its parameters.
+    if parameters is None and value.get("type") == "function":
+        parameters = {"type": "object", "properties": {}}
+    # Keep only definitions that carry a real schema; a bare name cannot be
+    # replayed against another model.
+    if not isinstance(name, str) or not name or not isinstance(parameters, dict):
+        return None
+    normalized: dict[str, Any] = {"name": name}
+    description = function.get("description")
+    if isinstance(description, str) and description:
+        normalized["description"] = description
+    normalized["parameters"] = parameters
+    # Strict schemas constrain the arguments the model may send, so a replay
+    # without the flag would pose a looser task.
+    if isinstance(function.get("strict"), bool):
+        normalized["strict"] = function["strict"]
+    return {"type": "function", "function": normalized}
+
+
+def _tool_definitions(values: Any) -> list[dict[str, Any]]:
+    """Normalize a list of tool definitions, dropping entries without schemas."""
+    values = _decode_json(values)
+    if not isinstance(values, list):
+        return []
+    return [
+        definition
+        for value in values
+        if (definition := _tool_definition(value)) is not None
+    ]
+
+
+def _get_tool_definitions(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the tool definitions offered to the model in one generation."""
+    request_input = _decode_json(record.get("input"))
+    if isinstance(request_input, dict):
+        definitions = _tool_definitions(request_input.get("tools"))
+        if definitions:
+            return definitions
+    request_parameters = _dict(_metadata_value(record, "model_request_parameters"))
+    definitions = [
+        *_tool_definitions(request_parameters.get("function_tools")),
+        *_tool_definitions(request_parameters.get("output_tools")),
+    ]
+    if definitions:
+        return definitions
+    return _tool_definitions(_metadata_value(record, "gen_ai.tool.definitions"))
 
 
 def _detect_shape(record: dict[str, Any]) -> str:
@@ -1533,7 +1629,7 @@ class LangfuseJSONLImporter:
                             "langfuse.type": record.get("type"),
                             "langfuse.level": record.get("level"),
                         },
-                        metadata=_source_metadata(record),
+                        metadata=_node_metadata(record, node_type),
                         children=[],
                     ),
                     inferred_parents.get(source_node_id, parent_source_id),
