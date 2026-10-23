@@ -22,6 +22,7 @@ are not drawn again as cards.
 """
 
 import html
+import json
 import re
 import uuid
 from datetime import UTC, datetime
@@ -38,6 +39,7 @@ from kitaru.api_models.v1.insight import (
 from kitaru.cli.output import CLIError, CommandResult
 
 REPORT_SECTION_KEY = "kitaru.report_section/v1"
+_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M UTC"
 
 
 async def write_insight_report(
@@ -72,8 +74,7 @@ async def write_insight_report(
             "import_id": str(import_id),
             "insights": len(insights),
             "sections": [
-                insight.name
-                for insight, _ in _get_sections(_get_latest_per_name(insights))
+                insight.name for insight, _ in _get_sections(_get_latest_runs(insights))
             ],
         },
         next_actions=[f"Open {out} in a browser."],
@@ -87,15 +88,19 @@ def render_insight_report(
     generated_at: datetime | None = None,
 ) -> str:
     """Build the HTML document for an import's insights."""
-    generated = (generated_at or datetime.now(UTC)).strftime("%Y-%m-%d %H:%M UTC")
-    latest = _get_latest_per_name(insights)
+    generated = (generated_at or datetime.now(UTC)).strftime(_TIMESTAMP_FORMAT)
+    latest = _get_latest_runs(insights)
     sections = _get_sections(latest)
     # A section may hide cards that analyzers wrote, never hand-made ones.
     hidden = {name for _, section in sections for name in section["covers"]}
     owners = {owner.id for owner, _ in sections}
-    body = [_strip_unsafe_tags(section["html"]) for _, section in sections]
+    labels = _get_run_labels(latest)
+    body = [
+        _run_label(labels.get(owner.id)) + _strip_unsafe_tags(section["html"])
+        for owner, section in sections
+    ]
     cards = [
-        _insight_card(i)
+        _insight_card(i, labels.get(i.id))
         for i in latest
         if i.id not in owners and not (i.analyzer_version_id and i.name in hidden)
     ]
@@ -110,20 +115,57 @@ def render_insight_report(
     )
 
 
-def _get_latest_per_name(insights: list[InsightResponse]) -> list[InsightResponse]:
-    """Return the newest analyzer insight per name, plus every hand-made one.
+def _get_latest_runs(insights: list[InsightResponse]) -> list[InsightResponse]:
+    """Return the newest analyzer insight per name and params, plus hand-made ones.
 
-    Rerunning an analyzer, including after a new version of it is
-    registered, stores new insights under the same names, so only the latest
-    of each name is rendered. Insights created by hand may reuse a name and
-    are all kept.
+    Rerunning an analyzer with the same params, including after a new version
+    of it is registered, stores new insights under the same names, so only
+    the latest of each is rendered. Runs with different params, such as the
+    batches of a screen split to fit a candidate cap, are all kept. Insights
+    created by hand may reuse a name and are all kept. The result is ordered
+    by creation time.
     """
-    latest: dict[str | uuid.UUID, InsightResponse] = {}
+    latest: dict[tuple[str, str] | uuid.UUID, InsightResponse] = {}
     for insight in sorted(insights, key=lambda item: item.created):
-        key = insight.name if insight.analyzer_version_id else insight.id
+        key = (
+            (insight.name, _get_params_key(insight))
+            if insight.analyzer_version_id
+            else insight.id
+        )
         latest.pop(key, None)
         latest[key] = insight
     return list(latest.values())
+
+
+def _get_params_key(insight: InsightResponse) -> str:
+    """Return the analyzer params of an insight as canonical JSON."""
+    return json.dumps(insight.analyzer_params, sort_keys=True)
+
+
+def _get_run_labels(insights: list[InsightResponse]) -> dict[uuid.UUID, str]:
+    """Label each analyzer run of a name that more than one kept run shares.
+
+    Runs are numbered in the order of `insights`.
+    """
+    runs: dict[str, list[InsightResponse]] = {}
+    for insight in insights:
+        if insight.analyzer_version_id:
+            runs.setdefault(insight.name, []).append(insight)
+    labels: dict[uuid.UUID, str] = {}
+    for same_name in runs.values():
+        if len(same_name) < 2:
+            continue
+        for number, insight in enumerate(same_name, start=1):
+            created = insight.created.strftime(_TIMESTAMP_FORMAT)
+            labels[insight.id] = (
+                f"Run {number} of {len(same_name)} · {created} · "
+                f"params {_get_params_key(insight)}"
+            )
+    return labels
+
+
+def _run_label(label: str | None) -> str:
+    return f'<p class="muted">{_e(label)}</p>' if label else ""
 
 
 def _get_sections(
@@ -174,7 +216,7 @@ def _strip_unsafe_tags(markup: str) -> str:
         markup = stripped
 
 
-def _insight_card(insight: InsightResponse) -> str:
+def _insight_card(insight: InsightResponse, label: str | None) -> str:
     """Render any insight from its stored data."""
     data = insight.data
     if isinstance(data, TextInsightData):
@@ -198,7 +240,10 @@ def _insight_card(insight: InsightResponse) -> str:
     description = (
         f'<p class="muted">{_e(insight.description)}</p>' if insight.description else ""
     )
-    return f'<div class="card"><h3>{_e(insight.title)}</h3>{description}{body}</div>'
+    return (
+        f'<div class="card"><h3>{_e(insight.title)}</h3>{_run_label(label)}'
+        f"{description}{body}</div>"
+    )
 
 
 def _e(value: Any) -> str:
