@@ -13,6 +13,14 @@ The API client uses `KITARU_API_URL` and `KITARU_API_TOKEN`. Both analyzers acce
 
 Install `kitaru-post-import-insights` for deterministic analysis, or `kitaru-post-import-insights[openai]` for OpenAI generation. The default catalog selects the corresponding requirement for each analyzer. The package does not depend on Langfuse or send insight-generation telemetry to it.
 
+## Recorded input and activity
+
+Language cards detect literal markers in selected text. A recorded `user` role does not prove that text came from a customer: some harnesses put agent policy in user-role messages. Importers that know the customer input should set `input_text_selector` on both the session and each relevant LLM node. For example, `/messages/1/content` selects the second message's content in a `messages` array. Choose selectors for the actual trace structure and preserve later customer turns; setting only the session selector leaves node input histories available to the profiler.
+
+Tool activity counts separate tool nodes when present in a session. Otherwise, it counts explicit `tool_call` parts in assistant output messages, accepting a message, a message list, or a `messages` container. When this fallback contributes requests, the distribution is labeled as requests and states that execution is unverified. Input histories are not counted, and incomplete request scans are excluded. Tool error, retry, and result analysis still requires separate tool nodes.
+
+The model-mix card counts recorded model identifiers. It prefers the served model field and falls back to the requested model field; different identifiers can refer to the same model.
+
 ## Release context
 
 The exact `kitaru==0.25.0+dev` dependency requires the unreleased analyzer contract in [PR #988](https://github.com/zenml-io/kitaru/pull/988): analyzer tasks pass session UUIDs, and the plugin fetches normalized sessions through the SDK. Replace the development pin with the compatible published core release floor during release preparation. This package must not be published while the development pin remains.
