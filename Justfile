@@ -23,6 +23,8 @@ check:
     @just import-check
     @printf '\n─── Python Standards ───────────────────────────\n'
     @just python-standards-check
+    @printf '\n─── Release Units ──────────────────────────────\n'
+    @just release-units-check
     @printf '\n─── MCP Schema ─────────────────────────────────\n'
     @just mcp-schema-check
     @printf '\n─── Example Coverage ───────────────────────────\n'
@@ -65,9 +67,13 @@ lint:
 import-check:
     uv run lint-imports
 
-# Verify database repository and ORM syntax standards
+# Verify package syntax standards (KIT codes)
 python-standards-check:
     uv run python scripts/check_python_standards.py
+
+# Validate the release-unit inventory against package manifests and default plugins, as CI does
+release-units-check:
+    uv run --no-project --with packaging==26.2 python scripts/release_units.py validate
 
 # Check plugin formatting, lint, and types in the frozen plugin workspace
 plugin-check:

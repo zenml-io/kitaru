@@ -11,9 +11,7 @@
 - Domain errors map to responses in the app-level exception handlers (404 for
   `NotFoundError`, 409 for `ConflictError`, 422 for `ValidationError`).
   Routers never catch domain errors and never raise `HTTPException` for them.
-- One mapping module per resource under `mapping/`. Response functions
-  construct DTOs explicitly field by field and assert timestamps are not
-  `None`. Never use `model_validate(obj, from_attributes=True)`.
+- One mapping module per resource under `mapping/`. Response functions construct DTOs explicitly field by field and assert timestamps are not `None`; `just python-standards-check` (KIT007) rejects `from_attributes`.
 - List routes bind query parameters with
   `params: Annotated[XListParams, Query()]`, convert them to the application
   filter through `<x>_list_params_to_filter` in the mapping module, and build
