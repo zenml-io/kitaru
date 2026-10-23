@@ -20,11 +20,7 @@ from dataclasses import dataclass
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from conftest import (
-    build_session_node,
-    pg_session_with_engine,
-    postgres_available,
-)
+from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.insight import TextInsightData
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin
@@ -89,6 +85,7 @@ from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig, default_tool_policy
 from kitaru.server.domain.session import Session, SessionNotFound
+from kitaru_test_support import build_session_node
 
 
 @dataclass

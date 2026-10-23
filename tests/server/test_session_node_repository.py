@@ -21,15 +21,7 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    FakeCohortRepository,
-    FakeCohortVersionRepository,
-    FakeSessionNodeRepository,
-    FakeSessionRepository,
-    create_session,
-    pg_session_with_engine,
-    postgres_available,
-)
+from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
@@ -71,6 +63,13 @@ from kitaru.server.filtering import (
     FilterExpression,
     NotExpression,
     OrExpression,
+)
+from kitaru_test_support import (
+    FakeCohortRepository,
+    FakeCohortVersionRepository,
+    FakeSessionNodeRepository,
+    FakeSessionRepository,
+    create_session,
 )
 
 Setup = tuple[SessionNodeRepository, uuid.UUID, Callable[[], Awaitable[uuid.UUID]]]

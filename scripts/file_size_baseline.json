@@ -38,18 +38,17 @@
   "tests/cli/test_auth.py": 1189,
   "tests/cli/test_local_runtime.py": 1187,
   "tests/cli/test_sessions.py": 1920,
-  "tests/conftest.py": 8044,
   "tests/mcp/test_handlers_protocol.py": 1142,
   "tests/mcp/test_review_workflows.py": 2195,
-  "tests/server/test_evaluation_repository.py": 1160,
+  "tests/server/test_evaluation_repository.py": 1159,
   "tests/server/test_import_service.py": 1008,
   "tests/server/test_replay_pipeline.py": 2058,
   "tests/server/test_replay_service.py": 1311,
-  "tests/server/test_session_node_repository.py": 1054,
-  "tests/server/test_session_repository.py": 1771,
+  "tests/server/test_session_node_repository.py": 1053,
+  "tests/server/test_session_repository.py": 1770,
   "tests/server/test_session_service.py": 1773,
-  "tests/server/test_sessions_api.py": 1387,
+  "tests/server/test_sessions_api.py": 1386,
   "tests/server/test_task_service.py": 1245,
   "tests/server/test_ui_experiment_runs_api.py": 1102,
-  "tests/task/test_importer.py": 1490
+  "tests/task/test_importer.py": 1489
 }

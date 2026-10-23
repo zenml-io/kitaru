@@ -22,19 +22,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select, text
 
-from conftest import (
-    FakeCohortRepository,
-    FakeCohortVersionRepository,
-    FakeEvaluationRepository,
-    FakeInvestigationRepository,
-    FakeJobRepository,
-    FakeReplayRepository,
-    FakeSessionRepository,
-    FakeTagRepository,
-    FakeTaskRepository,
-    pg_session_with_engine,
-    postgres_available,
-)
+from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
@@ -129,6 +117,17 @@ from kitaru.server.filtering import (
     FilterCondition,
     NotExpression,
     OrExpression,
+)
+from kitaru_test_support import (
+    FakeCohortRepository,
+    FakeCohortVersionRepository,
+    FakeEvaluationRepository,
+    FakeInvestigationRepository,
+    FakeJobRepository,
+    FakeReplayRepository,
+    FakeSessionRepository,
+    FakeTagRepository,
+    FakeTaskRepository,
 )
 
 Setup = tuple[

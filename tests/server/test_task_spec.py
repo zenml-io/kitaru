@@ -18,22 +18,6 @@ import uuid
 import pytest
 from pydantic import SecretStr
 
-from conftest import (
-    JobAndTaskServices,
-    build_job_and_task_services,
-    build_worker_actor,
-    create_agent,
-    create_analysis_task,
-    create_blob,
-    create_connection,
-    create_evaluation_task,
-    create_import,
-    create_import_task,
-    create_job,
-    create_plugin,
-    create_secret,
-    create_worker,
-)
 from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.application.models.auth import AuthContext
@@ -50,6 +34,22 @@ from kitaru.server.domain.task import (
     ImportTask,
     ImportTaskDetails,
     ScriptPluginSpec,
+)
+from kitaru_test_support import (
+    JobAndTaskServices,
+    build_job_and_task_services,
+    build_worker_actor,
+    create_agent,
+    create_analysis_task,
+    create_blob,
+    create_connection,
+    create_evaluation_task,
+    create_import,
+    create_import_task,
+    create_job,
+    create_plugin,
+    create_secret,
+    create_worker,
 )
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))

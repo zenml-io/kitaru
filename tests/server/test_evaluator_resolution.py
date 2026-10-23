@@ -17,12 +17,6 @@ import uuid
 
 import pytest
 
-from conftest import (
-    FakeConnectionRepository,
-    FakePluginRepository,
-    create_connection,
-    create_plugin,
-)
 from kitaru.server.application.models.plugin import EvaluatorConfigInput
 from kitaru.server.application.services.evaluator_resolution import (
     resolve_evaluator_config,
@@ -35,6 +29,12 @@ from kitaru.server.domain.plugin import (
     PluginKind,
     PluginNotFound,
     PluginVersionNotFound,
+)
+from kitaru_test_support import (
+    FakeConnectionRepository,
+    FakePluginRepository,
+    create_connection,
+    create_plugin,
 )
 
 OWNER_ID = uuid.uuid4()
