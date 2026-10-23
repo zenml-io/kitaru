@@ -657,6 +657,118 @@ async def test_replay_resolves_input_and_replaces_request_configuration(
     assert llm.system_prompt_selector == "/0/parts/0/content"
 
 
+@pytest.mark.parametrize("use_task_inputs_as_prompt", [True, False])
+@pytest.mark.parametrize("input_source", ["environment", "spec"])
+async def test_task_prompt_source(
+    monkeypatch: pytest.MonkeyPatch,
+    use_task_inputs_as_prompt: bool,
+    input_source: str,
+) -> None:
+    observed: list[ModelMessage] = []
+    task_inputs = {"case_id": "[mms_issue]bad_network_preference|17"}
+    caller_prompt = "My phone cannot send picture messages."
+
+    def model(messages: list[ModelMessage], _: AgentInfo) -> ModelResponse:
+        observed.extend(messages)
+        return ModelResponse(parts=[TextPart("What have you tried?")])
+
+    spec = _replay_spec(PassthroughConfig(), inputs=task_inputs)
+    _FakeClient.next_fixture = spec
+    monkeypatch.setenv("KITARU_TASK_ID", str(spec.task_id))
+    if input_source == "environment":
+        monkeypatch.setenv("KITARU_TASK_INPUTS", json.dumps(task_inputs))
+    agent = KitaruAgent(
+        Agent(FunctionModel(model)),
+        use_task_inputs_as_prompt=use_task_inputs_as_prompt,
+    )
+
+    result = await agent.run(caller_prompt)
+
+    prompts = [
+        part.content
+        for message in observed
+        if isinstance(message, ModelRequest)
+        for part in message.parts
+        if isinstance(part, UserPromptPart)
+    ]
+    assert prompts == [
+        json.dumps(task_inputs) if use_task_inputs_as_prompt else caller_prompt
+    ]
+    assert result.output == "What have you tried?"
+    client = _FakeClient.instances[0]
+    assert client.sessions.created[0].inputs == task_inputs
+    assert _nodes(client)[0].inputs == task_inputs
+    assert client.sessions.updated[0][1].outputs == result.output
+
+
+@pytest.mark.parametrize("prompt_override", [None, "replacement prompt"])
+async def test_prompt_opt_out_preserves_caller_history_and_replay_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+    prompt_override: str | None,
+) -> None:
+    observed: list[ModelMessage] = []
+    observed_settings: list[Any] = []
+
+    def original(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
+        raise AssertionError("The replay model override must replace the original")
+
+    def model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        observed.extend(messages)
+        observed_settings.append(info.model_settings)
+        return ModelResponse(parts=[TextPart("replayed")])
+
+    replacement = FunctionModel(model, model_name="replacement")
+    monkeypatch.setattr(capability_module, "infer_model", lambda _: replacement)
+    task_inputs = {
+        "schema_version": 1,
+        "turns": [
+            {"inputs": "hidden benchmark history", "outputs": "hidden answer"},
+            {"inputs": "hidden case id", "outputs": "recorded output"},
+        ],
+    }
+    _set_replay(
+        monkeypatch,
+        _replay_spec(
+            PassthroughConfig(),
+            inputs=task_inputs,
+            override=ReplayOverride(
+                model="provider:replacement",
+                model_params={"temperature": 0.2},
+                prompt=prompt_override,
+            ),
+        ),
+    )
+    agent = KitaruAgent(Agent(FunctionModel(original)), use_task_inputs_as_prompt=False)
+
+    result = await agent.run(
+        "simulator prompt",
+        message_history=[
+            ModelRequest(parts=[UserPromptPart("caller history")]),
+            ModelResponse(parts=[TextPart("previous answer")]),
+        ],
+    )
+
+    prompts = [
+        part.content
+        for message in observed
+        if isinstance(message, ModelRequest)
+        for part in message.parts
+        if isinstance(part, UserPromptPart)
+    ]
+    answers = [
+        part.content
+        for message in observed
+        if isinstance(message, ModelResponse)
+        for part in message.parts
+        if isinstance(part, TextPart)
+    ]
+    assert prompts == ["caller history", prompt_override or "simulator prompt"]
+    assert answers == ["previous answer"]
+    assert observed_settings == [{"temperature": 0.2}]
+    assert result.output == "replayed"
+    assert _FakeClient.instances[0].sessions.created[0].inputs == task_inputs
+
+
 async def test_records_visible_model_reasoning() -> None:
     def model(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
         return ModelResponse(
@@ -1358,9 +1470,11 @@ async def test_history_policy_non_baseline_scope_sends_no_occurrence(
 
 
 @pytest.mark.parametrize("recorded_result", [{"source": "history"}, None])
+@pytest.mark.parametrize("use_task_inputs_as_prompt", [True, False])
 async def test_history_policy_replays_completed_match_without_live_execution(
     monkeypatch: pytest.MonkeyPatch,
     recorded_result: Any,
+    use_task_inputs_as_prompt: bool,
 ) -> None:
     """A completed match, including null, is a mocked successful tool call."""
     real_calls: list[dict[str, Any]] = []
@@ -1384,6 +1498,7 @@ async def test_history_policy_replays_completed_match_without_live_execution(
     agent = KitaruAgent(
         _tool_agent(real_calls, returned_results),
         agent_id=uuid.uuid4(),
+        use_task_inputs_as_prompt=use_task_inputs_as_prompt,
     )
 
     result = await agent.run("weather")
