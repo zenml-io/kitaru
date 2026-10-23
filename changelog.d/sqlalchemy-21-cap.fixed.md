@@ -1,1 +1,0 @@
-- Keep SQLAlchemy server installs on the tested 2.0 series until Kitaru validates the 2.1 series.
