@@ -32,6 +32,7 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeResponse,
 )
 from kitaru.cli.insight_report import REPORT_SECTION_KEY as CORE_SECTION_KEY
+from kitaru.worker.task_runner import MAX_RESULT_BYTES
 from kitaru_model_swap import analyzer as analyzer_module
 from kitaru_model_swap.calls import Collection, RecordedCall, reservation_usage
 from kitaru_model_swap.endpoint import Usage, read_usage
@@ -46,6 +47,7 @@ from kitaru_model_swap.pricing import call_cost, resolve_price
 from kitaru_model_swap.report import (
     REPORT_SECTION_KEY,
     SUMMARY_INSIGHT_NAME,
+    build_insights,
     build_report,
     weighted_per_call,
 )
@@ -317,6 +319,37 @@ async def test_a_candidate_named_recorded_does_not_break_the_cost_card(
     )
 
     assert "model-swap-cost" in insights
+
+
+async def test_an_oversized_report_lists_fewer_disagreements_instead_of_failing(
+    stub_client: StubClient,
+) -> None:
+    small = report(await run(stub_client, ESCALATING, candidates=[CHEAP], max_calls=3))
+    template = small["disagreements"][0]
+    # Non-ASCII text and HTML markup grow when escaped as JSON and HTML, so
+    # the excerpt cap alone does not bound the serialized size.
+    excerpt = "é<" * 300
+    disagreements = [
+        template | {"node_id": str(i), "recorded": excerpt, "candidate_answer": excerpt}
+        for i in range(500)
+    ]
+    oversized = small | {
+        "disagreements": disagreements,
+        "disagreements_total": 500,
+    }
+
+    trimmed = build_insights(oversized, dashboard_url=None)
+    result = report({insight.name: insight for insight in trimmed})
+    listed = result["disagreements"]
+    html = trimmed[0].metadata[REPORT_SECTION_KEY]["html"]
+    encoded = json.dumps([insight.model_dump(mode="json") for insight in trimmed])
+
+    assert len(encoded.encode("utf-8")) <= MAX_RESULT_BYTES
+    assert 0 < len(listed) < 500
+    assert {d["node_id"] for d in listed} == {str(i) for i in range(len(listed))}
+    assert result["disagreements_total"] == 500
+    assert result["spent_usd"] == oversized["spent_usd"]
+    assert f"Showing the first {len(listed)}." in html
 
 
 def test_section_key_matches_the_report_command() -> None:
