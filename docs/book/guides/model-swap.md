@@ -162,7 +162,7 @@ A spend cap needs a price for every candidate; the analyzer refuses to start whe
 | `decision_candidates` | none | Up to four decision models that answer the decision parts of each call; see [Find calls a decision model could make](#find-calls-a-decision-model-could-make). |
 | `dry_run` | `false` | Estimate without sending. |
 | `max_spend_usd` | none | Spend cap across candidates, decision candidates, and the judge. Decision models need an explicit `price`. |
-| `max_calls` | `100` | Recorded calls to sample, spread evenly across node names and models. |
+| `max_calls` | `100` | Recorded calls to sample, spread evenly across node names and models. Within each, calls are drawn at random from across the whole import with a fixed seed, so reruns on the same import sample the same calls. |
 | `tool_schemas` | `{}` | Tool name to the JSON schema of its parameters, for tools the trace did not record. |
 | `tool_descriptions` | `{}` | Optional tool descriptions to go with `tool_schemas`. |
 | `use_recorded_tools` | `true` | Use tool definitions recorded on each call. |

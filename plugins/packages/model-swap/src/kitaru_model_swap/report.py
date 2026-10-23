@@ -261,6 +261,7 @@ def _coverage(collection: Collection, sampled: list[RecordedCall]) -> dict[str, 
     inferred = collection.replayable["inferred"]
     return {
         "sessions": collection.sessions,
+        "sessions_sampled": len({call.session_id for call in sampled}),
         "sessions_not_fetched": collection.sessions_not_fetched,
         "llm_calls_seen": collection.llm_calls_seen,
         "replayable": collection.replayable.total() - inferred,
@@ -1349,7 +1350,8 @@ def render_markdown(report: dict[str, Any]) -> str:
     coverage = report["coverage"]
     lines = [
         f"Sampled {coverage['sampled']} of {coverage['llm_calls_seen']} recorded "
-        f"model calls from {coverage['sessions']} sessions. "
+        f"model calls from {coverage['sessions_sampled']} of "
+        f"{coverage['sessions']} sessions. "
         f"{coverage['replayable']} were replayable with real tool schemas"
         + (
             f", {coverage['replayable_inferred']} only with inferred schemas"
