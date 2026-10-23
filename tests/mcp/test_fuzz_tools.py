@@ -18,6 +18,7 @@ import json
 import re
 import typing
 import uuid
+from datetime import datetime
 from functools import cache
 from typing import Any
 
@@ -84,19 +85,50 @@ def assert_envelope(result: CallToolResult) -> dict[str, Any]:
     return body
 
 
-def _bound_free_json(schema: dict[str, Any]) -> dict[str, Any]:
-    # zenml-io/zenml-internal#139: keep free-form JSON shallow until the tracked
-    # issue is fixed.
-    for name, prop in schema.get("properties", {}).items():
-        if prop == {} or prop.get("title") in {"Value", "Metadata", "Params"}:
-            schema["properties"][name] = {
-                "type": ["object", "array", "string", "number", "boolean", "null"],
+def _free_json_schema(depth: int = 2) -> dict[str, Any]:
+    """Bound arbitrary JSON containers at every level, including extra fields."""
+    scalar = {"type": ["string", "number", "boolean", "null"], "maxLength": 80}
+    if not depth:
+        return scalar
+    child = _free_json_schema(depth - 1)
+    return {
+        "anyOf": [
+            scalar,
+            {"type": "array", "items": child, "maxItems": 5},
+            {
+                "type": "object",
+                "additionalProperties": child,
+                "propertyNames": {"maxLength": 80},
                 "maxProperties": 5,
-                "maxItems": 5,
+            },
+        ]
+    }
+
+
+def _bound_free_json(schema: dict[str, Any]) -> dict[str, Any]:
+    # zenml-io/zenml-internal#139: keep arbitrary JSON shallow until fixed.
+    # Preserve declared object types and public array bounds.
+    if not set(schema) - {"title", "description", "default"}:
+        return {**schema, **_free_json_schema()}
+    result = dict(schema)
+    for key in ("properties", "$defs"):
+        if key in result:
+            result[key] = {
+                name: _bound_free_json(value) if isinstance(value, dict) else value
+                for name, value in result[key].items()
             }
-    for definition in schema.get("$defs", {}).values():
-        _bound_free_json(definition)
-    return schema
+    for key in ("anyOf", "oneOf", "allOf"):
+        if key in result:
+            result[key] = [_bound_free_json(value) for value in result[key]]
+    if isinstance(result.get("items"), dict):
+        result["items"] = _bound_free_json(result["items"])
+    additional = result.get("additionalProperties")
+    if additional is True or additional == {}:
+        result["additionalProperties"] = _free_json_schema()
+        result["maxProperties"] = min(result.get("maxProperties", 5), 5)
+    elif isinstance(additional, dict):
+        result["additionalProperties"] = _bound_free_json(additional)
+    return result
 
 
 def _ref_name(node: object) -> str:
@@ -190,11 +222,136 @@ def _is_model_valid(name: str, request: object) -> bool:
     return True
 
 
-# JSON Schema cannot express model validators such as ImportQuery requiring
-# `since` without `trace_ids`, so schema-drawn requests for those tools are
-# mostly filtered out. The filtered share sits near the health-check limit
-# and unrelated process state tips it over, so the check is suppressed for
-# the schema-derived properties rather than tuned per tool.
+def _require_discriminator_tags(schema: dict[str, Any]) -> dict[str, Any]:
+    """Require union tags even when their model fields have defaults."""
+    defs = schema.get("$defs", {})
+
+    def visit(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                visit(item)
+        elif isinstance(node, dict):
+            discriminator = node.get("discriminator", {})
+            tag = discriminator.get("propertyName")
+            for ref in discriminator.get("mapping", {}).values():
+                definition = defs[ref.removeprefix("#/$defs/")]
+                definition["required"] = sorted(
+                    set(definition.get("required", [])) | {tag}
+                )
+            for value in node.values():
+                visit(value)
+
+    visit(schema)
+    return schema
+
+
+def _from_schema(
+    schema: dict[str, Any], defs: dict[str, Any]
+) -> st.SearchStrategy[Any]:
+    return from_schema({**schema, "$defs": defs}, custom_formats=_FORMATS)
+
+
+def _without_fields(schema: dict[str, Any], fields: set[str]) -> dict[str, Any]:
+    # False schemas also prevent free-form extra fields from reintroducing keys.
+    return {
+        **schema,
+        "properties": {
+            name: False if name in fields else value
+            for name, value in schema["properties"].items()
+        },
+        "required": [name for name in schema.get("required", []) if name not in fields],
+    }
+
+
+def _non_null(schema: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **schema,
+        "anyOf": [branch for branch in schema["anyOf"] if branch.get("type") != "null"],
+    }
+
+
+def _update_strategy(
+    schema: dict[str, Any], defs: dict[str, Any]
+) -> st.SearchStrategy[dict[str, Any]]:
+    """Draw sparse updates with at least one consistent set or clear operation."""
+    properties = schema["properties"]
+    fields = sorted(set(properties) - set(schema["required"]))
+    values = [name for name in fields if not name.startswith("clear_")]
+    base = _from_schema(_without_fields(schema, set(fields)), defs)
+    setters = {name: _from_schema(_non_null(properties[name]), defs) for name in values}
+
+    @st.composite
+    def updates(draw: st.DrawFn) -> dict[str, Any]:
+        request = draw(base)
+        changed = draw(st.sampled_from(values))
+        for name in values:
+            clear = f"clear_{name}"
+            states = ["set", "clear"] if clear in properties else ["set"]
+            state = draw(
+                st.sampled_from(states + (["omit"] if name != changed else []))
+            )
+            if state == "set":
+                request[name] = draw(setters[name])
+            if state == "clear":
+                request[clear] = True
+                if draw(st.booleans()):
+                    request[name] = None
+            elif clear in properties and draw(st.booleans()):
+                request[clear] = False
+        return request
+
+    return updates()
+
+
+def _import_query_strategy(
+    schema: dict[str, Any], defs: dict[str, Any]
+) -> st.SearchStrategy[dict[str, Any]]:
+    """Draw optional trace selection and an ordered, timezone-aware window."""
+    base = _from_schema(_without_fields(schema, {"since", "until"}), defs)
+    timestamp = _from_schema(_non_null(schema["properties"]["since"]), defs)
+
+    @st.composite
+    def queries(draw: st.DrawFn) -> dict[str, Any]:
+        query = draw(base)
+        if query.get("trace_ids") is None or draw(st.booleans()):
+            query["since"] = draw(timestamp)
+        elif draw(st.booleans()):
+            query["since"] = None
+        if draw(st.booleans()):
+            query["until"] = draw(st.none() | timestamp)
+        if (
+            query.get("since") is not None
+            and query.get("until") is not None
+            and datetime.fromisoformat(query["until"])
+            < datetime.fromisoformat(query["since"])
+        ):
+            query["since"], query["until"] = query["until"], query["since"]
+        return query
+
+    return queries()
+
+
+def _session_import_strategy(
+    schema: dict[str, Any], defs: dict[str, Any]
+) -> st.SearchStrategy[dict[str, Any]]:
+    base = _from_schema(_without_fields(schema, {"source"}), defs)
+    api = _from_schema(_without_fields(defs["ApiImportSource"], {"query"}), defs)
+    query = _import_query_strategy(defs["ImportQuery"], defs)
+    blob = _from_schema(defs["BlobImportSource"], defs)
+
+    @st.composite
+    def imports(draw: st.DrawFn) -> dict[str, Any]:
+        request = draw(base)
+        request["source"] = (
+            {**draw(api), "query": draw(query)} if draw(st.booleans()) else draw(blob)
+        )
+        return request
+
+    return imports()
+
+
+# Other model-only constraints, such as unique memberships and pinned plugin
+# requirements, still use the validation filter. Keep the health check scoped.
 _SCHEMA_SETTINGS = settings(
     deadline=None, suppress_health_check=[HealthCheck.filter_too_much]
 )
@@ -203,11 +360,37 @@ _SCHEMA_SETTINGS = settings(
 @cache
 def _schema_strategy(name: str) -> st.SearchStrategy[Any]:
     schema = _unroll_recursion(
-        _bound_free_json(request_adapter_for(name).json_schema())
+        _bound_free_json(
+            _require_discriminator_tags(request_adapter_for(name).json_schema())
+        )
     )
-    return from_schema(schema, custom_formats=_FORMATS).filter(
-        lambda request: _is_model_valid(name, request)
-    )
+    defs = schema.get("$defs", {})
+    # PlainStr rejects these controls in model validation, not in its JSON schema.
+    for model, field in (
+        ("EvaluatorConfig", "evaluator"),
+        ("AnalyzerConfig", "analyzer"),
+    ):
+        if model in defs:
+            defs[model]["properties"][field]["pattern"] = (
+                r"^[^\x00-\x08\x0b\x0c\x0e-\x1f]*$"
+            )
+    if name == "kitaru_session_import":
+        strategy = _session_import_strategy(schema, defs)
+    else:
+        branches = schema.get("anyOf", [schema])
+        strategies = []
+        for branch in branches:
+            definition = defs.get(_ref_name(branch), branch)
+            properties = definition.get("properties", {})
+            if (
+                any(key.startswith("clear_") for key in properties)
+                or definition.get("title") == "ConnectionUpdate"
+            ):
+                strategies.append(_update_strategy(definition, defs))
+            else:
+                strategies.append(_from_schema(branch, defs))
+        strategy = st.one_of(strategies)
+    return strategy.filter(lambda request: _is_model_valid(name, request))
 
 
 @pytest.mark.mcp_fuzz
@@ -218,6 +401,7 @@ def test_schema_valid_request_yields_envelope(
     spec: ToolSpec, data: st.DataObject
 ) -> None:
     request = data.draw(_schema_strategy(spec.name))
+    request_adapter_for(spec.name).validate_python(request)
     server, context = server_context_for(CapabilityMode.DESTRUCTIVE)
     assert_envelope(call(server, context, spec.name, request))
 
@@ -296,6 +480,7 @@ def test_schema_valid_request_with_marker_never_leaks(
     request = data.draw(
         _with_marker_in_string_field(spec.name, data.draw(_schema_strategy(spec.name)))
     )
+    request_adapter_for(spec.name).validate_python(request)
     server, context = server_context_for(CapabilityMode.DESTRUCTIVE, EchoClient)
     assert_envelope(call(server, context, spec.name, request))
 
@@ -324,12 +509,13 @@ _CRASHED_ON_RECURSION = pytest.RaisesExc(
 @given(data=st.data())
 @settings(
     deadline=None,
-    # CI already tracks this failure; keep generating and shrinking examples,
-    # but leave the extra explanation work to local and nightly runs.
+    # This failure is tracked already; retain generation and shrinking without
+    # spending CI or nightly time explaining the known validation exception.
     phases=tuple(
         phase
         for phase in settings().phases
-        if phase != Phase.explain or settings.get_current_profile_name() != "ci"
+        if phase != Phase.explain
+        or settings.get_current_profile_name() not in {"ci", "nightly"}
     ),
 )
 def test_schema_invalid_request_never_raises(
