@@ -16,6 +16,8 @@ extend-exclude = [
 HashiCorp = "HashiCorp"
 # OpenAI Agents SDK stream event name is misspelled in the public SDK.
 handoff_occured = "handoff_occured"
+# FastAPI's dependency tree type uses British spelling.
+Dependant = "Dependant"
 # Deliberate misspelling in a test asserting that an unknown replay model
 # setting is rejected rather than silently ignored.
 temprature = "temprature"
@@ -40,3 +42,5 @@ optimiser = "optimiser"
 
 [default]
 locale = "en-us"
+# FastAPI's route attribute uses British spelling; prose still gets corrected.
+extend-ignore-re = ['\.dependant\b']

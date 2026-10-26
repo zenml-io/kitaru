@@ -274,6 +274,61 @@ async def test_empty_generation_preserves_utf8_context() -> None:
     assert restored.empty_reason == "no_eligible_candidates"
 
 
+async def test_message_only_traces_generate_honest_activity_and_identifier_cards() -> (
+    None
+):
+    identifiers = [
+        "claude-opus-4-5",
+        "global.anthropic.claude-opus-4-5-20251101-v1:0",
+    ]
+    sessions = [_session(number, status=SessionStatus.COMPLETED) for number in (1, 2)]
+    for session, identifier in zip(sessions, identifiers, strict=True):
+        session.session.inputs = {
+            "messages": [
+                {"role": "user", "content": "Policy: try again if wrong."},
+                {"role": "user", "content": "Please check my balance."},
+            ]
+        }
+        session.nodes = [
+            _node(
+                session_id=session.session.id,
+                node_id=uuid.UUID(int=session.session.number),
+                external_id="model",
+            ).model_copy(
+                update={
+                    "node_type": NodeType.LLM_CALL,
+                    "model": identifier,
+                    "requested_model": identifiers[0],
+                    "tool_name": None,
+                    "inputs": session.session.inputs,
+                    "outputs": [
+                        {
+                            "role": "assistant",
+                            "parts": [{"type": "tool_call", "id": "lookup"}],
+                        }
+                    ],
+                }
+            )
+        ]
+
+    result = await generate_insights(sessions, context=_context())
+    cards = {card.name: card for card in result.insights}
+
+    assert cards["tool-call-distribution"].title == (
+        "All recorded observations have 1 request"
+    )
+    assert isinstance(cards["tool-call-distribution"].data, BinnedInsightData)
+    assert cards["tool-call-distribution"].data.unit == "requests"
+    assert cards["model-mix"].title == (
+        "2 recorded model identifiers appear in these sessions"
+    )
+    assert cards["correction-language"].title.endswith("literal correction markers")
+    assert result.card_metadata(cards["correction-language"]).check_first is not None
+    assert "agent policy or harness instructions" in (
+        result.card_metadata(cards["correction-language"]).check_first or ""
+    )
+
+
 async def test_deterministic_result_is_canonical_and_byte_stable() -> None:
     sessions = [
         _session(1, status=SessionStatus.FAILED),

@@ -126,16 +126,23 @@ async def status(
     warnings: list[str] = []
     try:
         info = await get_server_info(client, target.server_url)
-        live_workers: int | None = None
+        live_workers: list[dict[str, Any]] | None = None
         authentication = (
             "not_required" if info.auth_scheme is AuthScheme.NONE else "missing"
         )
         if info.auth_scheme is AuthScheme.NONE or credential.source != "none":
             try:
-                live_workers = 0
+                workers: list[dict[str, Any]] = []
                 async for worker in client.workers.iter():
                     if worker.live:
-                        live_workers += 1
+                        workers.append(
+                            {
+                                "id": str(worker.id),
+                                "name": worker.name,
+                                "scope": worker.scope.model_dump(mode="json"),
+                            }
+                        )
+                live_workers = workers
                 authentication = (
                     "not_required"
                     if info.auth_scheme is AuthScheme.NONE
@@ -162,7 +169,10 @@ async def status(
             "server": info.model_dump(mode="json"),
             "dashboard_url": info.dashboard_url,
             "compatibility": compatibility,
-            "live_worker_count": live_workers,
+            "live_worker_count": len(live_workers)
+            if live_workers is not None
+            else None,
+            "live_workers": live_workers,
         }
         return CommandResult(item=item, warnings=warnings)
     finally:
