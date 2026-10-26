@@ -98,9 +98,28 @@ One `ReplayOverride`, four knobs; change one at a time:
 | `model` | Swap models at the model-call boundary. A string replaces every model; a `{old: new}` map replaces selectively. |
 | `system_prompt` | Replace the system prompt for the re-run. |
 | `prompt` | Replace the user prompt to ask a different question of the same recorded world. |
-| `model_params` | Adjust sampling parameters (temperature, etc.) at the adapter level. |
+| `model_params` | Supply adapter-specific model settings. In PydanticAI, replace the entire settings mapping. |
 
 Code changes need no override at all: register the new code as an agent version and pass its `agent_version_id`. Replays run **from the top**: the whole agent re-executes against the recorded world, so the entire decision path downstream of your change is real.
+
+### Preserve PydanticAI model settings
+
+In the [PydanticAI adapter](../adapters/pydantic-ai.md), `model_params` replaces the entire model settings mapping at each model request. It does not merge with the agent's current settings. Omitted keys are dropped. Leaving `model_params` unset or setting it to `None` keeps the current settings. Setting `model_params={}` resets the mapping to empty.
+
+For example, suppose your PydanticAI OpenAI Responses model uses `openai_reasoning_effort="medium"` and `openai_reasoning_summary="auto"`. An override containing only `{"openai_reasoning_effort": "high"}` drops `openai_reasoning_summary`, so the replay no longer requests that summary. Restate every setting you want to preserve:
+
+```python
+from kitaru.api_models.v1.replay_config import ReplayOverride
+
+override = ReplayOverride(
+    model_params={
+        "openai_reasoning_effort": "high",
+        "openai_reasoning_summary": "auto",
+    }
+)
+```
+
+Pass this `override` to `ReplayCreateRequest`. Use the model setting names accepted by your framework and target model. These replacement rules are specific to PydanticAI. Other adapters can apply `model_params` differently. For example, the [OpenAI Agents adapter](../adapters/openai-agents.md) resolves the supplied fields against its existing run configuration settings.
 
 {% hint style="warning" %} With the default `passthrough` policy, a replayed `refund_payment` call **refunds the card again**. Set a `history` policy for anything with side effects, or use `static` to inject a canned result. If your agent must behave differently under replay, check for the `KITARU_REPLAY_ID` environment variable; it is set only in replayed runs. {% endhint %}
 
