@@ -20,6 +20,7 @@ from typing import Any, Literal
 import pytest
 from rich.console import Console
 from rich.text import Text
+from tests.cli.output_rendering import render_text
 
 from kitaru.cli.output import (
     ERROR_EXIT_CODES,
@@ -36,40 +37,6 @@ from kitaru.cli.output import (
 )
 
 
-def _render_text(
-    command: str,
-    result: CommandResult,
-    *,
-    rich: bool,
-    columns: int = 120,
-    strip_ansi: bool = True,
-) -> tuple[str, str]:
-    """Render one text result with a deterministic terminal width."""
-    stdout = io.StringIO()
-    stderr = io.StringIO()
-    token = set_output_context(
-        OutputContext(
-            command=command,
-            mode="text",
-            debug=False,
-            traceback=False,
-            stdout=stdout,
-            stderr=stderr,
-            rich=rich,
-            terminal_width=columns,
-        )
-    )
-    try:
-        emit_result(result)
-    finally:
-        reset_output_context(token)
-    if strip_ansi:
-        return Text.from_ansi(stdout.getvalue()).plain, Text.from_ansi(
-            stderr.getvalue()
-        ).plain
-    return stdout.getvalue(), stderr.getvalue()
-
-
 @pytest.mark.parametrize("rich", [False, True])
 def test_text_redacts_fields_and_metadata_before_rendering(rich: bool) -> None:
     """Selecting a display field must not discard its secret-key context."""
@@ -79,7 +46,7 @@ def test_text_redacts_fields_and_metadata_before_rendering(rich: bool) -> None:
         links={"inspect": "https://example.test/KITKEY_link-secret"},
         next_actions=["Use ZENPROKEY_action-secret"],
     )
-    stdout, stderr = _render_text("example.get", result, rich=rich)
+    stdout, stderr = render_text("example.get", result, rich=rich)
     assert "unmarked-secret" not in stdout
     assert "link-secret" not in stdout
     assert "action-secret" not in stdout
@@ -337,7 +304,7 @@ def test_redaction_masks_secret_fields_and_recognizable_values() -> None:
 def test_annotation_text_escapes_terminal_control_characters(rich: bool) -> None:
     """Stored annotation text cannot emit terminal control sequences."""
     payload = "move\x1b[999Dlink\x1b]8;;https://evil.example\x07text"
-    stdout, _ = _render_text(
+    stdout, _ = render_text(
         "annotation.get",
         CommandResult(item={"id": "annotation-id", "value": payload}),
         rich=rich,
@@ -418,7 +385,7 @@ def test_human_session_list_selects_columns_for_terminal_width(
 ) -> None:
     """Human tables remain useful at common widths and never shorten IDs."""
     session_id = "019f0000-1111-7222-8333-444444444444"
-    stdout, _ = _render_text(
+    stdout, _ = render_text(
         "session.list",
         CommandResult(
             items=[
@@ -451,7 +418,7 @@ def test_human_session_list_selects_columns_for_terminal_width(
 
 def test_human_values_preserve_literal_rich_markup_characters() -> None:
     """Server values display literally instead of being interpreted as Rich markup."""
-    stdout, _ = _render_text(
+    stdout, _ = render_text(
         "session.list",
         CommandResult(
             items=[
@@ -515,7 +482,7 @@ def test_human_worker_scope_shows_claims_and_restrictions(
         if command == "worker.list"
         else CommandResult(item=worker)
     )
-    stdout, _ = _render_text(command, result, rich=True, columns=320)
+    stdout, _ = render_text(command, result, rich=True, columns=320)
 
     for text in expected:
         assert text in stdout
@@ -524,7 +491,7 @@ def test_human_worker_scope_shows_claims_and_restrictions(
 
 def test_human_status_shows_live_worker_scopes_and_heartbeat_meaning() -> None:
     """Status distinguishes a worker heartbeat from its task claims."""
-    stdout, _ = _render_text(
+    stdout, _ = render_text(
         "status",
         CommandResult(
             item={
@@ -549,7 +516,7 @@ def test_human_status_shows_live_worker_scopes_and_heartbeat_meaning() -> None:
 
 def test_human_list_renders_empty_state_pagination_and_next_actions() -> None:
     """Human lists explain empty pages and expose exact continuation data."""
-    stdout, _ = _render_text(
+    stdout, _ = render_text(
         "worker.list",
         CommandResult(
             items=[],
@@ -569,7 +536,7 @@ def test_human_list_renders_empty_state_pagination_and_next_actions() -> None:
 
 def test_human_detail_uses_sections_and_pretty_prints_nested_values() -> None:
     """Human detail views separate summary fields from nested payloads."""
-    stdout, _ = _render_text(
+    stdout, _ = render_text(
         "session.get",
         CommandResult(
             item={
@@ -594,118 +561,6 @@ def test_human_detail_uses_sections_and_pretty_prints_nested_values() -> None:
     assert '{"prompt": "Hello"}' not in stdout
 
 
-@pytest.mark.parametrize("columns", [80, 160])
-def test_human_experiment_run_shows_evaluation_aggregate_summary(columns: int) -> None:
-    """Aggregate output shows statistics without expanding replay values."""
-    stdout, stderr = _render_text(
-        "experiment.run.get",
-        CommandResult(
-            item={
-                "status": "completed",
-                "evaluation_aggregates": [
-                    {
-                        "name": "correctness",
-                        "data_type": "bool",
-                        "evaluator_name": "quality-check",
-                        "evaluator_version": 2,
-                        "evaluator_version_id": "019f0000-1111-7222-8333-444444444444",
-                        "baseline": {"count": 4, "mean": 0.25, "pass_rate": 0.75},
-                        "result": {"count": 4, "mean": 0.75, "pass_rate": 0.25},
-                        "replays": [{"replay_id": "hidden-replay-details"}],
-                    },
-                    {
-                        "name": "resolution",
-                        "data_type": "categorical",
-                        "evaluator_name": "category-check",
-                        "evaluator_version": 3,
-                        "evaluator_version_id": "019f0000-1111-7222-8333-555555555555",
-                        "baseline": {
-                            "count": 4,
-                            "mean": None,
-                            "pass_rate": None,
-                            "value_counts": {"blocked": 1, "resolved": 3},
-                        },
-                        "result": {
-                            "count": 0,
-                            "mean": None,
-                            "pass_rate": None,
-                            "value_counts": {},
-                        },
-                        "replays": [],
-                    },
-                ],
-            }
-        ),
-        rich=True,
-        columns=columns,
-    )
-
-    rendered = " ".join(stdout.split())
-    assert "Evaluation aggregates" in rendered
-    assert "correctness (bool)" in rendered
-    assert "quality-check@2" in rendered
-    assert "019f0000-1111-7222-8333-444444444444" in rendered
-    assert "Baseline: count=4; mean score=0.25; pass rate=75%" in rendered
-    assert "Result: count=4; mean score=0.75; pass rate=25%" in rendered
-    assert "resolution (categorical)" in rendered
-    assert "category-check@3" in rendered
-    assert "Baseline: count=4; values: blocked=1, resolved=3" in rendered
-    assert "Result: count=0" in rendered
-    assert "hidden-replay-details" not in rendered
-    assert "null" not in rendered
-    assert stderr == ""
-
-
-@pytest.mark.parametrize("columns", [80, 160])
-def test_human_experiment_run_distinguishes_empty_and_unrequested_aggregates(
-    columns: int,
-) -> None:
-    """Only an explicitly requested empty aggregate list shows an empty state."""
-    default, _ = _render_text(
-        "experiment.run.get",
-        CommandResult(item={"status": "completed"}),
-        rich=True,
-        columns=columns,
-    )
-    empty, _ = _render_text(
-        "experiment.run.get",
-        CommandResult(item={"status": "completed", "evaluation_aggregates": []}),
-        rich=True,
-        columns=columns,
-    )
-
-    assert "Evaluation aggregates" not in default
-    assert "Evaluation aggregates" in empty
-    assert "No evaluation aggregates found." in empty
-    assert empty.startswith(default)
-
-
-def test_human_evaluation_aggregate_summary_escapes_terminal_controls() -> None:
-    """Formatted names retain literal markup and cannot control the terminal."""
-    stdout, _ = _render_text(
-        "experiment.run.get",
-        CommandResult(
-            item={
-                "evaluation_aggregates": [
-                    {
-                        "name": "quality[red]\x1b[999D",
-                        "data_type": "bool",
-                        "evaluator_name": "quality-check",
-                        "evaluator_version": 1,
-                        "baseline": {"count": 0},
-                        "result": {"count": 0},
-                    }
-                ]
-            }
-        ),
-        rich=True,
-        strip_ansi=False,
-    )
-
-    assert "\x1b[999D" not in stdout
-    assert "quality[red]\\u001b[999D" in Text.from_ansi(stdout).plain
-
-
 def test_machine_text_ignores_human_view_metadata() -> None:
     """Plain machine text retains the existing complete line representation."""
     item = {
@@ -713,14 +568,14 @@ def test_machine_text_ignores_human_view_metadata() -> None:
         "status": "completed",
         "inputs": {"prompt": "Hello"},
     }
-    stdout, _ = _render_text("session.list", CommandResult(items=[item]), rich=False)
+    stdout, _ = render_text("session.list", CommandResult(items=[item]), rich=False)
 
     assert stdout == json.dumps(item, sort_keys=True) + "\n"
 
 
 def test_machine_text_renders_links_and_next_actions_after_the_item() -> None:
     """Plain text retains the rich footer's stable link and action labels."""
-    stdout, _ = _render_text(
+    stdout, _ = render_text(
         "session.get",
         CommandResult(
             item={"id": "019f0000-1111-7222-8333-444444444444"},
@@ -739,7 +594,7 @@ def test_machine_text_renders_links_and_next_actions_after_the_item() -> None:
 
 def test_root_rich_text_escapes_disk_derived_skill_names() -> None:
     """Detected skill names cannot inject terminal control sequences."""
-    stdout, _ = _render_text(
+    stdout, _ = render_text(
         "kitaru",
         CommandResult(
             item={
@@ -793,7 +648,7 @@ def test_human_error_uses_a_clear_headline_and_recovery_hint() -> None:
 
 def test_human_doctor_renders_checks_as_an_operational_table() -> None:
     """Doctor output is readable without decoding a nested JSON array."""
-    stdout, _ = _render_text(
+    stdout, _ = render_text(
         "doctor",
         CommandResult(
             item={
@@ -851,7 +706,7 @@ def test_human_doctor_renders_checks_as_an_operational_table() -> None:
 
 def test_human_registration_receipt_keeps_parent_and_version_identity() -> None:
     """Successful multi-phase registrations never render an empty human result."""
-    stdout, _ = _render_text(
+    stdout, _ = render_text(
         "agent.register",
         CommandResult(
             item={
@@ -974,7 +829,7 @@ def test_human_not_found_outside_listable_groups_has_no_hint() -> None:
 def test_human_setup_renders_steps_and_the_manual_mcp_snippet() -> None:
     """Setup shows each step and the snippet to paste when no client was found."""
     snippet = {"mcpServers": {"kitaru": {"command": "uvx", "args": ["kitaru-mcp"]}}}
-    stdout, _ = _render_text(
+    stdout, _ = render_text(
         "setup",
         CommandResult(
             item={

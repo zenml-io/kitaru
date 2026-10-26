@@ -16,21 +16,19 @@
 import asyncio
 import io
 import json
-import uuid
-from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from typing import Any, Literal
 
 import pytest
+from tests.cli.experiment_run_fakes import (
+    StubRunsClient,
+    build_run,
+    install_runs_client,
+)
 
 from kitaru.api_models.v1.experiment_run import (
-    EvaluationAggregateResponse,
     ExperimentRunCreateRequest,
     ExperimentRunJobsListParams,
     ExperimentRunListParams,
-    ExperimentRunProgress,
-    ExperimentRunResponse,
     ExperimentRunStatus,
 )
 from kitaru.api_models.v1.replay import BaselineEvaluationMode
@@ -43,190 +41,6 @@ from kitaru.cli.output import (
     reset_output_context,
     set_output_context,
 )
-from kitaru.client.exceptions import APIError
-
-
-def _run(
-    run_id: uuid.UUID,
-    status: ExperimentRunStatus,
-    *,
-    experiment_id: uuid.UUID,
-    cohort_version_id: uuid.UUID,
-    agent_version_id: uuid.UUID,
-    updated_offset: int = 0,
-    completed: int = 0,
-) -> ExperimentRunResponse:
-    now = datetime(2026, 8, 3, tzinfo=UTC)
-    return ExperimentRunResponse(
-        id=run_id,
-        owner_id=uuid.uuid5(uuid.NAMESPACE_URL, str(run_id)),
-        created=now,
-        updated=now + timedelta(seconds=updated_offset),
-        experiment_id=experiment_id,
-        number=3,
-        status=status,
-        cohort_version_id=cohort_version_id,
-        agent_version_id=agent_version_id,
-        evaluate_baselines=True,
-        baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
-        started_at=now,
-        ended_at=now
-        if status
-        in {
-            ExperimentRunStatus.COMPLETED,
-            ExperimentRunStatus.FAILED,
-            ExperimentRunStatus.CANCELED,
-        }
-        else None,
-        error="remote failure" if status is ExperimentRunStatus.FAILED else None,
-        progress=ExperimentRunProgress(
-            pending=0 if completed else 1,
-            evaluating=0,
-            completed=completed,
-            failed=1 if status is ExperimentRunStatus.FAILED else 0,
-            canceled=1 if status is ExperimentRunStatus.CANCELED else 0,
-            total=1,
-        ),
-    )
-
-
-class StubRunsClient:
-    """Protocol-shaped client recording all experiment-run SDK calls."""
-
-    def __init__(self) -> None:
-        self.experiment = SimpleNamespace(id=uuid.uuid4(), name="regression")
-        self.cohort_version = SimpleNamespace(
-            id=uuid.uuid4(), cohort_id=uuid.uuid4(), version=4
-        )
-        self.agent = SimpleNamespace(
-            id=uuid.uuid4(), name="candidate", latest_version=2
-        )
-        self.agent_version = SimpleNamespace(
-            id=uuid.uuid4(), agent_id=self.agent.id, version=2
-        )
-        self.run_id = uuid.uuid4()
-        self.created_run = _run(
-            self.run_id,
-            ExperimentRunStatus.RUNNING,
-            experiment_id=self.experiment.id,
-            cohort_version_id=self.cohort_version.id,
-            agent_version_id=self.agent_version.id,
-        )
-        self.get_responses = [self.created_run]
-        self.start_calls: list[tuple[uuid.UUID, ExperimentRunCreateRequest]] = []
-        self.start_idempotency_keys: list[str | None] = []
-        self.list_calls: list[ExperimentRunListParams] = []
-        self.jobs_calls: list[tuple[uuid.UUID, ExperimentRunJobsListParams]] = []
-        self.evaluation_aggregates: list[EvaluationAggregateResponse] = []
-        self.aggregate_calls: list[uuid.UUID] = []
-        self.get_calls = 0
-        self.cancel_calls = 0
-        self.delete_calls = 0
-        self.experiment_lookups = 0
-        self.experiments = self._Experiments(self)
-        self.experiment_runs = self._Runs(self)
-        self.cohort_versions = self._CohortVersions(self)
-        self.agents = self._Agents(self)
-        self.agent_versions = self._AgentVersions(self)
-
-    class _Experiments:
-        def __init__(self, owner: "StubRunsClient") -> None:
-            self.owner = owner
-
-        async def iter(self):
-            self.owner.experiment_lookups += 1
-            yield self.owner.experiment
-
-        async def list(self, params: Any) -> Any:
-            assert params.size == 2
-            self.owner.experiment_lookups += 1
-            return SimpleNamespace(items=[self.owner.experiment], next_cursor=None)
-
-        async def get(self, experiment_id: uuid.UUID) -> Any:
-            self.owner.experiment_lookups += 1
-            assert experiment_id == self.owner.experiment.id
-            return self.owner.experiment
-
-        async def start_run(
-            self,
-            experiment_id: uuid.UUID,
-            request: ExperimentRunCreateRequest,
-            idempotency_key: str | None = None,
-        ) -> ExperimentRunResponse:
-            self.owner.start_calls.append((experiment_id, request))
-            self.owner.start_idempotency_keys.append(idempotency_key)
-            return self.owner.created_run
-
-    class _Runs:
-        def __init__(self, owner: "StubRunsClient") -> None:
-            self.owner = owner
-
-        async def get(self, run_id: uuid.UUID) -> ExperimentRunResponse:
-            assert run_id == self.owner.run_id
-            index = min(self.owner.get_calls, len(self.owner.get_responses) - 1)
-            self.owner.get_calls += 1
-            return self.owner.get_responses[index]
-
-        async def get_evaluation_aggregates(
-            self, run_id: uuid.UUID
-        ) -> list[EvaluationAggregateResponse]:
-            self.owner.aggregate_calls.append(run_id)
-            return self.owner.evaluation_aggregates
-
-        async def list(self, params: ExperimentRunListParams) -> Any:
-            self.owner.list_calls.append(params)
-            return SimpleNamespace(items=[self.owner.created_run], next_cursor="next")
-
-        async def list_jobs(
-            self, run_id: uuid.UUID, params: ExperimentRunJobsListParams
-        ) -> Any:
-            self.owner.jobs_calls.append((run_id, params))
-            job = SimpleNamespace(model_dump=lambda **_: {"id": "job-1"})
-            return SimpleNamespace(items=[job], next_cursor=None)
-
-        async def cancel(self, run_id: uuid.UUID) -> ExperimentRunResponse:
-            assert run_id == self.owner.run_id
-            self.owner.cancel_calls += 1
-            return self.owner.get_responses[-1]
-
-        async def delete(self, run_id: uuid.UUID) -> None:
-            assert run_id == self.owner.run_id
-            self.owner.delete_calls += 1
-
-    class _CohortVersions:
-        def __init__(self, owner: "StubRunsClient") -> None:
-            self.owner = owner
-
-        async def get(self, version_id: uuid.UUID) -> Any:
-            assert version_id == self.owner.cohort_version.id
-            return self.owner.cohort_version
-
-    class _Agents:
-        def __init__(self, owner: "StubRunsClient") -> None:
-            self.owner = owner
-
-        async def iter(self):
-            yield self.owner.agent
-
-        async def list(self, params: Any) -> Any:
-            assert params.size == 2
-            return SimpleNamespace(items=[self.owner.agent], next_cursor=None)
-
-        async def get(self, agent_id: uuid.UUID) -> Any:
-            assert agent_id == self.owner.agent.id
-            return self.owner.agent
-
-        async def iter_versions(self, agent_id: uuid.UUID):
-            assert agent_id == self.owner.agent.id
-            yield self.owner.agent_version
-
-    class _AgentVersions:
-        def __init__(self, owner: "StubRunsClient") -> None:
-            self.owner = owner
-
-        async def get(self, version_id: uuid.UUID) -> Any:
-            assert version_id == self.owner.agent_version.id
-            return self.owner.agent_version
 
 
 def _output_context(
@@ -286,7 +100,7 @@ async def test_start_returns_exact_created_receipt() -> None:
 async def test_waited_start_emits_executable_created_and_terminal_actions() -> None:
     """Waited starts preserve immediate actions and terminal inspection actions."""
     client = StubRunsClient()
-    completed = _run(
+    completed = build_run(
         client.run_id,
         ExperimentRunStatus.COMPLETED,
         experiment_id=client.experiment.id,
@@ -350,7 +164,7 @@ async def test_waited_start_preserves_actions_on_terminal_errors(
     """Waited terminal errors retain created and recovery inspection actions."""
     client = StubRunsClient()
     client.get_responses = [
-        _run(
+        build_run(
             client.run_id,
             status,
             experiment_id=client.experiment.id,
@@ -419,7 +233,7 @@ async def test_poll_suppresses_updated_only_changes_and_created_snapshot() -> No
     """Run polling fingerprints the complete response except its updated timestamp."""
     client = StubRunsClient()
     client.get_responses = [
-        _run(
+        build_run(
             client.run_id,
             ExperimentRunStatus.RUNNING,
             experiment_id=client.experiment.id,
@@ -427,7 +241,7 @@ async def test_poll_suppresses_updated_only_changes_and_created_snapshot() -> No
             agent_version_id=client.agent_version.id,
             updated_offset=1,
         ),
-        _run(
+        build_run(
             client.run_id,
             ExperimentRunStatus.RUNNING,
             experiment_id=client.experiment.id,
@@ -436,7 +250,7 @@ async def test_poll_suppresses_updated_only_changes_and_created_snapshot() -> No
             updated_offset=2,
             completed=1,
         ),
-        _run(
+        build_run(
             client.run_id,
             ExperimentRunStatus.COMPLETED,
             experiment_id=client.experiment.id,
@@ -570,7 +384,7 @@ async def test_watch_maps_terminal_errors_with_receipts(
     """Failed and canceled watches carry terminal run evidence in stable errors."""
     client = StubRunsClient()
     client.get_responses = [
-        _run(
+        build_run(
             client.run_id,
             status,
             experiment_id=client.experiment.id,
@@ -602,7 +416,7 @@ async def test_watch_maps_terminal_errors_with_receipts(
 async def test_completed_watch_jsonl_emits_snapshot_then_terminal_receipt() -> None:
     """JSONL watch output is append-only and ends with one receipt."""
     client = StubRunsClient()
-    completed = _run(
+    completed = build_run(
         client.run_id,
         ExperimentRunStatus.COMPLETED,
         experiment_id=client.experiment.id,
@@ -689,14 +503,7 @@ async def test_inspection_cancel_and_delete_map_directly_to_sdk() -> None:
 @pytest.fixture
 def argv_client(monkeypatch: pytest.MonkeyPatch) -> StubRunsClient:
     """Route public run commands through one recording client."""
-    client = StubRunsClient()
-
-    @asynccontextmanager
-    async def fake_open_client():
-        yield client
-
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
-    return client
+    return install_runs_client(monkeypatch)
 
 
 def test_public_argv_covers_every_run_leaf(
@@ -737,7 +544,7 @@ def test_public_argv_covers_every_run_leaf(
     assert app_module.main(["experiment", "run", "jobs", str(client.run_id)]) == 0
     assert json.loads(capsys.readouterr().out)["items"] == [{"id": "job-1"}]
 
-    completed = _run(
+    completed = build_run(
         client.run_id,
         ExperimentRunStatus.COMPLETED,
         experiment_id=client.experiment.id,
@@ -777,178 +584,6 @@ def test_public_argv_covers_every_run_leaf(
         == 0
     )
     assert json.loads(capsys.readouterr().out)["item"]["deleted"] is True
-
-
-@pytest.mark.parametrize("status", list(ExperimentRunStatus))
-def test_public_run_get_preserves_default_inspection(
-    argv_client: StubRunsClient,
-    capsys: pytest.CaptureFixture[str],
-    status: ExperimentRunStatus,
-) -> None:
-    """Default inspection returns only the run, regardless of terminal status."""
-    client = argv_client
-    run = client.created_run.model_copy(update={"status": status})
-    client.get_responses = [run]
-
-    assert (
-        app_module.main(
-            ["experiment", "run", "get", str(client.run_id), "--output", "json"]
-        )
-        == 0
-    )
-    captured = capsys.readouterr()
-    payload = json.loads(captured.out)
-    assert captured.err == ""
-    assert payload["command"] == "experiment.run.get"
-    assert payload["item"] == run.model_dump(mode="json")
-    assert client.get_calls == 1
-    assert client.aggregate_calls == []
-
-
-@pytest.mark.parametrize("status", list(ExperimentRunStatus))
-def test_public_run_get_includes_evaluation_aggregates(
-    argv_client: StubRunsClient,
-    capsys: pytest.CaptureFixture[str],
-    status: ExperimentRunStatus,
-) -> None:
-    """Aggregate inspection adds stored evaluation evidence to the run item."""
-    client = argv_client
-    client.get_responses = [client.created_run.model_copy(update={"status": status})]
-    evaluator_version_id = uuid.uuid4()
-    replay_id = uuid.uuid4()
-    client.evaluation_aggregates = [
-        EvaluationAggregateResponse.model_validate(
-            {
-                "name": "quality",
-                "evaluator_version_id": evaluator_version_id,
-                "evaluator_name": "quality-check",
-                "evaluator_version": 2,
-                "data_type": "bool",
-                "baseline": {"count": 2, "mean": 0.5, "pass_rate": 0.5},
-                "result": {"count": 2, "mean": 1.0, "pass_rate": 0.5},
-                "replays": [
-                    {
-                        "replay_id": replay_id,
-                        "baseline": {"score": False, "passed": False},
-                        "result": {"score": True, "passed": False},
-                    }
-                ],
-            }
-        )
-    ]
-
-    assert (
-        app_module.main(
-            [
-                "experiment",
-                "run",
-                "get",
-                str(client.run_id),
-                "--aggregate",
-                "--output",
-                "json",
-            ]
-        )
-        == 0
-    )
-    captured = capsys.readouterr()
-    payload = json.loads(captured.out)
-    assert captured.err == ""
-    assert payload["command"] == "experiment.run.get"
-    assert payload["ok"] is True
-    assert payload["item"]["id"] == str(client.run_id)
-    assert payload["item"]["status"] == status.value
-    [aggregate] = payload["item"]["evaluation_aggregates"]
-    assert aggregate["name"] == "quality"
-    assert aggregate["evaluator_version_id"] == str(evaluator_version_id)
-    assert aggregate["evaluator_name"] == "quality-check"
-    assert aggregate["evaluator_version"] == 2
-    assert aggregate["data_type"] == "bool"
-    assert aggregate["baseline"]["count"] == 2
-    assert aggregate["baseline"]["mean"] == 0.5
-    assert aggregate["result"]["count"] == 2
-    assert aggregate["result"]["mean"] == 1.0
-    assert aggregate["result"]["pass_rate"] == 0.5
-    [replay] = aggregate["replays"]
-    assert replay["replay_id"] == str(replay_id)
-    assert replay["baseline"]["score"] is False
-    assert replay["result"]["score"] is True
-    assert replay["result"]["passed"] is False
-    assert client.get_calls == 1
-    assert client.aggregate_calls == [client.run_id]
-
-
-def test_public_run_get_includes_empty_evaluation_aggregates(
-    argv_client: StubRunsClient, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """A run with no evaluation groups remains a successful aggregate lookup."""
-    client = argv_client
-
-    assert (
-        app_module.main(
-            [
-                "experiment",
-                "run",
-                "get",
-                str(client.run_id),
-                "--aggregate",
-                "--output",
-                "json",
-            ]
-        )
-        == 0
-    )
-    captured = capsys.readouterr()
-    payload = json.loads(captured.out)
-    assert captured.err == ""
-    assert payload["item"]["status"] == "running"
-    assert payload["item"]["evaluation_aggregates"] == []
-    assert client.aggregate_calls == [client.run_id]
-
-
-@pytest.mark.parametrize("method", ["get", "get_evaluation_aggregates"])
-@pytest.mark.parametrize(
-    ("status_code", "kind", "exit_code"),
-    [(404, "not_found", 4), (401, "authentication_failed", 3)],
-)
-def test_public_run_get_aggregate_errors_remain_structured(
-    argv_client: StubRunsClient,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    method: str,
-    status_code: int,
-    kind: str,
-    exit_code: int,
-) -> None:
-    """A failed run or aggregate request emits one error without partial output."""
-    client = argv_client
-
-    async def fail_get(run_id: uuid.UUID) -> None:
-        assert run_id == client.run_id
-        raise APIError(status_code, "Inspection failed")
-
-    monkeypatch.setattr(client.experiment_runs, method, fail_get)
-    assert (
-        app_module.main(
-            [
-                "experiment",
-                "run",
-                "get",
-                str(client.run_id),
-                "--aggregate",
-                "--output",
-                "json",
-            ]
-        )
-        == exit_code
-    )
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    payload = json.loads(captured.err)
-    assert payload["command"] == "experiment.run.get"
-    assert payload["error"]["kind"] == kind
-    assert client.get_calls == (1 if method == "get_evaluation_aggregates" else 0)
-    assert client.aggregate_calls == []
 
 
 def test_public_run_start_forwards_baseline_evaluation_mode(
