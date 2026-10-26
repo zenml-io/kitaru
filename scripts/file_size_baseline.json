@@ -34,7 +34,6 @@
   "src/kitaru/cli/app.py": 5476,
   "src/kitaru/cli/local_runtime.py": 1057,
   "src/kitaru/cli/registration.py": 1032,
-  "src/kitaru/server/adapters/rest/dependencies.py": 1546,
   "tests/cli/test_auth.py": 1189,
   "tests/cli/test_local_runtime.py": 1187,
   "tests/cli/test_sessions.py": 1920,
