@@ -28,7 +28,7 @@ concurrency:
 permissions:
   contents: read
 env:
-  KITARU_ANALYTICS_OPT_IN: false
+  KITARU_SERVER_ANALYTICS_OPT_IN: false
   ZENML_ANALYTICS_OPT_IN: false
   ZENML_LOGGING_VERBOSITY: INFO
   AUTO_OPEN_DASHBOARD: false
