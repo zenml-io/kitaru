@@ -74,7 +74,6 @@ def node_rollup_contribution(node: SessionNode | None) -> SessionRollups:
         return SessionRollups()
     tokens = node.tokens
     return SessionRollups(
-        cost=node.cost if node.cost is not None else Decimal(0),
         input_tokens=(tokens.input_tokens or 0) if tokens is not None else 0,
         output_tokens=(tokens.output_tokens or 0) if tokens is not None else 0,
         cached_input_tokens=(tokens.cached_input_tokens or 0)

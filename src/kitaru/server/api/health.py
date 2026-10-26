@@ -19,8 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kitaru.server.adapters.rest.dependencies import get_session
 from kitaru.server.adapters.rest.responses import error_responses
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 
-router = APIRouter()
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.get("", responses=error_responses(503))

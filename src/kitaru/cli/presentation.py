@@ -81,13 +81,37 @@ def _format_runtime(value: Any) -> str:
 
 
 def _format_scope(value: Any) -> str:
-    """Format worker task kinds from its scope."""
+    """Format worker claims and their restrictions."""
     if not isinstance(value, dict):
         return str(value)
-    kinds = value.get("kinds")
-    if not kinds:
-        return "all"
-    return ", ".join(str(kind) for kind in kinds)
+    claims = [
+        f"{claim['kind']}={claim['agent_version_id']}"
+        if claim.get("agent_version_id")
+        else str(claim["kind"])
+        for claim in value["claims"]
+    ]
+    parts = [", ".join(claims)]
+    for selector in value.get("selectors") or []:
+        presence = "required" if selector["required"] else "if present"
+        parts.append(
+            f"{selector['key']} in [{', '.join(selector['values'])}] ({presence})"
+        )
+    if value.get("job_id"):
+        parts.append(f"job={value['job_id']}")
+    return "; ".join(parts)
+
+
+def _format_workers(value: Any) -> str:
+    """Format live worker identities and scopes."""
+    if value is None:
+        return "unavailable"
+    return (
+        "\n".join(
+            f"{worker['name']} ({worker['id']}): {_format_scope(worker['scope'])}"
+            for worker in value
+        )
+        or "none"
+    )
 
 
 def _format_verdict(value: Any) -> str:
@@ -266,8 +290,14 @@ _VIEWS: dict[str, HumanView] = {
                 (
                     HumanField("authentication", "Authentication"),
                     HumanField("compatibility", "Compatibility"),
-                    HumanField("live_worker_count", "Live workers"),
                     HumanField("dashboard_url", "Dashboard"),
+                ),
+            ),
+            HumanSection(
+                "Workers (recent heartbeats)",
+                (
+                    HumanField("live_worker_count", "Live workers"),
+                    HumanField("live_workers", "Scopes", formatter=_format_workers),
                 ),
             ),
             HumanSection(
@@ -702,7 +732,7 @@ _VIEWS: dict[str, HumanView] = {
             _NAME,
             _ID,
             HumanField("last_seen_at", "Last seen", 105),
-            HumanField("scope", "Kinds", 130, _format_scope),
+            HumanField("scope", "Scope", formatter=_format_scope),
             HumanField("runtime", "Runtime", 160, _format_runtime),
         ),
     ),
@@ -720,7 +750,7 @@ _VIEWS: dict[str, HumanView] = {
                 ),
             ),
             HumanSection(
-                "Scope", (HumanField("scope", "Task kinds", formatter=_format_scope),)
+                "Scope", (HumanField("scope", "Claims", formatter=_format_scope),)
             ),
             HumanSection("Runtime", (HumanField("runtime", "Runtime"),)),
             HumanSection("Metadata", (_METADATA,)),
