@@ -21,7 +21,7 @@ Each imported session contains session fields and a list of nodes. A session is 
 | `outputs` | any JSON value | Final session output. |
 | `error` | string or null | Failure message. |
 | `started_at`, `ended_at` | ISO 8601 timestamp or null | Session time range. |
-| `external_id` | string | Stable identity in the source system. Kitaru uses it with `imported_from` for deduplication. |
+| `external_id` | string | Stable identity in the source system. Kitaru uses it with `imported_from` for deduplication per destination logical agent. |
 | `metadata` | JSON object | Source identity, normalization warnings, and user metadata. |
 | `imported_from` | string or null | Source importer. Kitaru sets this from the selected importer rather than the JSONL record. |
 | `framework` | string or null | Agent framework when the trace identifies one, such as `pydantic-ai` or `langgraph`. |
@@ -248,7 +248,21 @@ Framework detection only sets `framework` when trace metadata identifies one sup
 
 ## Inspect failures
 
-The import job result reports created, skipped, and failed counts plus a bounded failure sample. The same counts land in the `stats` field of the import once parsing completes, and a parse failure lands in its `error` field. `stats` records the parse outcome on its own, so an import whose evaluators or analyzers fail keeps its counts while the job reports the failed task. Every session created by an import carries the `import_id` it came from. Reimporting the same `(imported_from, external_id)` pair skips the duplicate.
+The import job result reports created, skipped, and failed counts plus a bounded failure sample. The same counts land in the `stats` field of the import once parsing completes, and a parse failure lands in its `error` field. `stats` records the parse outcome on its own, so an import whose evaluators or analyzers fail keeps its counts while the job reports the failed task. Every session created by an import carries the `import_id` it came from.
+
+### Identity and deduplication
+
+In Kitaru 0.24.0 and later, imported sessions are unique on `(imported_from, external_id, agent_id)`: the importer's registered provider, the source session ID, and the destination logical agent. With a stable nonempty provider and source ID:
+
+| Import destination | Result when reimporting an existing source identity |
+|---|---|
+| Same agent and version | Skip the existing session. |
+| Same agent, another version | Still skip; agent version is not part of the key. |
+| Different logical agent | Create a separate session with the same source identity. |
+
+A session skipped because it already existed before this import is not refreshed with changed content or new nodes. Changing the owner, importer version, or content does not create another copy under the same key. Imports without a provider are not reliably deduplicated because the stored key contains a null value.
+
+Kitaru 0.23.0 used the global `(imported_from, external_id)` key, so the same source identity could also collide across different agents. Check the destination server's version, rather than only the local SDK version. For other older versions or an unknown server version, verify the applicable contract before relying on duplicate skips or using a different agent to create a copy.
 
 ## No importer for your provider
 
@@ -281,7 +295,7 @@ def parse(
 
 Three things matter most because they are where custom importers usually go wrong:
 
-- **`external_id` is your identity, and it must be stable.** Kitaru deduplicates on `(imported_from, external_id)`, so a re-import is only safe if the id does not move between runs. Derive it from the source's own identifier, never from a row number or a timestamp.
+- **`external_id` is your identity, and it must be stable.** Kitaru deduplicates on `(imported_from, external_id, agent_id)`, so keep the provider and source ID stable when re-importing into the same logical agent. Derive the ID from the source's own identifier, never from a row number or a timestamp. See [Identity and deduplication](#identity-and-deduplication) for server-version differences.
 - **Decide session boundaries deliberately.** One `ImportedSession` should be one end-to-end run; see [what a session is](../concepts/agents-and-sessions.md). If your source splits a run across records, join them in the parser.
 - **Yield failures, don't raise them.** An exception ends the import; an `ImportFailure` costs you one record and keeps the rest.
 
