@@ -23,6 +23,8 @@ check:
     @just import-check
     @printf '\n─── Python Standards ───────────────────────────\n'
     @just python-standards-check
+    @printf '\n─── File Sizes ─────────────────────────────────\n'
+    @just file-size-check
     @printf '\n─── Release Units ──────────────────────────────\n'
     @just release-units-check
     @printf '\n─── MCP Schema ─────────────────────────────────\n'
@@ -70,6 +72,10 @@ import-check:
 # Verify package syntax standards (KIT codes)
 python-standards-check:
     uv run python scripts/check_python_standards.py
+
+# Keep code files under 1000 lines; files in scripts/file_size_baseline.json may shrink but not grow
+file-size-check:
+    uv run python scripts/check_file_sizes.py
 
 # Validate the release-unit inventory against package manifests and default plugins, as CI does
 release-units-check:
