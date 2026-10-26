@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Index insights by task.
 
-Revision ID: 022_insight_task_id_index
-Revises: 021_node_external_id
+Revision ID: 023_insight_task_id_index
+Revises: 022_session_cost_completeness
 Create Date: 2026-10-23 13:38:13.315023
 
 """
@@ -22,8 +22,8 @@ Create Date: 2026-10-23 13:38:13.315023
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "022_insight_task_id_index"
-down_revision = "021_node_external_id"
+revision = "023_insight_task_id_index"
+down_revision = "022_session_cost_completeness"
 branch_labels = None
 depends_on = None
 
