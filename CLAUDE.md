@@ -113,6 +113,7 @@ For adapter, importer, specialized UI API, docs, CI, and release work, load the 
 - **Prefer typing over dynamic attribute checks.** Use Protocols/ABCs or `isinstance` narrowing instead of `getattr`/`hasattr`. If dynamic access is unavoidable, isolate it in a small typed helper.
 - Keep runtime annotation names resolvable when defining models and routes. Ruff enforces eager annotations to avoid reliance on resolving postponed names during runtime inspection.
 - **Util function placement:** Put a helper on the class if it's tied to the class's behavior or heavily used by subclasses (saves imports, subclasses just call `self.method()`). Put truly generic helpers in a standalone generic file, including helpers that are generic enough that other modules might use them in the future, even while they have a single caller.
+- **Keep code files at or under 1000 lines.** `just file-size-check` enforces it. Files listed in `scripts/file_size_baseline.json` predate the rule and may shrink but not grow: put new code in a new module, and after shrinking a listed file run `uv run python scripts/check_file_sizes.py --update` to lower its recorded count.
 - **`_underscore` means private.** `_method()` on a class → only call from within that class. `_function()` in a module → only call from within that module. Do not call private methods/functions from outside their owning class or module.
 
 ## Versioning and changelog

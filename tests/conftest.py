@@ -3194,13 +3194,14 @@ class FakeSessionRepository:
             self._tasks._unlink_session(session_id)
 
     async def apply_rollups(
-        self, session_id: uuid.UUID, deltas: SessionRollups
+        self, session_id: uuid.UUID, deltas: SessionRollups, cost: Decimal | None
     ) -> None:
-        """Apply rollup deltas to a session's cost, tokens, and call counts.
+        """Set session cost and apply token and call-count deltas.
 
         Args:
             session_id: Id of the session.
             deltas: Rollup deltas to add.
+            cost: Total cost, or ``None`` when pricing is incomplete.
 
         Raises:
             SessionNotFound: No session has this id.
@@ -3219,8 +3220,7 @@ class FakeSessionRepository:
         now = _renewed_timestamp(stored.updated)
         updated = stored.model_copy(
             update={
-                "cost": (stored.cost if stored.cost is not None else Decimal(0))
-                + deltas.cost,
+                "cost": cost,
                 "tokens": new_tokens,
                 "llm_call_count": stored.llm_call_count + deltas.llm_call_count,
                 "tool_call_count": stored.tool_call_count + deltas.tool_call_count,
@@ -3407,6 +3407,24 @@ class FakeSessionNodeRepository:
         self._nodes: dict[uuid.UUID, SessionNode] = {}
         self._sessions = sessions
         self._cohort_versions = cohort_versions
+
+    async def get_cost(self, session_id: uuid.UUID) -> Decimal | None:
+        """Sum recorded node costs unless any LLM call is unpriced.
+
+        Args:
+            session_id: Id of the owning session.
+
+        Returns:
+            Total cost, or ``None`` when any LLM call is unpriced or no
+            node has a recorded cost.
+        """
+        nodes = [node for node in self._nodes.values() if node.session_id == session_id]
+        if any(
+            node.node_type == NodeType.LLM_CALL and node.cost is None for node in nodes
+        ):
+            return None
+        costs = [node.cost for node in nodes if node.cost is not None]
+        return sum(costs, Decimal(0)) if costs else None
 
     async def get_by_external_ids(
         self,
