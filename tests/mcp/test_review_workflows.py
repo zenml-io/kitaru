@@ -11,10 +11,9 @@ from typing import Any, cast
 
 import httpx
 import pytest
-from mcp.server import MCPServer, ServerRequestContext
-from mcp.server.mcpserver import Context
 from mcp.types import CallToolResult, TextContent
 from pydantic import TypeAdapter, ValidationError
+from review_helpers import build_context, build_insight
 
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.evaluator import (
@@ -26,11 +25,6 @@ from kitaru.api_models.v1.experiment_run import (
     ExperimentRunResponse,
 )
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
-from kitaru.api_models.v1.insight import (
-    InsightInput,
-    InsightResponse,
-    InsightUpdateRequest,
-)
 from kitaru.api_models.v1.investigation import (
     InvestigationResponse,
     InvestigationSessionVerdict,
@@ -89,7 +83,6 @@ from kitaru.mcp.models.workflows import (
     ResourceDelete,
     TagLinkDelete,
 )
-from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
 from kitaru.mcp.tools.analyzers import handle_analyzers_manage
 from kitaru.mcp.tools.destructive import handle_delete
@@ -102,30 +95,12 @@ def _get_state(client: object, **settings: Any) -> MCPServerState:
     return MCPServerState(MCPSettings.model_validate(settings), cast(Any, client))
 
 
-def _get_context(
-    client: object,
-    mode: CapabilityMode,
-    *,
-    handler_timeout: float = 120.0,
-) -> tuple[MCPServer[MCPServerState], Context[MCPServerState, Any]]:
-    settings = MCPSettings(mode=mode, handler_timeout=handler_timeout)
-    state = MCPServerState(settings, cast(Any, client))
-    server = create_server(settings)
-    request_context = ServerRequestContext(
-        session=cast(Any, None),
-        lifespan_context=state,
-        protocol_version="2026-07-28",
-        method="tools/call",
-    )
-    return server, Context(request_context=request_context, mcp_server=server)
-
-
 async def test_review_read_protocol_has_typed_structured_text_parity() -> None:
     async def list_investigations(_params: object) -> Page[Any]:
         return Page(items=[], next_cursor=None)
 
     client = SimpleNamespace(investigations=SimpleNamespace(list=list_investigations))
-    server, context = _get_context(client, CapabilityMode.READ_ONLY)
+    server, context = build_context(client, CapabilityMode.READ_ONLY)
     result = await server.call_tool(
         "kitaru_review_read",
         {"request": {"operation": "list", "kind": "investigation", "size": 4}},
@@ -152,7 +127,7 @@ async def test_review_manage_protocol_rejects_unknown_verdict_before_handler() -
     client = SimpleNamespace(
         investigations=SimpleNamespace(update_session=update_session)
     )
-    server, context = _get_context(client, CapabilityMode.STANDARD)
+    server, context = build_context(client, CapabilityMode.STANDARD)
     with pytest.raises(Exception, match="validation error"):
         await server.call_tool(
             "kitaru_review_manage",
@@ -368,152 +343,6 @@ def test_insights_create_caps_batch_size() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    ("values", "message"),
-    [
-        ({"import_id": None}, "import_id cannot be null without clear_import"),
-        (
-            {"import_id": str(uuid.uuid4()), "clear_import": True},
-            "import_id and clear_import conflict",
-        ),
-        ({"clear_import": False}, "change at least one"),
-        ({"import_id": "invalid"}, "valid UUID"),
-    ],
-)
-def test_insight_update_rejects_invalid_import_changes(
-    values: dict[str, object], message: str
-) -> None:
-    with pytest.raises(ValidationError, match=message):
-        TypeAdapter(ReviewManageRequest).validate_python(
-            {"operation": "update_insight", "insight_id": uuid.uuid4(), **values}
-        )
-
-
-@pytest.mark.parametrize("import_value", ["omitted", "null", "uuid"])
-async def test_review_insight_create_protocol_forwards_batch_import(
-    import_value: str,
-) -> None:
-    agent_id = uuid.uuid4()
-    import_id = uuid.uuid4()
-    create_calls: list[dict[str, object]] = []
-
-    async def create_insights(
-        received_agent_id: uuid.UUID,
-        insights: list[InsightInput],
-        idempotency_key: str | None = None,
-        **kwargs: uuid.UUID,
-    ) -> list[InsightResponse]:
-        assert received_agent_id == agent_id
-        assert len(insights) == 2
-        assert idempotency_key == "import-insights"
-        assert all("import_id" not in item.model_fields_set for item in insights)
-        create_calls.append(dict(kwargs))
-        return [
-            _insight(agent_id=agent_id).model_copy(
-                update={"import_id": kwargs.get("import_id")}
-            )
-            for _ in insights
-        ]
-
-    client = SimpleNamespace(insights=SimpleNamespace(create=create_insights))
-    server, context = _get_context(client, CapabilityMode.STANDARD)
-    request: dict[str, object] = {
-        "operation": "create_insights",
-        "agent_id": str(agent_id),
-        "insights": [
-            {
-                "name": name,
-                "title": name,
-                "data": {"type": "text", "content": "Review finding"},
-            }
-            for name in ["latency", "quality"]
-        ],
-        "idempotency_key": "import-insights",
-    }
-    if import_value != "omitted":
-        request["import_id"] = str(import_id) if import_value == "uuid" else None
-    result = await server.call_tool(
-        "kitaru_review_manage", {"request": request}, context
-    )
-    assert isinstance(result, CallToolResult)
-    assert result.is_error is False
-    assert create_calls == (
-        [{"import_id": import_id}] if import_value == "uuid" else [{}]
-    )
-    assert result.structured_content is not None
-    assert [item["import_id"] for item in result.structured_content["data"]] == [
-        str(import_id) if import_value == "uuid" else None
-    ] * 2
-
-
-async def test_review_insight_update_protocol_import_lifecycle() -> None:
-    agent_id = uuid.uuid4()
-    insight = _insight(agent_id=agent_id)
-    first_import_id = uuid.uuid4()
-    second_import_id = uuid.uuid4()
-    update_calls: list[dict[str, object]] = []
-
-    async def update_insight(
-        received_id: uuid.UUID, request: InsightUpdateRequest
-    ) -> InsightResponse:
-        nonlocal insight
-        assert received_id == insight.id
-        values = request.model_dump(exclude_unset=True)
-        update_calls.append(values)
-        insight = insight.model_copy(update=values)
-        return insight
-
-    client = SimpleNamespace(insights=SimpleNamespace(update=update_insight))
-    server, context = _get_context(client, CapabilityMode.STANDARD)
-    for changes, expected_import in [
-        ({"import_id": str(first_import_id)}, first_import_id),
-        ({"import_id": str(second_import_id)}, second_import_id),
-        ({"title": "Renamed"}, second_import_id),
-        ({"clear_import": True}, None),
-        ({"import_id": None, "clear_import": True}, None),
-    ]:
-        result = await server.call_tool(
-            "kitaru_review_manage",
-            {
-                "request": {
-                    "operation": "update_insight",
-                    "insight_id": str(insight.id),
-                    **changes,
-                }
-            },
-            context,
-        )
-        assert isinstance(result, CallToolResult)
-        assert result.is_error is False
-        assert result.structured_content is not None
-        assert result.structured_content["data"]["import_id"] == (
-            str(expected_import) if expected_import else None
-        )
-    assert update_calls == [
-        {"import_id": first_import_id},
-        {"import_id": second_import_id},
-        {"title": "Renamed"},
-        {"import_id": None},
-        {"import_id": None},
-    ]
-
-
-async def test_review_discovery_exposes_batch_and_update_import_fields() -> None:
-    tools = await create_server(MCPSettings(mode=CapabilityMode.STANDARD)).list_tools()
-    tool = next(tool for tool in tools if tool.name == "kitaru_review_manage")
-    definitions = tool.input_schema["$defs"]
-    for name in ["InsightsCreate", "InsightUpdate"]:
-        assert definitions[name]["properties"]["import_id"]["anyOf"] == [
-            {"format": "uuid", "type": "string"},
-            {"type": "null"},
-        ]
-        assert "import_id" not in definitions[name]["required"]
-    assert (
-        definitions["InsightUpdate"]["properties"]["clear_import"]["default"] is False
-    )
-    assert "import_id" not in definitions["InsightInput"]["properties"]
-
-
 async def test_review_insight_creates_and_updates_forward_typed_sdk_dtos() -> None:
     create_calls: list[tuple[object, object, str | None]] = []
     update_calls: list[tuple[uuid.UUID, object]] = []
@@ -526,11 +355,11 @@ async def test_review_insight_creates_and_updates_forward_typed_sdk_dtos() -> No
         idempotency_key: str | None = None,
     ) -> list[object]:
         create_calls.append((received_agent_id, insights, idempotency_key))
-        return [_insight(agent_id=received_agent_id)]
+        return [build_insight(agent_id=received_agent_id)]
 
     async def update_insight(received_id: uuid.UUID, request: object) -> object:
         update_calls.append((received_id, request))
-        return _insight(agent_id=agent_id)
+        return build_insight(agent_id=agent_id)
 
     client = SimpleNamespace(
         insights=SimpleNamespace(create=create_insights, update=update_insight)
@@ -587,22 +416,6 @@ async def test_review_insight_creates_and_updates_forward_typed_sdk_dtos() -> No
     assert cast(Any, update_calls[1][1]).model_dump(exclude_unset=True) == {
         "title": "renamed"
     }
-
-
-def _insight(*, agent_id: uuid.UUID) -> InsightResponse:
-    now = datetime.now(UTC)
-    return InsightResponse(
-        id=uuid.uuid4(),
-        owner_id=uuid.uuid4(),
-        agent_id=agent_id,
-        name="latency-regressed",
-        title="Latency regressed",
-        description=None,
-        data={"type": "text", "content": "It got slower."},
-        metadata={},
-        created=now,
-        updated=now,
-    )
 
 
 def test_investigation_create_preserves_empty_session_list() -> None:
@@ -825,7 +638,7 @@ async def _create_investigation(
         investigations=SimpleNamespace(create=create),
         info=SimpleNamespace(get=get_info),
     )
-    server, context = _get_context(
+    server, context = build_context(
         client,
         CapabilityMode.STANDARD,
         handler_timeout=handler_timeout,
@@ -899,7 +712,7 @@ async def test_investigation_get_returns_dashboard_review_link() -> None:
         investigations=SimpleNamespace(get=get_investigation),
         info=SimpleNamespace(get=get_info),
     )
-    server, context = _get_context(client, CapabilityMode.READ_ONLY)
+    server, context = build_context(client, CapabilityMode.READ_ONLY)
     result = await server.call_tool(
         "kitaru_review_read",
         {
@@ -1111,7 +924,7 @@ async def test_review_tag_create_has_typed_protocol_result() -> None:
         assert isinstance(request, TagCreateRequest)
         return tag
 
-    server, context = _get_context(
+    server, context = build_context(
         SimpleNamespace(tags=SimpleNamespace(create=create)), CapabilityMode.STANDARD
     )
     result = await server.call_tool(
@@ -1145,7 +958,7 @@ async def test_review_tag_api_errors_use_redacted_protocol_envelope(
         del idempotency_key
         raise APIError(status_code, "Bearer sensitive-token")
 
-    server, context = _get_context(
+    server, context = build_context(
         SimpleNamespace(tags=SimpleNamespace(create=create)), CapabilityMode.STANDARD
     )
     result = await server.call_tool(
@@ -1405,7 +1218,7 @@ async def test_experiment_run_and_activity_reads_link_replay_to_sessions() -> No
         replays=SimpleNamespace(get=get_replay),
         sessions=SimpleNamespace(get=get_session),
     )
-    server, context = _get_context(client, CapabilityMode.STANDARD)
+    server, context = build_context(client, CapabilityMode.STANDARD)
     start = await server.call_tool(
         "kitaru_workflow_start",
         {
@@ -1486,7 +1299,7 @@ async def test_activity_result_session_exposes_durable_replay_failure_reason(
         info=SimpleNamespace(get=get_info),
         sessions=SimpleNamespace(get=get_session),
     )
-    server, context = _get_context(client, CapabilityMode.READ_ONLY)
+    server, context = build_context(client, CapabilityMode.READ_ONLY)
     result = await server.call_tool(
         "kitaru_activity_read",
         {
@@ -1525,7 +1338,7 @@ async def test_experiment_run_start_reports_safe_mastra_replay_reason(
         raise APIError(409, f"Session {baseline_session_id}: {reason}")
 
     client = SimpleNamespace(experiments=SimpleNamespace(start_run=start_run))
-    server, context = _get_context(client, CapabilityMode.STANDARD)
+    server, context = build_context(client, CapabilityMode.STANDARD)
     result = await server.call_tool(
         "kitaru_workflow_start",
         {
@@ -1562,7 +1375,7 @@ async def test_experiment_run_start_does_not_echo_arbitrary_conflict_detail() ->
         raise APIError(409, "token=secret")
 
     client = SimpleNamespace(experiments=SimpleNamespace(start_run=start_run))
-    server, context = _get_context(client, CapabilityMode.STANDARD)
+    server, context = build_context(client, CapabilityMode.STANDARD)
     result = await server.call_tool(
         "kitaru_workflow_start",
         {
@@ -1725,7 +1538,7 @@ async def test_evaluation_start_protocol_returns_typed_receipt() -> None:
         evaluators=SimpleNamespace(get=get_evaluator, get_version=get_version),
         evaluations=SimpleNamespace(create=create_evaluation),
     )
-    server, context = _get_context(client, CapabilityMode.STANDARD)
+    server, context = build_context(client, CapabilityMode.STANDARD)
     result = await server.call_tool(
         "kitaru_workflow_start",
         {

@@ -40,7 +40,7 @@
   "tests/cli/test_sessions.py": 1920,
   "tests/conftest.py": 8062,
   "tests/mcp/test_handlers_protocol.py": 1142,
-  "tests/mcp/test_review_workflows.py": 2195,
+  "tests/mcp/test_review_workflows.py": 2158,
   "tests/server/test_evaluation_repository.py": 1160,
   "tests/server/test_import_service.py": 1008,
   "tests/server/test_replay_pipeline.py": 2058,
