@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add `use_task_inputs_as_prompt=False` to preserve caller prompts and message history while recording task inputs. Explicit replay prompt overrides still apply.
+- Document manual benchmark grades after session completion and registered evaluator metrics for experiments.
+
 ## 0.3.1 - 2026-10-08
 
 - Serialize baseline history lookups per cache key so identical tool calls dispatched in parallel replay successive recorded occurrences instead of all replaying the first one.
