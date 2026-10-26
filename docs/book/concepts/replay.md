@@ -67,7 +67,7 @@ A replay moves `pending → evaluating → completed` (or `failed` / `canceled`)
 
 There is no separate fork operation in the API; a "fork" is a replay that carries an `override`. The word is shorthand for that, the way "baseline" is shorthand for a replay without one. Both are the same call.
 
-An override changes one thing about the re-run and leaves everything else alone:
+An override selects changes to the re-run. Set only the fields you want to change, and check how your adapter applies them:
 
 ```python
 from kitaru.api_models.v1.replay_config import ReplayOverride
@@ -82,7 +82,9 @@ override = ReplayOverride(
 
 - `model` swaps the model on every matching model call: a plain string replaces all of them, a map replaces old with new per model.
 - `system_prompt` and `prompt` rewrite the run's inputs before the agent starts.
-- `model_params` adjusts sampling parameters at the adapter level.
+- `model_params` supplies adapter-specific model settings. In PydanticAI, a supplied mapping replaces the entire current settings mapping rather than merging individual keys. Unset or `None` keeps the current settings, while `{}` resets the mapping to empty.
+
+For example, changing only `openai_reasoning_effort` through PydanticAI's `model_params` also drops an existing `openai_reasoning_summary="auto"` unless you include it again. Other adapters can apply settings differently. See [Replay a failure and fork it](../guides/replay-and-overrides.md) for a complete settings example.
 
 Replays re-run the agent **from the top**. There is no partial, mid-run cut point: the recording answers the world's side of the conversation, and your agent recomputes its own side in full. That is what makes a fork trustworthy: the whole decision path is real.
 

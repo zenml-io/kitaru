@@ -1,0 +1,1 @@
+- Clarified model-swap provider credentials, Responses API selection, native Anthropic replay prerequisites, and PydanticAI model-settings replacement during replay.
