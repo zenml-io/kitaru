@@ -456,6 +456,34 @@ async def test_query_filters_by_import_with_pagination_and_negation(
     assert missing == []
 
 
+async def test_query_filters_by_task_id(setup: Setup) -> None:
+    """Select the insights one analysis task produced."""
+    version_id = await setup.make_analyzer_version_id()
+    import_id, other_import_id = uuid.uuid4(), uuid.uuid4()
+    task_id = await setup.make_task_id(version_id, import_id)
+    other_task_id = await setup.make_task_id(version_id, other_import_id)
+    matching = await _create_insight(
+        setup.insights,
+        setup.owner_id,
+        setup.agent_id,
+        task_id=task_id,
+        import_id=import_id,
+    )
+    await _create_insight(
+        setup.insights,
+        setup.owner_id,
+        setup.agent_id,
+        task_id=other_task_id,
+        import_id=other_import_id,
+    )
+    insights, _ = await setup.insights.query(
+        InsightFilter.model_validate(
+            {"expression": {"field": "task_id", "op": "eq", "value": str(task_id)}}
+        )
+    )
+    assert [insight.id for insight in insights] == [matching.id]
+
+
 @pytest.mark.parametrize("setup", ["postgres"], indirect=True)
 async def test_negated_import_filter_excludes_null_imports(setup: Setup) -> None:
     """Use SQL null semantics when negating a direct import column filter."""
