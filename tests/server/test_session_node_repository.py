@@ -17,6 +17,7 @@ import itertools
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -277,6 +278,45 @@ async def _walk_pages(
         if next_cursor is None:
             return collected
         cursor = next_cursor
+
+
+@pytest.mark.parametrize(
+    ("entries", "expected"),
+    [
+        ([], None),
+        ([(NodeType.LLM_CALL, None)], None),
+        ([(NodeType.LLM_CALL, Decimal("1.25")), (NodeType.LLM_CALL, None)], None),
+        ([(NodeType.LLM_CALL, Decimal(0))], Decimal(0)),
+        (
+            [
+                (NodeType.LLM_CALL, Decimal("1.25")),
+                (NodeType.LLM_CALL, Decimal("0.75")),
+                (NodeType.TOOL_CALL, None),
+                (NodeType.SPAN, None),
+                (NodeType.TOOL_CALL, Decimal("0.10")),
+            ],
+            Decimal("2.10"),
+        ),
+    ],
+)
+async def test_get_cost_requires_complete_llm_pricing(
+    setup: Setup,
+    entries: list[tuple[NodeType, Decimal | None]],
+    expected: Decimal | None,
+) -> None:
+    """Keep unknown model prices distinct from free calls and unpriced tools."""
+    repository, session_id, make_session_id = setup
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(i, session_id=session_id, node_type=node_type, cost=cost)
+            for i, (node_type, cost) in enumerate(entries)
+        ],
+    )
+    other_id = await make_session_id()
+    await repository.upsert_batch(other_id, [_node(0, session_id=other_id, cost=None)])
+
+    assert await repository.get_cost(session_id) == expected
 
 
 async def test_get_by_external_ids_empty_when_none_stored(setup: Setup) -> None:

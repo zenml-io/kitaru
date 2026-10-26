@@ -44,6 +44,7 @@ class KitaruAgent(
         batch_size: int = 20,
         cost_calculator: CostCalculator | None = None,
         estimate_costs: bool = True,
+        use_task_inputs_as_prompt: bool = True,
     ) -> None:
         """Initialize a transparent wrapper around an existing agent.
 
@@ -59,6 +60,9 @@ class KitaruAgent(
                 completed model request. This takes priority over automatic pricing.
             estimate_costs: Use the bundled pricing catalog when no cost calculator
                 is supplied.
+            use_task_inputs_as_prompt: Project task inputs into the prompt and
+                message history. Set to False to keep the caller's prompt and
+                history. Explicit replay prompt overrides still apply.
 
         Raises:
             ValueError: If batch size is invalid.
@@ -73,6 +77,7 @@ class KitaruAgent(
             batch_size=batch_size,
             cost_calculator=cost_calculator,
             estimate_costs=estimate_costs,
+            use_task_inputs_as_prompt=use_task_inputs_as_prompt,
         )
 
     @asynccontextmanager

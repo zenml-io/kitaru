@@ -609,8 +609,8 @@ async def test_query_filters_by_cost_bounds(setup: Setup) -> None:
             origin=SessionOrigin.RECORDED,
         )
     )
-    await repository.apply_rollups(cheap.id, SessionRollups(cost=Decimal("1.00")))
-    await repository.apply_rollups(pricey.id, SessionRollups(cost=Decimal("9.00")))
+    await repository.apply_rollups(cheap.id, SessionRollups(), cost=Decimal("1.00"))
+    await repository.apply_rollups(pricey.id, SessionRollups(), cost=Decimal("9.00"))
 
     sessions, _ = await repository.query(
         SessionFilter(
@@ -938,7 +938,7 @@ async def test_delete_restricted_by_replay_result(replay_setup: ReplaySetup) -> 
 
 
 async def test_apply_rollups_accumulates_deltas(setup: Setup) -> None:
-    """Add deltas atomically, coalescing null cost and tokens to zero."""
+    """Set absolute cost while accumulating token and call-count deltas."""
     repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
         Session(
@@ -951,15 +951,16 @@ async def test_apply_rollups_accumulates_deltas(setup: Setup) -> None:
     await repository.apply_rollups(
         created.id,
         SessionRollups(
-            cost=Decimal("1.50"),
             input_tokens=10,
             output_tokens=5,
             llm_call_count=1,
         ),
+        cost=Decimal("1.50"),
     )
     await repository.apply_rollups(
         created.id,
-        SessionRollups(cost=Decimal("0.50"), tool_call_count=1),
+        SessionRollups(tool_call_count=1),
+        cost=Decimal("2.00"),
     )
     loaded = await repository.get(created.id, include_payloads=True)
     assert loaded.cost == Decimal("2.00")
@@ -970,12 +971,32 @@ async def test_apply_rollups_accumulates_deltas(setup: Setup) -> None:
     assert loaded.tool_call_count == 1
 
 
+async def test_apply_rollups_can_clear_incomplete_cost(setup: Setup) -> None:
+    """Replace an old priced subtotal with an unknown total."""
+    repository, owner_id, agent_id, _, _ = setup
+    created = await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+            cost=Decimal("1.50"),
+        )
+    )
+    await repository.apply_rollups(
+        created.id, SessionRollups(llm_call_count=1), cost=None
+    )
+    loaded = await repository.get(created.id, include_payloads=True)
+    assert loaded.cost is None
+    assert loaded.llm_call_count == 1
+
+
 async def test_apply_rollups_not_found(setup: Setup) -> None:
     """Raise for an unknown session id."""
     repository, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(SessionNotFound):
-        await repository.apply_rollups(missing_id, SessionRollups())
+        await repository.apply_rollups(missing_id, SessionRollups(), cost=None)
 
 
 async def test_query_filters_by_tag(setup: Setup) -> None:

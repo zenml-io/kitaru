@@ -663,13 +663,14 @@ class FakeSessionRepository:
             self._tasks._unlink_session(session_id)
 
     async def apply_rollups(
-        self, session_id: uuid.UUID, deltas: SessionRollups
+        self, session_id: uuid.UUID, deltas: SessionRollups, cost: Decimal | None
     ) -> None:
-        """Apply rollup deltas to a session's cost, tokens, and call counts.
+        """Set session cost and apply token and call-count deltas.
 
         Args:
             session_id: Id of the session.
             deltas: Rollup deltas to add.
+            cost: Total cost, or ``None`` when pricing is incomplete.
 
         Raises:
             SessionNotFound: No session has this id.
@@ -688,8 +689,7 @@ class FakeSessionRepository:
         now = _renewed_timestamp(stored.updated)
         updated = stored.model_copy(
             update={
-                "cost": (stored.cost if stored.cost is not None else Decimal(0))
-                + deltas.cost,
+                "cost": cost,
                 "tokens": new_tokens,
                 "llm_call_count": stored.llm_call_count + deltas.llm_call_count,
                 "tool_call_count": stored.tool_call_count + deltas.tool_call_count,

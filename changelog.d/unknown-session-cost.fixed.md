@@ -1,0 +1,1 @@
+- Keep session cost unknown when any model call is unpriced, including across batches and node replacements, and repair previously stored incomplete totals during database upgrades.
