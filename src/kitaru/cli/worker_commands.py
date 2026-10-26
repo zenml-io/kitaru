@@ -37,10 +37,10 @@ _WORKER_START_PARAMETERS = (
     ParameterSpec("--name", "string", "option", False, "Ephemeral worker name."),
     ParameterSpec(
         "--claim",
-        "agent|evaluator|importer|agent=UUID[]",
+        "agent|evaluator|importer|analyzer|agent=UUID[]",
         "option",
         False,
-        "Claim the worker serves: agent, evaluator, importer, or "
+        "Claim the worker serves: agent, evaluator, importer, analyzer, or "
         "agent=AGENT_VERSION_ID. Repeat for multiple claims.",
     ),
     ParameterSpec(
@@ -121,8 +121,8 @@ async def worker_start(
         list[str] | None,
         Parameter(
             name="--claim",
-            help="Claim the worker serves: agent, evaluator, importer, or "
-            "agent=AGENT_VERSION_ID. Repeat for multiple claims.",
+            help="Claim the worker serves: agent, evaluator, importer, analyzer, "
+            "or agent=AGENT_VERSION_ID. Repeat for multiple claims.",
         ),
     ] = None,
     selectors: Annotated[

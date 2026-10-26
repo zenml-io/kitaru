@@ -23,7 +23,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, get_args
 
 import httpx
 import pytest
@@ -158,6 +158,18 @@ def test_config_merge_parses_a_versioned_agent_claim() -> None:
     assert config.scope.claims == [
         WorkerClaim(kind=TaskKind.AGENT, agent_version_id=agent_version_id)
     ]
+
+
+def test_claim_help_lists_every_task_kind() -> None:
+    """The --claim help and schema name every kind the parser accepts."""
+    spec = command_registry.FUNCTION_SPECS[worker_commands.worker_start]
+    schema = next(item for item in spec.parameters if item.name == "--claim")
+    annotation = inspect.signature(worker_commands.worker_start).parameters["claims"]
+    help_text = get_args(annotation.annotation)[1].help
+    for kind in TaskKind:
+        assert kind.value in schema.type
+        assert kind.value in schema.description
+        assert kind.value in help_text
 
 
 def test_config_merge_rejects_an_invalid_claim_value() -> None:
