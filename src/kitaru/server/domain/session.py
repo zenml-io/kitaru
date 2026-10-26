@@ -340,7 +340,6 @@ def mastra_replay_stored_files(inputs: Any) -> list[MastraStoredFile]:
 class SessionRollups(FrozenModel):
     """Session rollup deltas."""
 
-    cost: Decimal = Decimal(0)
     input_tokens: int = 0
     output_tokens: int = 0
     cached_input_tokens: int = 0
@@ -355,7 +354,6 @@ def combine_rollups(deltas: Iterable[SessionRollups]) -> SessionRollups:
     Returns:
         Combined rollup delta.
     """
-    cost = Decimal(0)
     input_tokens = 0
     output_tokens = 0
     cached_input_tokens = 0
@@ -363,7 +361,6 @@ def combine_rollups(deltas: Iterable[SessionRollups]) -> SessionRollups:
     llm_call_count = 0
     tool_call_count = 0
     for delta in deltas:
-        cost += delta.cost
         input_tokens += delta.input_tokens
         output_tokens += delta.output_tokens
         cached_input_tokens += delta.cached_input_tokens
@@ -371,7 +368,6 @@ def combine_rollups(deltas: Iterable[SessionRollups]) -> SessionRollups:
         llm_call_count += delta.llm_call_count
         tool_call_count += delta.tool_call_count
     return SessionRollups(
-        cost=cost,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cached_input_tokens=cached_input_tokens,
@@ -388,7 +384,6 @@ def rollup_delta(old: SessionRollups, new: SessionRollups) -> SessionRollups:
         Rollup delta from ``old`` to ``new``.
     """
     return SessionRollups(
-        cost=new.cost - old.cost,
         input_tokens=new.input_tokens - old.input_tokens,
         output_tokens=new.output_tokens - old.output_tokens,
         cached_input_tokens=new.cached_input_tokens - old.cached_input_tokens,

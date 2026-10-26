@@ -1,1 +1,0 @@
-- `kitaru connections create` now prompts with a hidden input for optional secret fields (such as `SecretStr | None`) in a connection schema and stores their values as secrets instead of plain environment values.
