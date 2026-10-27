@@ -228,7 +228,7 @@ async function text(output: { stream: ReadableStream<unknown> }) {
 }
 
 async function recordCalls(
-  calls: Array<{ phase: "observer" | "reflector"; prompt: string }>,
+  calls: Array<{ phase: "observer" | "reflector"; prompt: unknown }>,
 ): Promise<OMResultEntry[]> {
   const tape = createOMResultTape(undefined, () => {
     throw new Error("unexpected incomplete result");
@@ -713,6 +713,50 @@ it("ignores wall-clock values and generated ids in the OM input fingerprint", ()
   expect(getOMInputFingerprint({ ...replay, temperature: 0.7 })).not.toBe(
     getOMInputFingerprint(baseline),
   );
+});
+
+function observerHistory(text: string) {
+  return { prompt: [{ role: "user", content: [{ type: "text", text }] }] };
+}
+
+// Mastra writes a date header or time label only where the day or minute
+// changed since the line before.
+const CROSSED_CLOCK_HISTORY = observerHistory(
+  "Oct 26 2026:\nUser (11:59 PM): remember green\nOct 27 2026:\nTool Call evidence (12:00 AM): read\n(12:01 AM): a pause",
+);
+
+it("ignores where Mastra's date headers and time labels fall in the OM input fingerprint", () => {
+  const replay = observerHistory(
+    "Oct 28 2026:\nUser (9:15 AM): remember green\nTool Call evidence: read\na pause",
+  );
+  expect(getOMInputFingerprint(replay)).toBe(
+    getOMInputFingerprint(CROSSED_CLOCK_HISTORY),
+  );
+  expect(
+    getOMInputFingerprint(observerHistory("User: remember blue")),
+  ).not.toBe(getOMInputFingerprint(observerHistory("User: remember green")));
+});
+
+it("matches a tape whose fingerprints kept Mastra's date headers and time labels", async () => {
+  const legacy = getOMInputFingerprint(
+    CROSSED_CLOCK_HISTORY,
+    undefined,
+    undefined,
+    undefined,
+    "legacy",
+  );
+  expect(legacy).not.toBe(getOMInputFingerprint(CROSSED_CLOCK_HISTORY));
+  const entries = (
+    await recordCalls([
+      { phase: "observer", prompt: CROSSED_CLOCK_HISTORY.prompt },
+    ])
+  ).map((entry) => ({ ...entry, inputFingerprint: legacy }));
+  const tape = createOMResultTape(entries, () => {});
+  await collect(
+    (await tape.instrument(model(), "observer").doStream(CROSSED_CLOCK_HISTORY))
+      .stream,
+  );
+  expect((await tape.finish()).divergence.inputMismatches).toBe(0);
 });
 
 it("fingerprints an attachment as the reference replay history holds", () => {

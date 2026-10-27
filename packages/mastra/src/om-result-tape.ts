@@ -192,12 +192,35 @@ const VOLATILE_TEXT: ReadonlyArray<readonly [RegExp, string]> = [
 // identifies the file.
 const ATTACHMENT_LABEL = /\[(File|Image) #(\d+): [^\]\n]*\]/g;
 
-function normalizeText(text: string): string {
+// Mastra writes a date header line and a time label only where the day or
+// minute differs from the line before, so whether one appears depends on where
+// day and minute boundaries fell during the run. These match the placeholders
+// that VOLATILE_TEXT leaves.
+const CLOCK_MARKERS: readonly RegExp[] = [
+  /^<date>:\n/gm,
+  /^\(<time>\): /gm,
+  / \(<time>\)(?=: )/g,
+];
+
+/**
+ * How a fingerprint treats Mastra's date headers and time labels.
+ *
+ * `legacy` keeps them, as tapes recorded before they were dropped hashed them.
+ */
+export type OMFingerprintFormat = "current" | "legacy";
+
+function normalizeText(text: string, format: OMFingerprintFormat): string {
   // Replay history holds redacted URLs, so the baseline hashes them redacted too.
-  return VOLATILE_TEXT.reduce(
+  const normalized = VOLATILE_TEXT.reduce(
     (current, [pattern, replacement]) => current.replace(pattern, replacement),
     redactUrlCredentials(text),
   ).replace(ATTACHMENT_LABEL, "[$1 #$2]");
+  return format === "legacy"
+    ? normalized
+    : CLOCK_MARKERS.reduce(
+        (current, pattern) => current.replace(pattern, ""),
+        normalized,
+      );
 }
 
 /**
@@ -213,6 +236,7 @@ export function getOMInputFingerprint(
   mapString: (value: string) => string = (value) => value,
   onFileContent?: (reference: string) => void,
   readInlineFile: InlineFileReader = createInlineFileReader(),
+  format: OMFingerprintFormat = "current",
 ): string {
   try {
     const text = JSON.stringify(
@@ -235,7 +259,8 @@ export function getOMInputFingerprint(
           const inline = readInlineFile(holder);
           if (inline) return inline.reference;
         }
-        if (typeof value === "string") return normalizeText(mapString(value));
+        if (typeof value === "string")
+          return normalizeText(mapString(value), format);
         const bytes = holder?.[key];
         if (
           bytes instanceof Uint8Array &&
@@ -606,15 +631,21 @@ export function createOMResultTape(
         cause: "no_recorded_result",
       });
     }
-    const fingerprint = getOMInputFingerprint(
-      input,
-      options.mapString,
-      undefined,
-      readInlineFile,
-    );
-    const matching = calls.find(
-      (candidate) => !candidate.used && candidate.fingerprint === fingerprint,
-    );
+    const findUnused = (format: OMFingerprintFormat) => {
+      const fingerprint = getOMInputFingerprint(
+        input,
+        options.mapString,
+        undefined,
+        readInlineFile,
+        format,
+      );
+      return calls.find(
+        (candidate) => !candidate.used && candidate.fingerprint === fingerprint,
+      );
+    };
+    // A tape recorded before fingerprints dropped Mastra's clock markers
+    // holds legacy fingerprints.
+    const matching = findUnused("current") ?? findUnused("legacy");
     if (matching) {
       const result = use(matching, method);
       const { actorStepsAtResult: steps, durationMs } = matching.result ?? {};

@@ -29,6 +29,7 @@ import {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 type Observation = { messageTokens: number; bufferTokens: number | false };
@@ -39,6 +40,7 @@ function setup(options: {
   toolSteps: () => number;
   evidenceRepeats?: number | (() => number);
   missingObservationalMemoryResults?: "fail" | "live";
+  onActorCall?: (call: number) => void;
 }) {
   const store = new InMemoryStore();
   const domain = store.stores.memory;
@@ -107,6 +109,7 @@ function setup(options: {
     provider: "fixture",
     doStream: async ({ prompt }) => {
       actorPrompts.push(JSON.stringify(prompt));
+      options.onActorCall?.(actorPrompts.length);
       step += 1;
       if (step > options.toolSteps()) {
         step = 0;
@@ -278,13 +281,17 @@ async function replay(
  * Record a turn whose slow observer is still running while the actor reads
  * more evidence, then replay it with an instant observer.
  */
-async function replaySlowObserverBaseline(evidenceRepeats: number) {
+async function replaySlowObserverBaseline(
+  evidenceRepeats: number,
+  onActorCall?: (call: number) => void,
+) {
   let delayMs = 300;
   const fixture = setup({
     observation: { messageTokens: 1200, bufferTokens: 0.2 },
     observe: () => new Promise((resolve) => setTimeout(resolve, delayMs)),
     toolSteps: () => 5,
     evidenceRepeats,
+    onActorCall,
   });
   const baseline = await recordBaseline(fixture);
   expect(baseline?.metadata).toMatchObject({ mastra_replay_state: "eligible" });
@@ -324,6 +331,19 @@ const JUST_UNDER_THRESHOLD: Record<string, number> = {
 
 it("replays a baseline whose slow observer merged buffer rounds without live OM calls", async () => {
   await replaySlowObserverBaseline(34);
+});
+
+it("replays a baseline whose first tool call came a minute after the user message", async () => {
+  // Mastra's observer prompt labels the tool call with its time because its
+  // minute differs from the message's. The replay runs within one minute, so
+  // its prompt has no such label.
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-26T22:43:59Z") });
+  let shifted = false;
+  await replaySlowObserverBaseline(34, () => {
+    if (shifted) return;
+    shifted = true;
+    vi.setSystemTime(Date.now() + 60_000);
+  });
 });
 
 it("keeps a baseline that ended just under the observation threshold unobserved in replay", async () => {
