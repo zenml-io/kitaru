@@ -5,7 +5,7 @@
   "examples/typescript/vercel_ai_ticket_resolver/test/workflow.test.ts": 1148,
   "packages/mastra/src/memory-binding.ts": 1515,
   "packages/mastra/src/memory-snapshot.ts": 1346,
-  "packages/mastra/src/stateful-agent.ts": 1878,
+  "packages/mastra/src/stateful-agent.ts": 1873,
   "packages/mastra/src/stateful-files.ts": 1161,
   "packages/mastra/src/stream-recording.ts": 1107,
   "packages/mastra/test/memory-binding.test.ts": 1002,
