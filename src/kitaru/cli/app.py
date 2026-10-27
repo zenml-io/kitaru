@@ -2226,30 +2226,7 @@ async def connection_delete(
     _spec(
         ("insight", "create"),
         "Create a batch of insights for one agent.",
-        parameters=(
-            ParameterSpec(
-                "--agent",
-                "reference",
-                "option",
-                True,
-                "Agent UUID or case-sensitive name.",
-            ),
-            ParameterSpec(
-                "--insight",
-                "JSON[]",
-                "option",
-                True,
-                "Insight JSON object; repeat for each created insight.",
-            ),
-            ParameterSpec(
-                "--import",
-                "UUID",
-                "option",
-                False,
-                "Associate every insight with this import.",
-            ),
-            _IDEMPOTENCY_KEY_PARAMETER,
-        ),
+        parameters=(*insights.CREATE_PARAMETERS, _IDEMPOTENCY_KEY_PARAMETER),
         read_only=False,
         side_effects=("creates_remote_state",),
         idempotency="non_idempotent_remote_create",
@@ -2350,34 +2327,7 @@ async def insight_get(insight: uuid.UUID, /) -> CommandResult:
     _spec(
         ("insight", "update"),
         "Update selected insight fields.",
-        parameters=(
-            ParameterSpec("INSIGHT", "UUID", "argument", True, "Insight ID."),
-            ParameterSpec("--title", "string", "option", False, "New title."),
-            ParameterSpec(
-                "--description", "string", "option", False, "New description."
-            ),
-            ParameterSpec(
-                "--clear-description",
-                "boolean",
-                "option",
-                False,
-                "Clear the description.",
-            ),
-            ParameterSpec(
-                "--import",
-                "UUID",
-                "option",
-                False,
-                "Attach or reassign to this import; omit to preserve the association.",
-            ),
-            ParameterSpec(
-                "--clear-import",
-                "boolean",
-                "option",
-                False,
-                "Detach from the import; cannot be combined with --import.",
-            ),
-        ),
+        parameters=insights.UPDATE_PARAMETERS,
         read_only=False,
         side_effects=("mutates_remote_state",),
         idempotency="idempotent replacement",

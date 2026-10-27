@@ -73,9 +73,7 @@ from kitaru.server.adapters.db.repositories.experiment_run_repository import (
 from kitaru.server.adapters.db.repositories.idempotency_key_repository import (
     SQLIdempotencyKeyRepository,
 )
-from kitaru.server.adapters.db.repositories.import_repository import (
-    SQLImportRepository,
-)
+from kitaru.server.adapters.db.repositories.import_repository import SQLImportRepository
 from kitaru.server.adapters.db.repositories.insight_repository import (
     SQLInsightRepository,
 )

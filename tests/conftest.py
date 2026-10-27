@@ -255,9 +255,7 @@ from kitaru.server.domain.session import (
     SessionNotFound,
     SessionRollups,
 )
-from kitaru.server.domain.session_node import (
-    SessionNode,
-)
+from kitaru.server.domain.session_node import SessionNode
 from kitaru.server.domain.tag import (
     DuplicateTagLink,
     DuplicateTagName,
