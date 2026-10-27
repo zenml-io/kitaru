@@ -11,7 +11,7 @@
   "packages/mastra/test/memory-binding.test.ts": 1002,
   "packages/mastra/test/memory-lease-lifecycle.test.ts": 1060,
   "packages/mastra/test/signed-url-history.test.ts": 1513,
-  "packages/mastra/test/stateful-overrides.test.ts": 1354,
+  "packages/mastra/test/stateful-overrides.test.ts": 1195,
   "packages/mastra/test/stream-lifecycle.test.ts": 1474,
   "plugins/packages/braintrust-importer/src/kitaru_braintrust_importer/importer.py": 1176,
   "plugins/packages/claude-agent-sdk/src/kitaru_claude_agent_sdk/recording.py": 1096,
