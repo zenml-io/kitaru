@@ -22,7 +22,12 @@ from pydantic import Field
 from kitaru.api_models.v1.insight import InsightData
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
-from kitaru.server.filtering import EQUALITY_OPS, SCOPE_OPS, FilterField
+from kitaru.server.filtering import (
+    EQUALITY_OPS,
+    NULLABLE_OPS,
+    SCOPE_OPS,
+    FilterField,
+)
 
 
 class InsightFilter(ListFilter):
@@ -32,6 +37,7 @@ class InsightFilter(ListFilter):
         "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "agent_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "import_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
+        "task_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS),
         "name": FilterField(value_type=str, ops=EQUALITY_OPS),
         "type": FilterField(value_type=str, ops=EQUALITY_OPS),
     }

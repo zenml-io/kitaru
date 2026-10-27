@@ -16,6 +16,7 @@
 import json
 import os
 import subprocess
+import uuid
 from types import SimpleNamespace
 from typing import Any
 
@@ -23,6 +24,7 @@ import httpx
 import pytest
 
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
+from kitaru.api_models.v1.worker import WorkerScope
 from kitaru.cli import app as app_module
 from kitaru.cli import diagnostics
 from kitaru.cli.config import ResolvedCredential, ResolvedTarget
@@ -35,10 +37,18 @@ from kitaru.client.exceptions import APIError, NotFoundError
 class FakeWorkers:
     """Worker resource returning a stable liveness snapshot."""
 
+    def __init__(self, liveness: tuple[bool, ...] = (True, False, True)) -> None:
+        self.liveness = liveness
+
     async def iter(self):
-        """Yield two live workers and one stale worker."""
-        for live in (True, False, True):
-            yield SimpleNamespace(live=live)
+        """Yield workers with the configured liveness."""
+        for number, live in enumerate(self.liveness, start=1):
+            yield SimpleNamespace(
+                id=uuid.UUID(int=number),
+                name=f"worker-{number}",
+                live=live,
+                scope=WorkerScope(claims=[{"kind": "importer"}]),
+            )
 
     async def list(self) -> list[object]:
         """Return an empty worker collection for authentication checks."""
@@ -69,7 +79,7 @@ class FakeClient:
         self.closed = True
 
 
-async def test_status_reports_provenance_and_live_worker_count(
+async def test_status_reports_provenance_and_live_worker_scopes(
     tmp_path, monkeypatch
 ) -> None:
     """Status composes local provenance with unauthenticated server data."""
@@ -87,8 +97,39 @@ async def test_status_reports_provenance_and_live_worker_count(
     assert result.item["server_source"] == "environment"
     assert result.item["authentication"] == "not_required"
     assert result.item["live_worker_count"] == 2
+    assert result.item["live_workers"] == [
+        {
+            "id": str(uuid.UUID(int=number)),
+            "name": f"worker-{number}",
+            "scope": {
+                "claims": [{"kind": "importer", "agent_version_id": None}],
+                "selectors": None,
+                "job_id": None,
+            },
+        }
+        for number in (1, 3)
+    ]
     assert result.item["credential_status"]["source"] == "none"
     assert client.closed is True
+
+
+@pytest.mark.parametrize("liveness", [(), (False,)])
+async def test_status_distinguishes_no_live_workers_from_unavailable(
+    tmp_path, monkeypatch, liveness: tuple[bool, ...]
+) -> None:
+    """An empty live fleet is reported as an observed zero."""
+    client = FakeClient()
+    client.workers = FakeWorkers(liveness)
+    monkeypatch.setattr(diagnostics, "build_api_client", lambda *args: client)
+
+    result = await diagnostics.status(
+        target=ResolvedTarget("https://api.example.com", "explicit"),
+        credential_store=CredentialStore(tmp_path / "credentials.json"),
+        timeout=30,
+    )
+
+    assert result.item["live_worker_count"] == 0
+    assert result.item["live_workers"] == []
 
 
 @pytest.mark.parametrize(
@@ -568,6 +609,8 @@ async def test_status_reports_a_rejected_credential_as_a_warning(
 
     assert result.exit_code == 0
     assert result.item["authentication"] == "rejected"
+    assert result.item["live_worker_count"] is None
+    assert result.item["live_workers"] is None
     assert result.item["credential_status"]["kind"] == "api_key"
     assert "KITKEY_rejected" not in json.dumps(result.item)
     assert "credential was rejected" in result.warnings[0]
@@ -607,6 +650,7 @@ async def test_status_warns_when_auth_is_required_but_no_credential_exists(
 
     assert result.item["authentication"] == "missing"
     assert result.item["live_worker_count"] is None
+    assert result.item["live_workers"] is None
     assert "no credential is available" in result.warnings[0]
 
 

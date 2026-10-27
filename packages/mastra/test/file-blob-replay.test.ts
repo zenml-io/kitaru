@@ -10,6 +10,13 @@ import {
 import { textStream } from "./helpers/memory-agent.js";
 import { AGENT_ID, installTestApi, REPLAY_ID } from "./helpers.js";
 
+// Mastra 1.75 and later replace inline image bytes that lack an image signature
+// with a placeholder before the model call.
+function withPngSignature(bytes: Uint8Array): Uint8Array {
+  bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
+  return bytes;
+}
+
 const THREAD = "blob-thread";
 const RESOURCE = "blob-resource";
 
@@ -255,7 +262,7 @@ it("stores 10 MB of attachments on a 10 MB thread as blobs once and replays them
 it("records and replays a single 9 MB declared attachment", async () => {
   const { store, domain } = await seedThread(0, 0);
   const url = attachmentUrl(0);
-  const bytes = new Uint8Array(9 * 1024 * 1024).fill(9);
+  const bytes = withPngSignature(new Uint8Array(9 * 1024 * 1024).fill(9));
   const { adapter, api, fetchAttachment, final, prompts } = fixture(
     domain,
     () => bytes,
@@ -333,7 +340,7 @@ it("keeps a turn eligible when history holds a captured file inline beyond the r
   const { store, domain } = await seedThread(0, 0);
   const url = attachmentUrl(0);
   // 13 MiB of bytes is over 16 MiB as base64 but within the file limit.
-  const bytes = new Uint8Array(13 * 1024 * 1024).fill(7);
+  const bytes = withPngSignature(new Uint8Array(13 * 1024 * 1024).fill(7));
   const inline = Buffer.from(bytes).toString("base64");
   await domain.saveMessages({
     messages: [
