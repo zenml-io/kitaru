@@ -68,7 +68,7 @@ The CI profile omits Hypothesis's explanation phase only for the known-failing i
 
 ## API fuzzing
 
-`tests/server/test_fuzz_api.py` generates requests from `openapi/openapi.json` with Schemathesis and sends them to the real app. Opt in with `KITARU_FUZZ=1` (the suite skips otherwise) and start the database first with `docker compose up -d db`; `just fuzz-api` runs the deep nightly configuration. The `fuzz` dependency group carries `schemathesis`, so run under `uv run --extra server --group fuzz`.
+`tests/server/test_fuzz_api.py` generates requests from `openapi/openapi.json` with Schemathesis and sends them to the real app. Opt in with `KITARU_FUZZ=1` (the module skips at import otherwise; keep that skip above the schema setup rather than in a `pytestmark`, for the reason in its comment) and start the database first with `docker compose up -d db`; `just fuzz-api` runs the deep nightly configuration. The `fuzz` dependency group carries `schemathesis`, so run under `uv run --extra server --group fuzz`.
 
 `tests/server/fuzz_server.py` boots one real server per session on its own disposable database, with real Alembic migrations and a real bearer token from `POST /api/v1/login`. It runs under uvicorn in a background thread rather than an in-process ASGI transport, because those transports rerun the lifespan — migrations included — for every generated example. An ASGI wrapper records unhandled exceptions so a failure names the exception and not just the endpoint; a 500 body carries no detail on its own.
 
