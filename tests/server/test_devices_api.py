@@ -19,7 +19,6 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import FakeDeviceRepository, create_device
 from kitaru.server.adapters.rest.dependencies import authorize, get_device_service
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
@@ -28,6 +27,7 @@ from kitaru.server.application.models.device import DevicePolicy
 from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.device import DeviceStatus
+from kitaru_test_support import FakeDeviceRepository, create_device
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 FOREIGN_ACCOUNT = Account(id=uuid.uuid4(), name="bob")

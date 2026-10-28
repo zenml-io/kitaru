@@ -18,7 +18,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conftest import FakeApiKeyRepository
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.auth import AuthContext
@@ -33,6 +32,7 @@ from kitaru.server.domain.api_key import (
 )
 from kitaru.server.domain.keys import hash_secret, verify_secret
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import FakeApiKeyRepository
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 FOREIGN_ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="bob"))

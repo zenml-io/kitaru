@@ -4,10 +4,12 @@ import type { MemoryConfigInternal } from "@mastra/core/memory";
 import type { MemoryStorage } from "@mastra/core/storage";
 import type { Memory } from "@mastra/memory";
 import type { SecretKeyClassifier } from "@zenml-io/kitaru/adapter";
+import type { OMEngine } from "./attachment-tokens.js";
 import {
   createMemoryCaptureBinding,
   createProcessLocalMemoryAccess,
   type MastraMemoryCaptureOptions,
+  type MastraMemorySelector,
 } from "./memory-binding.js";
 import { MEMORY_REPLAY_TESTED_VERSIONS } from "./memory-replay-versions.js";
 import {
@@ -16,7 +18,11 @@ import {
   type MastraMemorySnapshot,
   validateMemorySnapshot,
 } from "./memory-snapshot.js";
-import type { createOMResultTape } from "./om-result-tape.js";
+import type {
+  createOMResultTape,
+  OMPhase,
+  OMResultTapeOptions,
+} from "./om-result-tape.js";
 import type { RecordedClock } from "./replay-clock.js";
 import {
   type MastraReplayReason,
@@ -250,21 +256,151 @@ export async function bindOMResultModels(
   return { ...config, observationalMemory: bound } as MemoryConfigInternal;
 }
 
-/** Whether Mastra's async buffering of `kind` is running on a thread in this process. */
-export function isAsyncBufferingRunning(
-  engine: NonNullable<Awaited<Memory["omEngine"]>>,
-  selector: { threadId: string; resourceId: string },
-  kind: "observation" | "reflection",
-): boolean {
+type BufferingKind = "observation" | "reflection";
+type RunningRounds = Map<string, Promise<void>>;
+
+/** A running buffer round that notes each wait on it. */
+class WatchedRound<V> extends Promise<V> {
+  // Derived promises are plain, so only a wait on the round itself counts.
+  static override get [Symbol.species]() {
+    return Promise;
+  }
+
+  waited = false;
+  onWait: () => void = () => {};
+
+  // `await` and `Promise.race` call `then` on a promise of another class,
+  // while Mastra reading the round without waiting on it does not.
+  // biome-ignore lint/suspicious/noThenProperty: each wait must reach this method
+  override then<T = V, E = never>(
+    onFulfilled?: ((value: V) => T | PromiseLike<T>) | null,
+    onRejected?: ((reason: unknown) => E | PromiseLike<E>) | null,
+  ): Promise<T | E> {
+    this.waited = true;
+    this.onWait();
+    return super.then(onFulfilled, onRejected);
+  }
+}
+
+/** Wait listeners by buffer key, for each map of running rounds. */
+const waitListeners = new WeakMap<
+  RunningRounds,
+  Map<string, Set<() => void>>
+>();
+
+function getBufferKey(
+  engine: OMEngine,
+  selector: MastraMemorySelector,
+  kind: BufferingKind,
+): string {
   const lockKey = engine.buffering.getLockKey(
     selector.threadId,
     selector.resourceId,
   );
+  return kind === "observation"
+    ? engine.buffering.getObservationBufferKey(lockKey)
+    : engine.buffering.getReflectionBufferKey(lockKey);
+}
+
+/** Get Mastra's process-wide map of running buffer rounds by buffer key. */
+function getRunningRounds(engine: OMEngine): RunningRounds {
+  // The map is a static field of a class that @mastra/memory does not export.
+  return (
+    engine.buffering.constructor as unknown as {
+      asyncBufferingOps: RunningRounds;
+    }
+  ).asyncBufferingOps;
+}
+
+/** Whether Mastra's async buffering of `kind` is running on a thread in this process. */
+export function isAsyncBufferingRunning(
+  engine: OMEngine,
+  selector: MastraMemorySelector,
+  kind: BufferingKind,
+): boolean {
   return engine.buffering.isAsyncBufferingInProgress(
-    kind === "observation"
-      ? engine.buffering.getObservationBufferKey(lockKey)
-      : engine.buffering.getReflectionBufferKey(lockKey),
+    getBufferKey(engine, selector, kind),
   );
+}
+
+/** Answer a tape's buffering questions from the engine once `getEngine` has one. */
+export function getBufferingTapeOptions(
+  getEngine: () => OMEngine | null,
+  selector: MastraMemorySelector,
+): Pick<OMResultTapeOptions, "isBuffered" | "onBufferWait"> {
+  const kindOf = (phase: OMPhase): BufferingKind =>
+    phase === "observer" ? "observation" : "reflection";
+  return {
+    isBuffered(phase) {
+      const engine = getEngine();
+      return (
+        engine !== null &&
+        isAsyncBufferingRunning(engine, selector, kindOf(phase))
+      );
+    },
+    onBufferWait(phase, listener) {
+      const engine = getEngine();
+      return engine
+        ? onBufferingWait(engine, selector, kindOf(phase), listener)
+        : () => {};
+    },
+  };
+}
+
+/**
+ * Note each wait on a buffer round that starts in this process from now on.
+ *
+ * Every Memory of one Mastra copy shares the map of running rounds, so it
+ * stays watched once watched.
+ */
+export function trackBufferingWaits(engine: OMEngine): void {
+  const rounds = getRunningRounds(engine);
+  if (waitListeners.has(rounds)) return;
+  const listeners = new Map<string, Set<() => void>>();
+  waitListeners.set(rounds, listeners);
+  const setRound = rounds.set.bind(rounds);
+  rounds.set = (key: string, round: Promise<void>) => {
+    const watched = new WatchedRound<void>((resolve, reject) =>
+      round.then(resolve, reject),
+    );
+    // A round nobody waits on must not report its failure as unhandled.
+    Promise.prototype.then.call(watched, undefined, () => {});
+    watched.onWait = () => {
+      for (const listener of listeners.get(key) ?? []) listener();
+    };
+    return setRound(key, watched);
+  };
+}
+
+/**
+ * Call `listener` whenever Mastra waits on the running buffer round of
+ * `kind` on a thread, and at once when it already does.
+ *
+ * Only a round that started once `trackBufferingWaits` watched the engine's
+ * map reports its waits. Returns a function that stops listening.
+ */
+export function onBufferingWait(
+  engine: OMEngine,
+  selector: MastraMemorySelector,
+  kind: BufferingKind,
+  listener: () => void,
+): () => void {
+  const rounds = getRunningRounds(engine);
+  const byKey = waitListeners.get(rounds);
+  if (!byKey) return () => {};
+  const key = getBufferKey(engine, selector, kind);
+  const round = rounds.get(key);
+  if (round instanceof WatchedRound && round.waited) {
+    listener();
+    return () => {};
+  }
+  const listeners = byKey.get(key) ?? new Set();
+  byKey.set(key, listeners);
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) byKey.delete(key);
+  };
 }
 
 /**
@@ -474,6 +610,9 @@ export async function createIsolatedMemoryReplay(
       domains: { memory: binding.domain },
     });
     const memory = new Memory({ storage, options: configuration });
+    // Track from the start: Mastra can wait on a round before the tape holds it.
+    const engine = options.omTape ? await memory.omEngine : null;
+    if (engine) trackBufferingWaits(engine);
     const initialSnapshot = await binding.captureInitial(memory);
     if (!initialSnapshot) {
       await binding.release();
@@ -488,6 +627,9 @@ export async function createIsolatedMemoryReplay(
       initialSnapshot,
       finish(): Promise<boolean> {
         finished ??= (async () => {
+          // Settling joins a buffer round that the tape may still hold for an
+          // actor step the finished turn never started.
+          options.omTape?.endActorSteps();
           try {
             // A buffering operation that another turn left hung on the same
             // thread would otherwise stall this replay indefinitely.
@@ -509,6 +651,7 @@ export async function createIsolatedMemoryReplay(
         return finished;
       },
       async release(): Promise<void> {
+        options.omTape?.endActorSteps();
         await finished;
       },
     };
