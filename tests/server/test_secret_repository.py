@@ -19,14 +19,7 @@ from collections.abc import AsyncGenerator
 import pytest
 from pydantic import SecretStr
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeConnectionRepository,
-    FakeSecretRepository,
-    pg_session,
-    postgres_available,
-)
+from conftest import pg_session, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.orm.secret import SecretORM
@@ -65,6 +58,12 @@ from kitaru.server.domain.secret import (
     SecretNotFound,
 )
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeConnectionRepository,
+    FakeSecretRepository,
+)
 
 Setup = tuple[SecretRepository, uuid.UUID, uuid.UUID]
 RestrictionSetup = tuple[SecretRepository, AgentVersionRepository, uuid.UUID, uuid.UUID]

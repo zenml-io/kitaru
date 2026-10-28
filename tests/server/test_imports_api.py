@@ -22,17 +22,6 @@ from typing import Any
 import httpx
 import pytest
 
-from conftest import (
-    FakeEphemeralWorkers,
-    JobAndTaskServices,
-    build_job_and_task_services,
-    create_agent,
-    create_blob,
-    create_connection,
-    create_plugin,
-    create_session,
-    override_idempotency,
-)
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
@@ -59,6 +48,17 @@ from kitaru.server.ephemeral_worker_settings import (
     EphemeralWorkerBackend,
     EphemeralWorkerSettings,
     ModalEphemeralWorkerSettings,
+)
+from kitaru_test_support import (
+    FakeEphemeralWorkers,
+    JobAndTaskServices,
+    build_job_and_task_services,
+    create_agent,
+    create_blob,
+    create_connection,
+    create_plugin,
+    create_session,
+    override_idempotency,
 )
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")

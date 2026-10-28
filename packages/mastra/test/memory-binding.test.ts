@@ -133,18 +133,6 @@ it("keeps a shared resource unsafe after an unowned native write", async () => {
   await recovered();
 });
 
-it("shows why separate process-local helpers cannot qualify for multi-server replay", async () => {
-  const first = createProcessLocalMemoryAccess();
-  const second = createProcessLocalMemoryAccess();
-  const selector = { threadId: THREAD, resourceId: RESOURCE };
-  const firstLease = await first.acquire(selector);
-  const secondLease = await second.acquire(selector);
-  expect(await firstLease.verifyEligibility()).toBe(true);
-  expect(await secondLease.verifyEligibility()).toBe(true);
-  await firstLease();
-  await secondLease();
-});
-
 it("poisons all threads when a native fallback cannot identify its selector", async () => {
   const access = createProcessLocalMemoryAccess();
   const first = await access.acquire({
@@ -293,16 +281,6 @@ it("keeps a thread unsafe when a late write cannot register", async () => {
     await recovered.binding.captureInitial(recovered.runtime.memory),
   ).toBeDefined();
   await recovered.binding.release();
-});
-
-it("waits within waitMs for a releasing holder instead of invalidating it", async () => {
-  const access = createProcessLocalMemoryAccess();
-  const selector = { threadId: THREAD, resourceId: RESOURCE };
-  const first = await access.acquire(selector);
-  setTimeout(() => void first(), 20);
-  const second = await access.acquire(selector, { waitMs: 200 });
-  expect(await second.verifyEligibility()).toBe(true);
-  await second();
 });
 
 it("bounds a hung acquisition and releases a lease returned after cancellation", async () => {

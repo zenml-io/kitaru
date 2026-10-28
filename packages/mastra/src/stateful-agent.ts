@@ -22,10 +22,8 @@ import {
   createSecretKeyClassifier,
   MastraReplayBudgetError,
   normalizeRecordingLimits,
-  type RecordingLimits,
   ROOT_NODE_EXTERNAL_ID,
   resolveReplayContext,
-  type SecretKeyClassifier,
 } from "@zenml-io/kitaru/adapter";
 import {
   recordAttachmentTokens,
@@ -43,6 +41,7 @@ import {
   assertMemoryReplayVersions,
   bindOMResultModels,
   createIsolatedMemoryReplay,
+  getBufferingTapeOptions,
   getMemoryModelId,
   getMemoryStoreSemantics,
   isAsyncBufferingRunning,
@@ -54,7 +53,6 @@ import {
   captureMemoryReplayEnvelope,
   createIncompleteMemoryReplayEnvelope,
   decodeMemoryValue,
-  encodeMemoryEvidence,
   encodeMemoryValue,
   finalizeMemoryReplayEnvelope,
   type MastraMemorySnapshot,
@@ -64,11 +62,11 @@ import {
   validateMemoryReplayContext,
   validateMemoryReplaySelectors,
 } from "./memory-snapshot.js";
+import { createLiveOMCallNode } from "./om-live-call-node.js";
 import {
   createOMResultTape,
   MastraOMDivergenceError,
   type MissingOMResults,
-  type OMLiveCall,
   type OMResultEntry,
   toStoredOMEntry,
 } from "./om-result-tape.js";
@@ -501,76 +499,6 @@ class MemoryReplayRequestContext extends RequestContext {
   }
 }
 
-/**
- * Build the `llm_call` node for an OM call that a replay answered live.
- *
- * The prompt keeps captured files as their references, so the node does not
- * repeat file bytes the replay input already names.
- */
-function liveOMCallNode(
-  invocationId: string,
-  index: number,
-  call: OMLiveCall,
-  sanitize: (value: unknown) => unknown,
-  limits: RecordingLimits | undefined,
-  isSecretKey: SecretKeyClassifier,
-): SessionNodeCreateRequest {
-  const lossReasons: string[] = [];
-  const encode = (value: unknown, label: string): JsonValue => {
-    try {
-      const evidence = encodeMemoryEvidence(
-        sanitize(value),
-        label,
-        limits,
-        isSecretKey,
-      );
-      if (evidence.lossReason) lossReasons.push(evidence.lossReason);
-      return evidence.value;
-    } catch {
-      lossReasons.push(`${label} could not be recorded.`);
-      return null;
-    }
-  };
-  // The tape keeps the result in codec form; encoding that form again would
-  // reject its own reserved keys.
-  let output: unknown = null;
-  try {
-    output = decodeMemoryValue(call.output, isSecretKey);
-  } catch {
-    lossReasons.push("Live observational-memory result could not be recorded.");
-  }
-  let model: string | null = null;
-  try {
-    model = getMemoryModelId(call.model);
-  } catch {
-    // The node still shows the call; only its model name is unknown.
-  }
-  return {
-    external_id: `${invocationId}:om-live-call:${index}`,
-    parent_external_id: ROOT_NODE_EXTERNAL_ID,
-    node_type: "llm_call",
-    name: `om_${call.phase}_live_call`,
-    status: call.failed ? "failed" : "completed",
-    ...(call.failed ? { error: "Observational-memory model call failed" } : {}),
-    inputs: encode(
-      { prompt: call.prompt },
-      "Live observational-memory request",
-    ),
-    outputs: encode(output, "Live observational-memory result"),
-    model,
-    started_at: call.startedAt,
-    ended_at: call.endedAt,
-    attributes: {
-      invocation_id: invocationId,
-      om_phase: call.phase,
-      om_method: call.method,
-      om_live: true,
-      evidence_complete: call.captured && lossReasons.length === 0,
-      evidence_loss_reasons: lossReasons,
-    },
-  };
-}
-
 /** Construct each streamed invocation with historical configuration and isolated replay memory. */
 export function createMemoryReplayAgent(
   factory: MemoryReplayAgentFactory,
@@ -966,13 +894,7 @@ export function createMemoryReplayAgent(
         isCapturedFile: baselineFiles
           ? (reference) => baselineFiles?.hasFile(reference) ?? false
           : undefined,
-        isBuffered: (phase) =>
-          omEngine !== null &&
-          isAsyncBufferingRunning(
-            omEngine,
-            selector,
-            phase === "observer" ? "observation" : "reflection",
-          ),
+        ...getBufferingTapeOptions(() => omEngine, selector),
       },
     );
     let memoryStore: MastraMemoryStoreSemantics;
@@ -1682,7 +1604,7 @@ export function createMemoryReplayAgent(
               });
             for (const [index, call] of (tape?.liveCalls ?? []).entries())
               await writeNode(
-                liveOMCallNode(
+                createLiveOMCallNode(
                   invocationId,
                   index,
                   call,

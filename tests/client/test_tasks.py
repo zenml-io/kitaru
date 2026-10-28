@@ -19,22 +19,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from conftest import (
-    FakeAccountRepository,
-    FakeApiKeyRepository,
-    FakePasswordHasher,
-    JobAndTaskServices,
-    asgi_api_client,
-    build_job_and_task_services,
-    create_agent,
-    create_agent_task,
-    create_agent_version,
-    create_job,
-    create_worker,
-    local_settings,
-    mint_worker_token,
-    stub_auth_session,
-)
+from conftest import asgi_api_client, local_settings, stub_auth_session
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.task import (
     TaskClaimRequest,
@@ -55,6 +40,19 @@ from kitaru.server.api.app import create_app
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakeApiKeyRepository,
+    FakePasswordHasher,
+    JobAndTaskServices,
+    build_job_and_task_services,
+    create_agent,
+    create_agent_task,
+    create_agent_version,
+    create_job,
+    create_worker,
+    mint_worker_token,
+)
 
 
 @pytest.fixture

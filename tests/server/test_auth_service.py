@@ -18,14 +18,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conftest import (
-    FakeAccountRepository,
-    FakeApiKeyRepository,
-    FakePasswordHasher,
-    control_plane_settings,
-    create_api_key,
-    local_settings,
-)
+from conftest import control_plane_settings, local_settings
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.auth_service import (
     LAST_USED_UPDATE_INTERVAL_SECONDS,
@@ -41,6 +34,12 @@ from kitaru.server.application.models.auth import (
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.api_key import encode_api_key
 from kitaru.server.domain.keys import generate_secret, hash_secret
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakeApiKeyRepository,
+    FakePasswordHasher,
+    create_api_key,
+)
 
 
 @pytest.fixture

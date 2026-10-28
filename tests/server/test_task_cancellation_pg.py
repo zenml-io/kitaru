@@ -23,7 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from conftest import UNSCOPED_WORKER_SCOPE, pg_session_with_engine, postgres_available
+from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.api_models.v1.worker import WorkerRuntime
@@ -77,6 +77,7 @@ from kitaru.server.domain.agent_version import AgentVersion, RunSpec
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.task import AgentTask, Task
 from kitaru.server.domain.worker import Worker
+from kitaru_test_support import UNSCOPED_WORKER_SCOPE
 
 TASK_LOW_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 TASK_HIGH_ID = uuid.UUID("ffffffff-ffff-ffff-ffff-fffffffffff2")

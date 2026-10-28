@@ -6,6 +6,7 @@ import {
   type MastraReplayEvidence,
   type SecretKeyClassifier,
 } from "@zenml-io/kitaru/adapter";
+import { MEMORY_MUTATIONS } from "./memory-mutations.js";
 import {
   decodeMemoryValue,
   encodeMemoryEvidence,
@@ -566,7 +567,7 @@ export function createRegisteredWriteDomain(
       const value: unknown = Reflect.get(target, property, target);
       if (typeof value !== "function") return value;
       if (methods.has(property)) return methods.get(property);
-      const bound = MUTATIONS.has(property)
+      const bound = MEMORY_MUTATIONS.has(property)
         ? async (...args: unknown[]): Promise<unknown> => {
             const registration = await registerWrite();
             try {
@@ -581,46 +582,6 @@ export function createRegisteredWriteDomain(
     },
   });
 }
-
-// The pinned public MemoryStorage mutation inventory. Delegation binds `this` to
-// the original domain, so a native method's own helper calls record only once.
-const MUTATIONS: ReadonlySet<PropertyKey> = new Set<
-  | keyof MemoryStorage
-  | "commitActiveObservations"
-  | "appendBufferedObservations"
->([
-  "dangerouslyClearAll",
-  "prune",
-  "saveThread",
-  "updateThread",
-  "patchThread",
-  "deleteThread",
-  "saveMessages",
-  "updateMessages",
-  "deleteMessages",
-  "copyThread",
-  "cloneThread",
-  "updateThreadResourceId",
-  "saveResource",
-  "updateResource",
-  "initializeObservationalMemory",
-  "updateActiveObservations",
-  "commitActiveObservations",
-  "updateBufferedObservations",
-  "appendBufferedObservations",
-  "swapBufferedToActive",
-  "createReflectionGeneration",
-  "updateBufferedReflection",
-  "swapBufferedReflectionToActive",
-  "setReflectingFlag",
-  "setObservingFlag",
-  "setBufferingObservationFlag",
-  "setBufferingReflectionFlag",
-  "insertObservationalMemoryRecord",
-  "clearObservationalMemory",
-  "setPendingMessageTokens",
-  "updateObservationalMemoryConfig",
-]);
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1061,7 +1022,7 @@ export function createMemoryCaptureBinding(
       const value: unknown = Reflect.get(target, property, target);
       if (typeof value !== "function") return value;
       if (methods.has(property)) return methods.get(property);
-      if (!MUTATIONS.has(property)) {
+      if (!MEMORY_MUTATIONS.has(property)) {
         const bound = value.bind(target);
         methods.set(property, bound);
         return bound;

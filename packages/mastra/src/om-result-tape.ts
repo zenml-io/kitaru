@@ -28,7 +28,10 @@ export interface OMResultEntry {
   failed?: true;
   /** How many actor steps had started when the result arrived. */
   actorStepsAtResult?: number;
-  /** Milliseconds from the call's start until its result arrived. */
+  /**
+   * Milliseconds from the call's start until its result arrived. Earlier
+   * Kitaru versions hold a replayed buffered result only when it is set.
+   */
   durationMs?: number;
 }
 
@@ -143,6 +146,11 @@ export interface OMResultTapeOptions {
    * rather than blocking the actor.
    */
   isBuffered?: (phase: OMPhase) => boolean;
+  /**
+   * Call `listener` whenever Mastra waits on the running buffer round of
+   * `phase`, and at once when it already does. Return a function that stops.
+   */
+  onBufferWait?: (phase: OMPhase, listener: () => void) => () => void;
   /** Defaults to `fail`. Only a tape with recorded results reads it. */
   missingResults?: MissingOMResults;
   /**
@@ -431,9 +439,10 @@ async function withReplayFileUrls(
  *   ran, and a buffered reflection ends without a result.
  * - A buffered call that matches its recorded call returns that result only
  *   once the actor has started as many steps as it had when production's
- *   result arrived, or once production's call duration has passed. Mastra
- *   starts no new buffer round while one is running, so an instant result
- *   would let it start rounds production never ran. Each such round seals
+ *   result arrived, once the actor has ended, or once Mastra waits on the
+ *   round, however long the replay takes to reach that step. Mastra starts
+ *   no new buffer round while one is running, so an instant result would
+ *   let it start rounds production never ran. Each such round seals
  *   the messages it covers, which splits later steps into more messages and
  *   raises the pending token count that decides when OM observes.
  * - A blocking call takes the next unused recorded call of its phase. With
@@ -476,25 +485,32 @@ export function createOMResultTape(
   let served = 0;
   let incomplete = false;
   let actorSteps = 0;
+  let actorStepsEnded = false;
   const holds = new Set<{ steps: number; release: () => void }>();
 
-  /** Resolve once `steps` actor steps have started, after `maxMs` at most. */
-  function waitForActorSteps(steps: number, maxMs: number): Promise<void> {
-    if (actorSteps >= steps) return Promise.resolve();
+  /**
+   * Resolve once `steps` actor steps have started, the actor has ended, or
+   * Mastra waits on the running buffer round of `phase`.
+   */
+  function waitForActorSteps(phase: OMPhase, steps: number): Promise<void> {
+    if (actorStepsEnded || actorSteps >= steps) return Promise.resolve();
     return new Promise((resolve) => {
+      let stopWatching: (() => void) | undefined;
       const hold = {
         steps,
         release() {
-          clearTimeout(timer);
+          stopWatching?.();
           holds.delete(hold);
           resolve();
         },
       };
-      // A replay that diverged may wait on this round at a step production
-      // never reached, so it waits no longer than production's observer did.
-      const timer = setTimeout(hold.release, maxMs);
-      timer.unref?.();
       holds.add(hold);
+      // A replay that diverged can block its actor on this round before the
+      // step production reached, and the round would then wait forever. A
+      // production actor that waited on the round got its result at the
+      // step where it waited, so a replay that matches production has
+      // already reached that step when Mastra waits.
+      stopWatching = options.onBufferWait?.(phase, hold.release);
     });
   }
 
@@ -502,6 +518,12 @@ export function createOMResultTape(
   function beginActorStep(): void {
     actorSteps += 1;
     for (const hold of holds) if (actorSteps >= hold.steps) hold.release();
+  }
+
+  /** Release held buffered results, because the actor starts no more steps. */
+  function endActorSteps(): void {
+    actorStepsEnded = true;
+    for (const hold of holds) hold.release();
   }
 
   function failCapture(): void {
@@ -617,9 +639,9 @@ export function createOMResultTape(
     );
     if (matching) {
       const result = use(matching, method);
-      const { actorStepsAtResult: steps, durationMs } = matching.result ?? {};
-      return buffered && steps !== undefined && durationMs !== undefined
-        ? waitForActorSteps(steps, durationMs).then(() => result)
+      const steps = matching.result?.actorStepsAtResult;
+      return buffered && steps !== undefined
+        ? waitForActorSteps(phase, steps).then(() => result)
         : result;
     }
     const unused = calls.find((candidate) => !candidate.used);
@@ -903,7 +925,7 @@ export function createOMResultTape(
    * departures are counted in `divergence`.
    */
   async function finish(): Promise<OMTapeResult> {
-    for (const hold of holds) hold.release();
+    endActorSteps();
     while (pending.size > 0) await Promise.all([...pending]);
     if (recorded) {
       if (failedClosed) throw failedClosed;
@@ -958,5 +980,5 @@ export function createOMResultTape(
     };
   }
 
-  return { instrument, beginActorStep, finish };
+  return { instrument, beginActorStep, endActorSteps, finish };
 }

@@ -7,10 +7,14 @@ import { z } from "zod/v4";
 import type { MastraMemoryMutation } from "../src/memory-binding.js";
 import {
   createIsolatedMemoryReplay,
+  isAsyncBufferingRunning,
+  onBufferingWait,
   serializeMemoryConfiguration,
+  trackBufferingWaits,
 } from "../src/memory-replay.js";
 import {
   createMemoryRuntime,
+  holdBuffering,
   type ModelCall,
   RESOURCE,
   seedMemory,
@@ -423,6 +427,67 @@ it("replays on the record semantics of a database store unless the source was in
     expect(nativeReflected?.lastObservedAt).toBeUndefined();
   else expect(nativeReflected?.lastObservedAt).toBeInstanceOf(Date);
   await inMemory.finish();
+});
+
+it("reports when Mastra waits on a thread's running buffer round", async () => {
+  const { memory } = createMemoryRuntime();
+  const engine = await memory.omEngine;
+  if (!engine) throw new Error("Missing OM engine");
+  const selector = { threadId: THREAD, resourceId: RESOURCE };
+  trackBufferingWaits(engine);
+  const endRound = await holdBuffering(memory);
+  try {
+    let waits = 0;
+    const stop = onBufferingWait(engine, selector, "observation", () => {
+      waits++;
+    });
+    // Subscribing read the round from Mastra's map. Mastra also reads it
+    // without waiting for some reflection activations, and a read alone
+    // must not release a held result.
+    expect(waits).toBe(0);
+    const waited = engine.waitForBuffering(THREAD, RESOURCE);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(waits).toBe(1);
+    stop();
+    // A hold that starts while Mastra already waits ends at once.
+    let late = 0;
+    onBufferingWait(engine, selector, "observation", () => {
+      late++;
+    });
+    expect(late).toBe(1);
+    endRound();
+    await waited;
+  } finally {
+    endRound();
+  }
+});
+
+it("forgets a finished buffer round that Mastra removes only while its map holds it", async () => {
+  const { memory } = createMemoryRuntime();
+  const engine = await memory.omEngine;
+  if (!engine) throw new Error("Missing OM engine");
+  const selector = { threadId: THREAD, resourceId: RESOURCE };
+  trackBufferingWaits(engine);
+  const rounds = (
+    engine.buffering.constructor as unknown as {
+      asyncBufferingOps: Map<string, Promise<void>>;
+    }
+  ).asyncBufferingOps;
+  const key = engine.buffering.getObservationBufferKey(
+    engine.buffering.getLockKey(THREAD, RESOURCE),
+  );
+  let endRound!: () => void;
+  // Mastra 1.77 and later clear a finished round this way.
+  const round: Promise<void> = new Promise<void>((resolve) => {
+    endRound = resolve;
+  }).finally(() => {
+    if (rounds.get(key) === round) rounds.delete(key);
+  });
+  rounds.set(key, round);
+  expect(isAsyncBufferingRunning(engine, selector, "observation")).toBe(true);
+  endRound();
+  await round;
+  expect(isAsyncBufferingRunning(engine, selector, "observation")).toBe(false);
 });
 
 it.skipIf(!("commitActiveObservations" in InMemoryMemory.prototype))(
