@@ -20,10 +20,6 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import (
-    FakeApiKeyRepository,
-    override_idempotency,
-)
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_api_key_service,
@@ -34,6 +30,10 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.api_key import API_KEY_PREFIX
+from kitaru_test_support import (
+    FakeApiKeyRepository,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

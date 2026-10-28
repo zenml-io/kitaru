@@ -18,20 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeCohortRepository,
-    FakeCohortVersionRepository,
-    FakeImportRepository,
-    FakeReplayRepository,
-    FakeSessionRepository,
-    FakeTagRepository,
-    FakeTaskRepository,
-    asgi_api_client,
-    build_payload_store,
-    override_idempotency,
-)
+from conftest import asgi_api_client
 from kitaru.api_models.v1.agent import AgentCreateRequest
 from kitaru.api_models.v1.cohort import (
     CohortCreateRequest,
@@ -74,6 +61,19 @@ from kitaru.server.application.services.cohort_version_service import (
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeCohortRepository,
+    FakeCohortVersionRepository,
+    FakeImportRepository,
+    FakeReplayRepository,
+    FakeSessionRepository,
+    FakeTagRepository,
+    FakeTaskRepository,
+    build_payload_store,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

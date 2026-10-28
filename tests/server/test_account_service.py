@@ -18,7 +18,6 @@ from typing import Any
 
 import pytest
 
-from conftest import FakeAccountRepository, FakePasswordHasher
 from kitaru.analytics.events import FINISHED_ONBOARDING_SURVEY_KEY, AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
@@ -35,6 +34,7 @@ from kitaru.server.domain.account import (
 from kitaru.server.domain.base import ForbiddenError
 from kitaru.server.domain.keys import hash_secret
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import FakeAccountRepository, FakePasswordHasher
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin", is_admin=True))
 NON_ADMIN_ACTOR = AuthContext(
