@@ -21,13 +21,7 @@ from typing import Any
 import httpx
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeImportRepository,
-    FakeInsightRepository,
-    asgi_api_client,
-    override_idempotency,
-)
+from conftest import asgi_api_client
 from kitaru.api_models.v1.agent import AgentCreateRequest
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp, NotFilter
 from kitaru.api_models.v1.insight import (
@@ -51,6 +45,12 @@ from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.insight_service import InsightService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.imports import Import
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeImportRepository,
+    FakeInsightRepository,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

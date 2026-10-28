@@ -6,10 +6,13 @@ import { z } from "zod/v4";
 import type { MastraMemoryMutation } from "../src/memory-binding.js";
 import {
   createIsolatedMemoryReplay,
+  onBufferingWait,
   serializeMemoryConfiguration,
+  trackBufferingWaits,
 } from "../src/memory-replay.js";
 import {
   createMemoryRuntime,
+  holdBuffering,
   type ModelCall,
   RESOURCE,
   seedMemory,
@@ -418,4 +421,37 @@ it("replays on the record semantics of a database store unless the source was in
       ?.lastObservedAt,
   ).toBeInstanceOf(Date);
   await inMemory.finish();
+});
+
+it("reports when Mastra waits on a thread's running buffer round", async () => {
+  const { memory } = createMemoryRuntime();
+  const engine = await memory.omEngine;
+  if (!engine) throw new Error("Missing OM engine");
+  const selector = { threadId: THREAD, resourceId: RESOURCE };
+  trackBufferingWaits(engine);
+  const endRound = await holdBuffering(memory);
+  try {
+    let waits = 0;
+    const stop = onBufferingWait(engine, selector, "observation", () => {
+      waits++;
+    });
+    // Subscribing read the round from Mastra's map. Mastra also reads it
+    // without waiting for some reflection activations, and a read alone
+    // must not release a held result.
+    expect(waits).toBe(0);
+    const waited = engine.waitForBuffering(THREAD, RESOURCE);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(waits).toBe(1);
+    stop();
+    // A hold that starts while Mastra already waits ends at once.
+    let late = 0;
+    onBufferingWait(engine, selector, "observation", () => {
+      late++;
+    });
+    expect(late).toBe(1);
+    endRound();
+    await waited;
+  } finally {
+    endRound();
+  }
 });

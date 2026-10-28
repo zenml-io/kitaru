@@ -18,13 +18,6 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeImportRepository,
-    FakeInsightRepository,
-    create_agent,
-    create_import,
-)
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.insight import (
@@ -47,6 +40,13 @@ from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.imports import ImportNotFound
 from kitaru.server.domain.insight import Insight, InsightNotFound
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeImportRepository,
+    FakeInsightRepository,
+    create_agent,
+    create_import,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 

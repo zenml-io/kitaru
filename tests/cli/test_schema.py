@@ -18,6 +18,7 @@ import re
 
 from kitaru.cli import app as _registered_app
 from kitaru.cli import app as app_module
+from kitaru.cli import command_registry
 from kitaru.cli.schema import ParameterSpec, describe_schema
 
 
@@ -32,8 +33,8 @@ def _normalize_parameter_name(parameter: ParameterSpec) -> str:
 
 def test_handler_parameters_match_command_schema() -> None:
     """Every command-local handler parameter has exactly one schema entry."""
-    for function, spec in app_module._FUNCTION_SPECS.items():
-        local_parameters = spec.parameters[len(app_module._GLOBAL_PARAMETERS) :]
+    for function, spec in command_registry.FUNCTION_SPECS.items():
+        local_parameters = spec.parameters[len(command_registry.GLOBAL_PARAMETERS) :]
         schema_names = [_normalize_parameter_name(item) for item in local_parameters]
         handler_names = list(inspect.signature(function).parameters)
         if "all_sessions" in handler_names:

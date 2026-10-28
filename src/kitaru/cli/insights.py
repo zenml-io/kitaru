@@ -25,45 +25,6 @@ from kitaru.api_models.v1.insight import (
 )
 from kitaru.cli.output import CLIError, CommandResult
 from kitaru.cli.registration import list_params, page_result, resolve_asset
-from kitaru.cli.schema import ParameterSpec
-
-CREATE_PARAMETERS = (
-    ParameterSpec(
-        "--agent", "reference", "option", True, "Agent UUID or case-sensitive name."
-    ),
-    ParameterSpec(
-        "--insight",
-        "JSON[]",
-        "option",
-        True,
-        "Insight JSON object; repeat for each created insight.",
-    ),
-    ParameterSpec(
-        "--import", "UUID", "option", False, "Associate every insight with this import."
-    ),
-)
-UPDATE_PARAMETERS = (
-    ParameterSpec("INSIGHT", "UUID", "argument", True, "Insight ID."),
-    ParameterSpec("--title", "string", "option", False, "New title."),
-    ParameterSpec("--description", "string", "option", False, "New description."),
-    ParameterSpec(
-        "--clear-description", "boolean", "option", False, "Clear the description."
-    ),
-    ParameterSpec(
-        "--import",
-        "UUID",
-        "option",
-        False,
-        "Attach or reassign to this import; omit to preserve the association.",
-    ),
-    ParameterSpec(
-        "--clear-import",
-        "boolean",
-        "option",
-        False,
-        "Detach from the import; cannot be combined with --import.",
-    ),
-)
 
 
 def _parse_insight_input(value: str) -> InsightInput:

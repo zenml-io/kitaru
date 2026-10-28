@@ -17,7 +17,6 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from conftest import FakeExperimentRunRepository, FakeReplayRepository, create_replay
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.replay import ReplayStatus
@@ -27,6 +26,11 @@ from kitaru.server.application.services.run_finalization import (
 )
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.experiment_run import ExperimentRun
+from kitaru_test_support import (
+    FakeExperimentRunRepository,
+    FakeReplayRepository,
+    create_replay,
+)
 
 OWNER_ID = uuid.uuid4()
 
