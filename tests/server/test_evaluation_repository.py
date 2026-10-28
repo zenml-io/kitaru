@@ -22,12 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from conftest import (
-    FakeEvaluationRepository,
-    FakePluginRepository,
-    pg_session_with_engine,
-    postgres_available,
-)
+from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.evaluation import EvaluationDataType, EvaluationResult
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
@@ -100,6 +95,10 @@ from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import EvaluationTask
 from kitaru.server.filtering import FilterCondition, NotExpression
 from kitaru.server.utils import hash_params
+from kitaru_test_support import (
+    FakeEvaluationRepository,
+    FakePluginRepository,
+)
 
 Setup = tuple[EvaluationRepository, uuid.UUID, uuid.UUID]
 PluginSetup = tuple[PluginRepository, EvaluationRepository, uuid.UUID, uuid.UUID]

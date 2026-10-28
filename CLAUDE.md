@@ -89,6 +89,8 @@ This project uses [just](https://github.com/casey/just) as a command stack. Run 
 
 **Typical loop:** write code → `just fix` (auto-fix what it can) → `just check` (verify everything passes) → `just test` (make sure nothing is broken) → commit.
 
+**Test parallelism:** Run pytest serially (`just test`) or with at most `-n 4`; never `-n auto`. Measured on an 18-core laptop, `-n auto` finished `tests/server` only about 20% sooner than serial while using about 8x the CPU, and several agent sessions often test at once. `.claude/settings.json` caps `-n auto` at 4 workers for Claude Code; an explicit higher `-n` bypasses that cap.
+
 ```bash
 uv sync                 # Install dependencies
 uv sync --extra server  # Include server components

@@ -24,10 +24,6 @@ from typing import ClassVar
 import pytest
 
 from conftest import (
-    FakeAccountRepository,
-    FakeApiKeyRepository,
-    FakeControlPlaneClient,
-    FakePasswordHasher,
     asgi_api_client,
     control_plane_settings,
     local_settings,
@@ -47,6 +43,12 @@ from kitaru.server.adapters.auth.control_plane import (
 )
 from kitaru.server.adapters.rest.dependencies import get_auth_service, get_auth_session
 from kitaru.server.api.app import create_app
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakeApiKeyRepository,
+    FakeControlPlaneClient,
+    FakePasswordHasher,
+)
 
 CONTROL_PLANE_URL = "https://control-plane.example.com"
 SERVER_URL = "http://test"

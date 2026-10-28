@@ -20,11 +20,7 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy.exc import IntegrityError
 
-from conftest import (
-    FakeConnectionRepository,
-    pg_session,
-    postgres_available,
-)
+from conftest import pg_session, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.orm.connection import ConnectionORM
@@ -49,6 +45,7 @@ from kitaru.server.domain.connection import (
 )
 from kitaru.server.domain.secret import Secret
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import FakeConnectionRepository
 
 Setup = tuple[ConnectionRepository, uuid.UUID, uuid.UUID]
 

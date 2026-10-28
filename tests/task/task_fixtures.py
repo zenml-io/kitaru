@@ -26,19 +26,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import NamedTuple
 
-from conftest import (
-    FakeReplayRepository,
-    FakeSessionNodeRepository,
-    JobAndTaskServices,
-    asgi_api_client,
-    build_job_and_task_services,
-    build_payload_store,
-    create_agent,
-    create_blob,
-    create_plugin,
-    create_worker,
-    override_idempotency,
-)
+from conftest import asgi_api_client
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.server.adapters.rest.dependencies import (
@@ -65,6 +53,18 @@ from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
+from kitaru_test_support import (
+    FakeReplayRepository,
+    FakeSessionNodeRepository,
+    JobAndTaskServices,
+    build_job_and_task_services,
+    build_payload_store,
+    create_agent,
+    create_blob,
+    create_plugin,
+    create_worker,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

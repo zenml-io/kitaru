@@ -18,7 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import FakePluginRepository, pg_session, postgres_available
+from conftest import pg_session, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -42,6 +42,7 @@ from kitaru.server.domain.plugin import (
     PluginVersionNotFound,
 )
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import FakePluginRepository
 
 Setup = tuple[PluginRepository, uuid.UUID]
 
