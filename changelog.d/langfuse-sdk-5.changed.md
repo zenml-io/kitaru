@@ -1,0 +1,1 @@
+- Update the Langfuse integration and quickstart trace generation to Python SDK 5 and the observations API. API access requires Langfuse Cloud or self-hosted Langfuse 4.59.0 or later; existing file exports remain supported.
