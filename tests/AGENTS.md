@@ -25,9 +25,7 @@ The SDK gets a round-trip test in `tests/client/` routing the client through
 
 ## Fakes
 
-Fake repositories live in `tests/conftest.py` and implement the full
-repository Protocol, including domain error behavior and `updated` timestamp
-renewal on update.
+Fake repositories live in the `tests/kitaru_test_support/` package, one module per group of related resources, and implement the full repository Protocol, including domain error behavior and `updated` timestamp renewal on update. Tests import them from the package, for example `from kitaru_test_support import FakeSessionRepository`; add a new public helper to the package `__all__`. `tests/conftest.py` keeps the pytest hooks, the fixtures, and the PostgreSQL, settings, and ASGI client helpers, which tests still import with `from conftest import ...`. Keep every file under the 1,000-line limit enforced by `just file-size-check`.
 
 ## PostgreSQL
 
@@ -60,7 +58,7 @@ Hypothesis tests live next to the surface they cover: `plugins/tests/importers/t
 
 Three profiles are registered in each root's `conftest.py` and selected with `HYPOTHESIS_PROFILE`: `dev` (100 examples, default locally), `ci` (50 examples, fixed seed; default when `CI` is set, so PR runs are deterministic), and `nightly` (2000 examples, random; used by `just fuzz` and the `fuzz-nightly` workflow). The `just fuzz` aggregate runs `fuzz-importers`, `fuzz-evaluators`, `fuzz-api-models`, `fuzz-mcp`, `fuzz-adapters`, `fuzz-filters`, and `fuzz-api`. The nightly workflow also runs `fuzz-filters-pg`, `fuzz-api-sequences`, and `fuzz-task-lifecycle` as separate PostgreSQL-backed jobs with fresh random samples and their bounded recipe defaults instead of the 2000-example profile. `@given` tests are sync; call async code with `asyncio.run` inside the body.
 
-Known bugs are pinned with `@pytest.mark.xfail(strict=True, raises=..., reason="<issue>")` example tests, where `raises=` names the specific failure (a `pytest.RaisesExc` matcher when the exception type alone cannot tell it apart) so that a different failure still fails the run, and the generators exclude the matching input class with a comment naming the same issue. Fixing the bug makes the xfail fail; remove the marker and the generator exclusion in the same PR. Failing examples are saved under `.hypothesis/examples` and replayed first on the next run.
+Known bugs are pinned with `@pytest.mark.xfail(raises=..., reason="<issue>")` example tests, where `raises=` names the specific failure (a `pytest.RaisesExc` matcher when the exception type alone cannot tell it apart) so that a different failure still fails the run, and the generators exclude the matching input class with a comment naming the same issue. Fixing the bug makes the xfail fail because `xfail_strict` is on; remove the marker and the generator exclusion in the same PR. Failing examples are saved under `.hypothesis/examples` and replayed first on the next run.
 
 Mark generated-input MCP tests with `mcp_fuzz`. PR CI runs those properties on Python 3.14 only; fixed MCP regression tests continue on every supported Python version. Nightly MCP boundary and redaction jobs run separately on Python 3.12, retaining 2,000 examples per property. `just fuzz-mcp` runs their combined selection locally; `just fuzz-mcp-boundary` and `just fuzz-mcp-redaction` reproduce each job. The recipes print test names, durations, and a stack dump after five minutes in one test. Nightly processes stop before the job deadline so logs and saved examples can be uploaded; a separate reporting job includes failed and cancelled matrix jobs. Cancelling the entire workflow or losing a runner can still prevent diagnostics and reporting.
 
@@ -68,7 +66,7 @@ The CI and nightly profiles omit Hypothesis's explanation phase only for the kno
 
 ## API fuzzing
 
-`tests/server/test_fuzz_api.py` generates requests from `openapi/openapi.json` with Schemathesis and sends them to the real app. Opt in with `KITARU_FUZZ=1` (the suite skips otherwise) and start the database first with `docker compose up -d db`; `just fuzz-api` runs the deep nightly configuration. The `fuzz` dependency group carries `schemathesis`, so run under `uv run --extra server --group fuzz`.
+`tests/server/test_fuzz_api.py` generates requests from `openapi/openapi.json` with Schemathesis and sends them to the real app. Opt in with `KITARU_FUZZ=1` (the module skips at import otherwise; keep that skip above the schema setup rather than in a `pytestmark`, for the reason in its comment) and start the database first with `docker compose up -d db`; `just fuzz-api` runs the deep nightly configuration. The `fuzz` dependency group carries `schemathesis`, so run under `uv run --extra server --group fuzz`.
 
 `tests/server/fuzz_server.py` boots one real server per session on its own disposable database, with real Alembic migrations and a real bearer token from `POST /api/v1/login`. It runs under uvicorn in a background thread rather than an in-process ASGI transport, because those transports rerun the lifespan — migrations included — for every generated example. An ASGI wrapper records unhandled exceptions so a failure names the exception and not just the endpoint; a 500 body carries no detail on its own.
 

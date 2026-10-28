@@ -18,12 +18,6 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    create_agent,
-    create_agent_version,
-)
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.agent import (
@@ -38,6 +32,12 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentNotFound, DuplicateAgentName
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    create_agent,
+    create_agent_version,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 FOREIGN_ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="bob"))

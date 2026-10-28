@@ -45,6 +45,7 @@ stack.
 - `just check`: run root and plugin lint/types, import and schema contracts, example coverage, formatting, and repository checks
 - `just test`: run the full pytest suite
 - `just test tests/test_file.py::test_name`: run one targeted test
+- Test parallelism: Run pytest serially (`just test`) or with at most `-n 4`; never `-n auto`. Measured on an 18-core laptop, `-n auto` finished `tests/server` only about 20% sooner than serial while using about 8x the CPU, and several agent sessions often test at once. `.claude/settings.json` caps `-n auto` at 4 workers for Claude Code; an explicit higher `-n` bypasses that cap.
 - `just build`: build wheel and sdist locally
 
 During iteration, format changed files and run tests for the changed behavior. `just fix` rewrites Python files and workflow YAML across the checkout; prefer file-scoped formatters for narrow changes and review incidental edits after a full fix.

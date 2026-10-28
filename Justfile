@@ -23,6 +23,8 @@ check:
     @just import-check
     @printf '\n─── Python Standards ───────────────────────────\n'
     @just python-standards-check
+    @printf '\n─── File Sizes ─────────────────────────────────\n'
+    @just file-size-check
     @printf '\n─── MCP Schema ─────────────────────────────────\n'
     @just mcp-schema-check
     @printf '\n─── Example Coverage ───────────────────────────\n'
@@ -68,6 +70,10 @@ import-check:
 # Verify database repository and ORM syntax standards
 python-standards-check:
     uv run python scripts/check_python_standards.py
+
+# Keep code files under 1000 lines; files in scripts/file_size_baseline.json may shrink but not grow
+file-size-check:
+    uv run python scripts/check_file_sizes.py
 
 # Check plugin formatting, lint, and types in the frozen plugin workspace
 plugin-check:
