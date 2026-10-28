@@ -49,10 +49,10 @@ importers:
     dependencies:
       '@ai-sdk/openai':
         specifier: 4.0.99
-        version: 4.0.99(zod@3.25.76)
+        version: 4.0.99(zod@4.6.7)
       '@mastra/core':
         specifier: 1.76.0
-        version: 1.76.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.76.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@zenml-io/kitaru':
         specifier: workspace:*
         version: link:../../../packages/core
@@ -60,8 +60,8 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/mastra
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.6.7
+        version: 4.6.7
 
   examples/typescript/vercel_ai_support_triage:
     dependencies:
@@ -103,196 +103,196 @@ importers:
     devDependencies:
       '@mastra/core':
         specifier: 1.67.0
-        version: 1.67.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.67.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@mastra/memory':
         specifier: 1.30.0
-        version: 1.30.0(@mastra/core@1.67.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.30.0(@mastra/core@1.67.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       '@mastra/pg':
         specifier: 1.25.0
-        version: 1.25.0(@mastra/core@1.67.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.25.0(@mastra/core@1.67.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/mastra-compat/1.68:
     devDependencies:
       '@mastra/core':
         specifier: 1.68.0
-        version: 1.68.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.68.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@mastra/memory':
         specifier: 1.31.0
-        version: 1.31.0(@mastra/core@1.68.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.31.0(@mastra/core@1.68.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       '@mastra/pg':
         specifier: 1.26.0
-        version: 1.26.0(@mastra/core@1.68.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.26.0(@mastra/core@1.68.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/mastra-compat/1.69:
     devDependencies:
       '@mastra/core':
         specifier: 1.69.0
-        version: 1.69.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.69.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@mastra/memory':
         specifier: 1.31.0
-        version: 1.31.0(@mastra/core@1.69.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.31.0(@mastra/core@1.69.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       '@mastra/pg':
         specifier: 1.26.0
-        version: 1.26.0(@mastra/core@1.69.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.26.0(@mastra/core@1.69.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/mastra-compat/1.70:
     devDependencies:
       '@mastra/core':
         specifier: 1.70.0
-        version: 1.70.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.70.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@mastra/memory':
         specifier: 1.32.0
-        version: 1.32.0(@mastra/core@1.70.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.32.0(@mastra/core@1.70.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       '@mastra/pg':
         specifier: 1.27.0
-        version: 1.27.0(@mastra/core@1.70.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.27.0(@mastra/core@1.70.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/mastra-compat/1.71:
     devDependencies:
       '@mastra/core':
         specifier: 1.71.0
-        version: 1.71.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.71.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@mastra/memory':
         specifier: 1.32.1
-        version: 1.32.1(@mastra/core@1.71.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.32.1(@mastra/core@1.71.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       '@mastra/pg':
         specifier: 1.27.1
-        version: 1.27.1(@mastra/core@1.71.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.27.1(@mastra/core@1.71.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/mastra-compat/1.72:
     devDependencies:
       '@mastra/core':
         specifier: 1.72.0
-        version: 1.72.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.72.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@mastra/memory':
         specifier: 1.33.0
-        version: 1.33.0(@mastra/core@1.72.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.33.0(@mastra/core@1.72.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       '@mastra/pg':
         specifier: 1.28.0
-        version: 1.28.0(@mastra/core@1.72.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.28.0(@mastra/core@1.72.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/mastra-compat/1.73:
     devDependencies:
       '@mastra/core':
         specifier: 1.73.0
-        version: 1.73.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.73.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@mastra/memory':
         specifier: 1.34.0
-        version: 1.34.0(@mastra/core@1.73.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.34.0(@mastra/core@1.73.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       '@mastra/pg':
         specifier: 1.28.1
-        version: 1.28.1(@mastra/core@1.73.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.28.1(@mastra/core@1.73.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/mastra-compat/1.74:
     devDependencies:
       '@mastra/core':
         specifier: 1.74.0
-        version: 1.74.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.74.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@mastra/memory':
         specifier: 1.35.0
-        version: 1.35.0(@mastra/core@1.74.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.35.0(@mastra/core@1.74.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       '@mastra/pg':
         specifier: 1.29.0
-        version: 1.29.0(@mastra/core@1.74.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.29.0(@mastra/core@1.74.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/mastra-compat/1.75:
     devDependencies:
       '@mastra/core':
         specifier: 1.75.0
-        version: 1.75.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.75.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@mastra/memory':
         specifier: 1.36.0
-        version: 1.36.0(@mastra/core@1.75.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.36.0(@mastra/core@1.75.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       '@mastra/pg':
         specifier: 1.30.0
-        version: 1.30.0(@mastra/core@1.75.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.30.0(@mastra/core@1.75.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/mastra-compat/1.76:
     devDependencies:
       '@mastra/core':
         specifier: 1.76.0
-        version: 1.76.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.76.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@mastra/memory':
         specifier: 1.37.0
-        version: 1.37.0(@mastra/core@1.76.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.37.0(@mastra/core@1.76.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       '@mastra/pg':
         specifier: 1.31.0
-        version: 1.31.0(@mastra/core@1.76.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.31.0(@mastra/core@1.76.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/mastra-compat/1.77:
     devDependencies:
       '@mastra/core':
         specifier: 1.77.0
-        version: 1.77.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.77.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@mastra/memory':
         specifier: 1.37.1
-        version: 1.37.1(@mastra/core@1.77.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.37.1(@mastra/core@1.77.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       '@mastra/pg':
         specifier: 1.31.1
-        version: 1.31.1(@mastra/core@1.77.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.31.1(@mastra/core@1.77.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/mastra-compat/1.78:
     devDependencies:
       '@mastra/core':
         specifier: 1.78.0
-        version: 1.78.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.78.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@mastra/memory':
         specifier: 1.38.0
-        version: 1.38.0(@mastra/core@1.78.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.38.0(@mastra/core@1.78.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       '@mastra/pg':
         specifier: 1.31.2
-        version: 1.31.2(@mastra/core@1.78.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.31.2(@mastra/core@1.78.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/mastra-compat/1.79:
     devDependencies:
       '@mastra/core':
         specifier: 1.79.0
-        version: 1.79.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+        version: 1.79.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@mastra/memory':
         specifier: 1.39.0
-        version: 1.39.0(@mastra/core@1.79.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.39.0(@mastra/core@1.79.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       '@mastra/pg':
         specifier: 1.32.0
-        version: 1.32.0(@mastra/core@1.79.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))
+        version: 1.32.0(@mastra/core@1.79.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))
       zod:
-        specifier: 3.25.76
-        version: 3.25.76
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/vercel-ai:
     dependencies:
@@ -2349,12 +2349,6 @@ packages:
   zod-from-json-schema@0.5.6:
     resolution: {integrity: sha512-U33AJ7ZWS6y9XNSzMWcdy8hRAvZmWhTtpYJu0SXPT5AArbc9nq2ur7Magzmn5RF9KBV4b3FP0nCpmqqlfXlR9w==}
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
-
-  zod@4.6.5:
-    resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
-
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
@@ -2376,14 +2370,6 @@ snapshots:
     optionalDependencies:
       express: 5.2.1
 
-  '@ai-sdk/gateway@4.0.121(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 4.0.31
-      '@ai-sdk/provider-utils': 5.0.65(zod@3.25.76)
-      '@vercel/oidc': 3.2.0
-      zod: 3.25.76
-    optional: true
-
   '@ai-sdk/gateway@4.0.121(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 4.0.31
@@ -2391,24 +2377,11 @@ snapshots:
       '@vercel/oidc': 3.2.0
       zod: 4.6.7
 
-  '@ai-sdk/openai@4.0.99(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 4.0.31
-      '@ai-sdk/provider-utils': 5.0.65(zod@3.25.76)
-      zod: 3.25.76
-
   '@ai-sdk/openai@4.0.99(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 4.0.31
       '@ai-sdk/provider-utils': 5.0.65(zod@4.6.7)
       zod: 4.6.7
-
-  '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.14
-      '@standard-schema/spec': 1.1.0
-      eventsource-parser: 3.1.1
-      zod: 3.25.76
 
   '@ai-sdk/provider-utils@4.0.40(zod@4.6.7)':
     dependencies:
@@ -2417,21 +2390,13 @@ snapshots:
       eventsource-parser: 3.1.1
       zod: 4.6.7
 
-  '@ai-sdk/provider-utils@4.0.61(zod@3.25.76)':
+  '@ai-sdk/provider-utils@4.0.61(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 3.0.19
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.1.1
       undici: 6.29.1
-      zod: 3.25.76
-
-  '@ai-sdk/provider-utils@5.0.13(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 4.0.4
-      '@standard-schema/spec': 1.1.0
-      '@workflow/serde': 4.1.0
-      eventsource-parser: 3.1.1
-      zod: 3.25.76
+      zod: 4.6.7
 
   '@ai-sdk/provider-utils@5.0.13(zod@4.6.7)':
     dependencies:
@@ -2441,32 +2406,23 @@ snapshots:
       eventsource-parser: 3.1.1
       zod: 4.6.7
 
-  '@ai-sdk/provider-utils@5.0.54(zod@3.25.76)':
+  '@ai-sdk/provider-utils@5.0.54(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 4.0.22
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.1
       undici: 7.30.1
-      zod: 3.25.76
+      zod: 4.6.7
 
-  '@ai-sdk/provider-utils@5.0.62(zod@3.25.76)':
+  '@ai-sdk/provider-utils@5.0.62(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 4.0.29
       '@standard-schema/spec': 1.1.0
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.1
       undici: 7.30.1
-      zod: 3.25.76
-
-  '@ai-sdk/provider-utils@5.0.65(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 4.0.31
-      '@standard-schema/spec': 1.1.0
-      '@workflow/serde': 4.1.0
-      eventsource-parser: 3.1.1
-      undici: 7.30.1
-      zod: 3.25.76
+      zod: 4.6.7
 
   '@ai-sdk/provider-utils@5.0.65(zod@4.6.7)':
     dependencies:
@@ -2651,23 +2607,23 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@mastra/core@1.67.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.67.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@4.6.7)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@4.6.7)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.14'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.4'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.10(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.10(zod@4.6.7)
       '@modelcontextprotocol/server': 2.0.0
       '@sindresorhus/slugify': 2.2.1
       '@standard-schema/spec': 1.1.0
       ajv: 8.20.0
-      chat: 4.41.0(ai@7.0.148(zod@3.25.76))(zod@3.25.76)
+      chat: 4.41.0(ai@7.0.148(zod@4.6.7))(zod@4.6.7)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
@@ -2684,7 +2640,7 @@ snapshots:
       tokenx: 1.3.0
       ws: 8.22.0
       xxhash-wasm: 1.1.0
-      zod: 3.25.76
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@grpc/grpc-js'
@@ -2696,27 +2652,27 @@ snapshots:
       - utf-8-validate
       - workflow
 
-  '@mastra/core@1.68.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.68.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@4.6.7)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@4.6.7)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.14'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.4'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.11(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.11(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
-      chat: 4.41.0(ai@7.0.148(zod@3.25.76))(zod@3.25.76)
+      chat: 4.41.0(ai@7.0.148(zod@4.6.7))(zod@4.6.7)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
       fastq: 1.20.1
       gray-matter: 4.0.3
       hono: 4.13.9
-      hono-openapi: 1.3.3(hono@4.13.9)(zod@3.25.76)
+      hono-openapi: 1.3.3(hono@4.13.9)(zod@4.6.7)
       ignore: 7.0.6
       jpeg-js: 0.4.4
       json-schema: 0.4.0
@@ -2727,7 +2683,7 @@ snapshots:
       posthog-node: 5.46.1
       ws: 8.22.0
       xxhash-wasm: 1.1.0
-      zod: 3.25.76
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@grpc/grpc-js'
@@ -2747,27 +2703,27 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@mastra/core@1.69.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.69.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@4.6.7)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@4.6.7)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.14'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.17'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.11(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.11(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
-      chat: 4.41.0(ai@7.0.148(zod@3.25.76))(zod@3.25.76)
+      chat: 4.41.0(ai@7.0.148(zod@4.6.7))(zod@4.6.7)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
       fastq: 1.20.1
       gray-matter: 4.0.3
       hono: 4.13.9
-      hono-openapi: 1.3.3(hono@4.13.9)(zod@3.25.76)
+      hono-openapi: 1.3.3(hono@4.13.9)(zod@4.6.7)
       ignore: 7.0.6
       jpeg-js: 0.4.4
       json-schema: 0.4.0
@@ -2778,7 +2734,7 @@ snapshots:
       posthog-node: 5.46.1
       ws: 8.22.0
       xxhash-wasm: 1.1.0
-      zod: 3.25.76
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@grpc/grpc-js'
@@ -2798,27 +2754,27 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@mastra/core@1.70.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.70.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@4.6.7)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@4.6.7)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.14'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.17'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.11(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.11(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
-      chat: 4.41.0(ai@7.0.148(zod@3.25.76))(zod@3.25.76)
+      chat: 4.41.0(ai@7.0.148(zod@4.6.7))(zod@4.6.7)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
       fastq: 1.20.1
       gray-matter: 4.0.3
       hono: 4.13.9
-      hono-openapi: 1.3.3(hono@4.13.9)(zod@3.25.76)
+      hono-openapi: 1.3.3(hono@4.13.9)(zod@4.6.7)
       ignore: 7.0.6
       jpeg-js: 0.4.4
       json-schema: 0.4.0
@@ -2829,7 +2785,7 @@ snapshots:
       posthog-node: 5.46.1
       ws: 8.22.0
       xxhash-wasm: 1.1.0
-      zod: 3.25.76
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@grpc/grpc-js'
@@ -2849,27 +2805,27 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@mastra/core@1.71.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.71.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@4.6.7)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@4.6.7)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.14'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.17'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.11(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.11(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
-      chat: 4.41.0(ai@7.0.148(zod@3.25.76))(zod@3.25.76)
+      chat: 4.41.0(ai@7.0.148(zod@4.6.7))(zod@4.6.7)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
       fastq: 1.20.1
       gray-matter: 4.0.3
       hono: 4.13.9
-      hono-openapi: 1.3.3(hono@4.13.9)(zod@3.25.76)
+      hono-openapi: 1.3.3(hono@4.13.9)(zod@4.6.7)
       ignore: 7.0.6
       jpeg-js: 0.4.4
       json-schema: 0.4.0
@@ -2881,7 +2837,7 @@ snapshots:
       re2js: 2.8.6
       ws: 8.22.0
       xxhash-wasm: 1.1.0
-      zod: 3.25.76
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@grpc/grpc-js'
@@ -2901,27 +2857,27 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@mastra/core@1.72.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.72.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@4.6.7)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@4.6.7)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.14'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.17'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.12(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.12(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
-      chat: 4.41.0(ai@7.0.148(zod@3.25.76))(zod@3.25.76)
+      chat: 4.41.0(ai@7.0.148(zod@4.6.7))(zod@4.6.7)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
       fastq: 1.20.1
       gray-matter: 4.0.3
       hono: 4.13.9
-      hono-openapi: 1.3.3(hono@4.13.9)(zod@3.25.76)
+      hono-openapi: 1.3.3(hono@4.13.9)(zod@4.6.7)
       ignore: 7.0.6
       jpeg-js: 0.4.4
       json-schema: 0.4.0
@@ -2933,7 +2889,7 @@ snapshots:
       re2js: 2.8.6
       ws: 8.22.0
       xxhash-wasm: 1.1.0
-      zod: 3.25.76
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@grpc/grpc-js'
@@ -2953,27 +2909,27 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@mastra/core@1.73.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.73.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@4.6.7)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@4.6.7)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.14'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.17'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.13(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.13(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
-      chat: 4.41.0(ai@7.0.148(zod@3.25.76))(zod@3.25.76)
+      chat: 4.41.0(ai@7.0.148(zod@4.6.7))(zod@4.6.7)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
       fastq: 1.20.1
       gray-matter: 4.0.3
       hono: 4.13.9
-      hono-openapi: 1.3.3(hono@4.13.9)(zod@3.25.76)
+      hono-openapi: 1.3.3(hono@4.13.9)(zod@4.6.7)
       ignore: 7.0.6
       jpeg-js: 0.4.4
       json-schema: 0.4.0
@@ -2985,7 +2941,7 @@ snapshots:
       re2js: 2.8.6
       ws: 8.22.0
       xxhash-wasm: 1.1.0
-      zod: 3.25.76
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@grpc/grpc-js'
@@ -3005,27 +2961,27 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@mastra/core@1.74.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.74.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@4.6.7)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@4.6.7)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.14'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.17'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.13(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.13(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
-      chat: 4.41.0(ai@7.0.148(zod@3.25.76))(zod@3.25.76)
+      chat: 4.41.0(ai@7.0.148(zod@4.6.7))(zod@4.6.7)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
       fastq: 1.20.1
       gray-matter: 4.0.3
       hono: 4.13.9
-      hono-openapi: 1.3.3(hono@4.13.9)(zod@3.25.76)
+      hono-openapi: 1.3.3(hono@4.13.9)(zod@4.6.7)
       ignore: 7.0.6
       jpeg-js: 0.4.4
       json-schema: 0.4.0
@@ -3037,7 +2993,7 @@ snapshots:
       re2js: 2.8.6
       ws: 8.22.0
       xxhash-wasm: 1.1.0
-      zod: 3.25.76
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@grpc/grpc-js'
@@ -3057,27 +3013,27 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@mastra/core@1.75.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.75.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@4.6.7)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.13(zod@4.6.7)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.14'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.17'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.13(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.13(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
-      chat: 4.41.0(ai@7.0.148(zod@3.25.76))(zod@3.25.76)
+      chat: 4.41.0(ai@7.0.148(zod@4.6.7))(zod@4.6.7)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
       fastq: 1.20.1
       gray-matter: 4.0.3
       hono: 4.13.9
-      hono-openapi: 1.3.3(hono@4.13.9)(zod@3.25.76)
+      hono-openapi: 1.3.3(hono@4.13.9)(zod@4.6.7)
       ignore: 7.0.6
       jpeg-js: 0.4.4
       json-schema: 0.4.0
@@ -3089,7 +3045,7 @@ snapshots:
       re2js: 2.8.6
       ws: 8.22.0
       xxhash-wasm: 1.1.0
-      zod: 3.25.76
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@grpc/grpc-js'
@@ -3109,27 +3065,27 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@mastra/core@1.76.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.76.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.54(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@4.6.7)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.54(zod@4.6.7)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.14'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.22'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.13(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.13(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
-      chat: 4.41.0(ai@7.0.148(zod@3.25.76))(zod@3.25.76)
+      chat: 4.41.0(ai@7.0.148(zod@4.6.7))(zod@4.6.7)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
       fastq: 1.20.1
       gray-matter: 4.0.3
       hono: 4.13.9
-      hono-openapi: 1.3.3(hono@4.13.9)(zod@3.25.76)
+      hono-openapi: 1.3.3(hono@4.13.9)(zod@4.6.7)
       ignore: 7.0.6
       jpeg-js: 0.4.4
       json-schema: 0.4.0
@@ -3141,7 +3097,7 @@ snapshots:
       re2js: 2.8.6
       ws: 8.22.0
       xxhash-wasm: 1.1.0
-      zod: 3.25.76
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@grpc/grpc-js'
@@ -3161,27 +3117,27 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@mastra/core@1.77.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.77.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.54(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@4.6.7)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.54(zod@4.6.7)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.14'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.22'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.14(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.14(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
-      chat: 4.41.0(ai@7.0.148(zod@3.25.76))(zod@3.25.76)
+      chat: 4.41.0(ai@7.0.148(zod@4.6.7))(zod@4.6.7)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
       fastq: 1.20.1
       gray-matter: 4.0.3
       hono: 4.13.9
-      hono-openapi: 1.3.3(hono@4.13.9)(zod@3.25.76)
+      hono-openapi: 1.3.3(hono@4.13.9)(zod@4.6.7)
       ignore: 7.0.6
       jpeg-js: 0.4.4
       json-schema: 0.4.0
@@ -3193,7 +3149,7 @@ snapshots:
       re2js: 2.8.6
       ws: 8.22.0
       xxhash-wasm: 1.1.0
-      zod: 3.25.76
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@grpc/grpc-js'
@@ -3213,27 +3169,27 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@mastra/core@1.78.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.78.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.54(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.40(zod@4.6.7)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.54(zod@4.6.7)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.3'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.14'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.22'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.15(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.15(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
-      chat: 4.41.0(ai@7.0.148(zod@3.25.76))(zod@3.25.76)
+      chat: 4.41.0(ai@7.0.148(zod@4.6.7))(zod@4.6.7)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
       fastq: 1.20.1
       gray-matter: 4.0.3
       hono: 4.13.9
-      hono-openapi: 1.3.3(hono@4.13.9)(zod@3.25.76)
+      hono-openapi: 1.3.3(hono@4.13.9)(zod@4.6.7)
       ignore: 7.0.6
       jpeg-js: 0.4.4
       json-schema: 0.4.0
@@ -3245,7 +3201,7 @@ snapshots:
       re2js: 2.8.6
       ws: 8.22.0
       xxhash-wasm: 1.1.0
-      zod: 3.25.76
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@grpc/grpc-js'
@@ -3265,26 +3221,26 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@mastra/core@1.79.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)':
+  '@mastra/core@1.79.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)':
     dependencies:
       '@a2a-js/sdk-v0_3': '@a2a-js/sdk@0.3.14(express@5.2.1)'
       '@a2a-js/sdk-v1': '@a2a-js/sdk@1.0.1(express@5.2.1)'
-      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.61(zod@3.25.76)'
-      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.62(zod@3.25.76)'
+      '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.61(zod@4.6.7)'
+      '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.62(zod@4.6.7)'
       '@ai-sdk/provider-v5': '@ai-sdk/provider@2.0.5'
       '@ai-sdk/provider-v6': '@ai-sdk/provider@3.0.19'
       '@ai-sdk/provider-v7': '@ai-sdk/provider@4.0.29'
       '@isaacs/ttlcache': 2.1.5
       '@lukeed/uuid': 2.0.1
-      '@mastra/schema-compat': 1.3.16(zod@3.25.76)
+      '@mastra/schema-compat': 1.3.16(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
-      chat: 4.41.0(ai@7.0.148(zod@3.25.76))(zod@3.25.76)
+      chat: 4.41.0(ai@7.0.148(zod@4.6.7))(zod@4.6.7)
       croner: 10.0.1
       dotenv: 17.4.2
       execa: 9.6.1
       fastq: 1.20.1
       hono: 4.13.9
-      hono-openapi: 1.3.3(hono@4.13.9)(zod@3.25.76)
+      hono-openapi: 1.3.3(hono@4.13.9)(zod@4.6.7)
       ignore: 7.0.6
       jpeg-js: 0.4.4
       json-schema: 0.4.0
@@ -3297,7 +3253,7 @@ snapshots:
       ws: 8.22.0
       xxhash-wasm: 1.1.0
       yaml: 2.9.1
-      zod: 3.25.76
+      zod: 4.6.7
     transitivePeerDependencies:
       - '@bufbuild/protobuf'
       - '@grpc/grpc-js'
@@ -3317,10 +3273,10 @@ snapshots:
       - zod-openapi
       - zod-to-json-schema
 
-  '@mastra/memory@1.30.0(@mastra/core@1.67.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/memory@1.30.0(@mastra/core@1.67.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.67.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
-      '@mastra/schema-compat': 1.3.10(zod@4.6.5)
+      '@mastra/core': 1.67.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
+      '@mastra/schema-compat': 1.3.10(zod@4.6.7)
       async-mutex: 0.5.0
       diff: 8.0.4
       json-schema: 0.4.0
@@ -3328,167 +3284,167 @@ snapshots:
       probe-image-size: 7.4.0
       tokenx: 1.3.0
       xxhash-wasm: 1.1.0
-      zod: 4.6.5
+      zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
 
-  '@mastra/memory@1.31.0(@mastra/core@1.68.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/memory@1.31.0(@mastra/core@1.68.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.68.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
-      '@mastra/schema-compat': 1.3.11(zod@4.6.5)
+      '@mastra/core': 1.68.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
+      '@mastra/schema-compat': 1.3.11(zod@4.6.7)
       async-mutex: 0.5.0
       diff: 8.0.4
       json-schema: 0.4.0
       lru-cache: 11.5.2
       probe-image-size: 7.4.0
       xxhash-wasm: 1.1.0
-      zod: 4.6.5
+      zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
 
-  '@mastra/memory@1.31.0(@mastra/core@1.69.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/memory@1.31.0(@mastra/core@1.69.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.69.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
-      '@mastra/schema-compat': 1.3.11(zod@4.6.5)
+      '@mastra/core': 1.69.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
+      '@mastra/schema-compat': 1.3.11(zod@4.6.7)
       async-mutex: 0.5.0
       diff: 8.0.4
       json-schema: 0.4.0
       lru-cache: 11.5.2
       probe-image-size: 7.4.0
       xxhash-wasm: 1.1.0
-      zod: 4.6.5
+      zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
 
-  '@mastra/memory@1.32.0(@mastra/core@1.70.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/memory@1.32.0(@mastra/core@1.70.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.70.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
-      '@mastra/schema-compat': 1.3.11(zod@4.6.5)
+      '@mastra/core': 1.70.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
+      '@mastra/schema-compat': 1.3.11(zod@4.6.7)
       async-mutex: 0.5.0
       diff: 8.0.4
       json-schema: 0.4.0
       lru-cache: 11.5.2
       probe-image-size: 7.4.0
       xxhash-wasm: 1.1.0
-      zod: 4.6.5
+      zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
 
-  '@mastra/memory@1.32.1(@mastra/core@1.71.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/memory@1.32.1(@mastra/core@1.71.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.71.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
-      '@mastra/schema-compat': 1.3.11(zod@4.6.5)
+      '@mastra/core': 1.71.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
+      '@mastra/schema-compat': 1.3.11(zod@4.6.7)
       async-mutex: 0.5.0
       diff: 8.0.4
       json-schema: 0.4.0
       lru-cache: 11.5.2
       probe-image-size: 7.4.0
       xxhash-wasm: 1.1.0
-      zod: 4.6.5
+      zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
 
-  '@mastra/memory@1.33.0(@mastra/core@1.72.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/memory@1.33.0(@mastra/core@1.72.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.72.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
-      '@mastra/schema-compat': 1.3.12(zod@4.6.5)
+      '@mastra/core': 1.72.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
+      '@mastra/schema-compat': 1.3.12(zod@4.6.7)
       async-mutex: 0.5.0
       diff: 8.0.4
       json-schema: 0.4.0
       lru-cache: 11.5.2
       probe-image-size: 7.4.0
       xxhash-wasm: 1.1.0
-      zod: 4.6.5
+      zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
 
-  '@mastra/memory@1.34.0(@mastra/core@1.73.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/memory@1.34.0(@mastra/core@1.73.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.73.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
-      '@mastra/schema-compat': 1.3.13(zod@4.6.5)
+      '@mastra/core': 1.73.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
+      '@mastra/schema-compat': 1.3.13(zod@4.6.7)
       async-mutex: 0.5.0
       diff: 8.0.4
       json-schema: 0.4.0
       lru-cache: 11.5.2
       probe-image-size: 7.4.0
       xxhash-wasm: 1.1.0
-      zod: 4.6.5
+      zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
 
-  '@mastra/memory@1.35.0(@mastra/core@1.74.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/memory@1.35.0(@mastra/core@1.74.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.74.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
-      '@mastra/schema-compat': 1.3.13(zod@4.6.5)
+      '@mastra/core': 1.74.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
+      '@mastra/schema-compat': 1.3.13(zod@4.6.7)
       async-mutex: 0.5.0
       diff: 8.0.4
       json-schema: 0.4.0
       lru-cache: 11.5.2
       probe-image-size: 7.4.0
       xxhash-wasm: 1.1.0
-      zod: 4.6.5
+      zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
 
-  '@mastra/memory@1.36.0(@mastra/core@1.75.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/memory@1.36.0(@mastra/core@1.75.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.75.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
-      '@mastra/schema-compat': 1.3.13(zod@4.6.5)
+      '@mastra/core': 1.75.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
+      '@mastra/schema-compat': 1.3.13(zod@4.6.7)
       async-mutex: 0.5.0
       diff: 8.0.4
       json-schema: 0.4.0
       lru-cache: 11.5.2
       probe-image-size: 7.4.0
       xxhash-wasm: 1.1.0
-      zod: 4.6.5
+      zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
 
-  '@mastra/memory@1.37.0(@mastra/core@1.76.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/memory@1.37.0(@mastra/core@1.76.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.76.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
-      '@mastra/schema-compat': 1.3.13(zod@4.6.5)
+      '@mastra/core': 1.76.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
+      '@mastra/schema-compat': 1.3.13(zod@4.6.7)
       async-mutex: 0.5.0
       diff: 8.0.4
       json-schema: 0.4.0
       lru-cache: 11.5.2
       probe-image-size: 7.4.0
       xxhash-wasm: 1.1.0
-      zod: 4.6.5
+      zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
 
-  '@mastra/memory@1.37.1(@mastra/core@1.77.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/memory@1.37.1(@mastra/core@1.77.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.77.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
-      '@mastra/schema-compat': 1.3.14(zod@4.6.5)
+      '@mastra/core': 1.77.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
+      '@mastra/schema-compat': 1.3.14(zod@4.6.7)
       async-mutex: 0.5.0
       diff: 8.0.4
       json-schema: 0.4.0
       lru-cache: 11.5.2
       probe-image-size: 7.4.0
       xxhash-wasm: 1.1.0
-      zod: 4.6.5
+      zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
 
-  '@mastra/memory@1.38.0(@mastra/core@1.78.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/memory@1.38.0(@mastra/core@1.78.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.78.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
-      '@mastra/schema-compat': 1.3.15(zod@4.6.5)
+      '@mastra/core': 1.78.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
+      '@mastra/schema-compat': 1.3.15(zod@4.6.7)
       async-mutex: 0.5.0
       diff: 8.0.4
       json-schema: 0.4.0
       lru-cache: 11.5.2
       probe-image-size: 7.4.0
       xxhash-wasm: 1.1.0
-      zod: 4.6.5
+      zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
 
-  '@mastra/memory@1.39.0(@mastra/core@1.79.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/memory@1.39.0(@mastra/core@1.79.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.79.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      '@mastra/core': 1.79.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       '@mastra/schema-compat': 1.3.16(zod@4.6.7)
       async-mutex: 0.5.0
       diff: 8.0.4
@@ -3500,9 +3456,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@mastra/pg@1.25.0(@mastra/core@1.67.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/pg@1.25.0(@mastra/core@1.67.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.67.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      '@mastra/core': 1.67.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       async-mutex: 0.5.0
       pg: 8.23.0
       pg-connection-string: 2.14.0
@@ -3510,9 +3466,9 @@ snapshots:
     transitivePeerDependencies:
       - pg-native
 
-  '@mastra/pg@1.26.0(@mastra/core@1.68.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/pg@1.26.0(@mastra/core@1.68.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.68.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      '@mastra/core': 1.68.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       async-mutex: 0.5.0
       pg: 8.23.0
       pg-connection-string: 2.14.0
@@ -3520,9 +3476,9 @@ snapshots:
     transitivePeerDependencies:
       - pg-native
 
-  '@mastra/pg@1.26.0(@mastra/core@1.69.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/pg@1.26.0(@mastra/core@1.69.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.69.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      '@mastra/core': 1.69.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       async-mutex: 0.5.0
       pg: 8.23.0
       pg-connection-string: 2.14.0
@@ -3530,9 +3486,9 @@ snapshots:
     transitivePeerDependencies:
       - pg-native
 
-  '@mastra/pg@1.27.0(@mastra/core@1.70.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/pg@1.27.0(@mastra/core@1.70.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.70.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      '@mastra/core': 1.70.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       async-mutex: 0.5.0
       pg: 8.23.0
       pg-connection-string: 2.14.0
@@ -3540,9 +3496,9 @@ snapshots:
     transitivePeerDependencies:
       - pg-native
 
-  '@mastra/pg@1.27.1(@mastra/core@1.71.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/pg@1.27.1(@mastra/core@1.71.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.71.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      '@mastra/core': 1.71.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       async-mutex: 0.5.0
       pg: 8.23.0
       pg-connection-string: 2.14.0
@@ -3550,9 +3506,9 @@ snapshots:
     transitivePeerDependencies:
       - pg-native
 
-  '@mastra/pg@1.28.0(@mastra/core@1.72.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/pg@1.28.0(@mastra/core@1.72.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.72.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      '@mastra/core': 1.72.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       async-mutex: 0.5.0
       pg: 8.23.0
       pg-connection-string: 2.14.0
@@ -3560,9 +3516,9 @@ snapshots:
     transitivePeerDependencies:
       - pg-native
 
-  '@mastra/pg@1.28.1(@mastra/core@1.73.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/pg@1.28.1(@mastra/core@1.73.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.73.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      '@mastra/core': 1.73.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       async-mutex: 0.5.0
       pg: 8.23.0
       pg-connection-string: 2.14.0
@@ -3570,9 +3526,9 @@ snapshots:
     transitivePeerDependencies:
       - pg-native
 
-  '@mastra/pg@1.29.0(@mastra/core@1.74.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/pg@1.29.0(@mastra/core@1.74.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.74.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      '@mastra/core': 1.74.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       async-mutex: 0.5.0
       pg: 8.23.0
       pg-connection-string: 2.14.0
@@ -3580,9 +3536,9 @@ snapshots:
     transitivePeerDependencies:
       - pg-native
 
-  '@mastra/pg@1.30.0(@mastra/core@1.75.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/pg@1.30.0(@mastra/core@1.75.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.75.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      '@mastra/core': 1.75.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       async-mutex: 0.5.0
       pg: 8.23.0
       pg-connection-string: 2.14.0
@@ -3590,9 +3546,9 @@ snapshots:
     transitivePeerDependencies:
       - pg-native
 
-  '@mastra/pg@1.31.0(@mastra/core@1.76.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/pg@1.31.0(@mastra/core@1.76.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.76.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      '@mastra/core': 1.76.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       async-mutex: 0.5.0
       pg: 8.23.0
       pg-connection-string: 2.14.0
@@ -3600,9 +3556,9 @@ snapshots:
     transitivePeerDependencies:
       - pg-native
 
-  '@mastra/pg@1.31.1(@mastra/core@1.77.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/pg@1.31.1(@mastra/core@1.77.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.77.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      '@mastra/core': 1.77.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       async-mutex: 0.5.0
       pg: 8.23.0
       pg-connection-string: 2.14.0
@@ -3610,9 +3566,9 @@ snapshots:
     transitivePeerDependencies:
       - pg-native
 
-  '@mastra/pg@1.31.2(@mastra/core@1.78.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/pg@1.31.2(@mastra/core@1.78.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.78.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      '@mastra/core': 1.78.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       async-mutex: 0.5.0
       pg: 8.23.0
       pg-connection-string: 2.14.0
@@ -3620,9 +3576,9 @@ snapshots:
     transitivePeerDependencies:
       - pg-native
 
-  '@mastra/pg@1.32.0(@mastra/core@1.79.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76))':
+  '@mastra/pg@1.32.0(@mastra/core@1.79.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7))':
     dependencies:
-      '@mastra/core': 1.79.0(ai@7.0.148(zod@3.25.76))(express@5.2.1)(zod@3.25.76)
+      '@mastra/core': 1.79.0(ai@7.0.148(zod@4.6.7))(express@5.2.1)(zod@4.6.7)
       async-mutex: 0.5.0
       pg: 8.23.0
       pg-connection-string: 2.14.0
@@ -3630,82 +3586,40 @@ snapshots:
     transitivePeerDependencies:
       - pg-native
 
-  '@mastra/schema-compat@1.3.10(zod@3.25.76)':
+  '@mastra/schema-compat@1.3.10(zod@4.6.7)':
     dependencies:
       json-schema-to-zod: 2.8.1
-      zod: 3.25.76
+      zod: 4.6.7
       zod-from-json-schema: 0.5.6
 
-  '@mastra/schema-compat@1.3.10(zod@4.6.5)':
+  '@mastra/schema-compat@1.3.11(zod@4.6.7)':
     dependencies:
       json-schema-to-zod: 2.8.1
-      zod: 4.6.5
+      zod: 4.6.7
       zod-from-json-schema: 0.5.6
 
-  '@mastra/schema-compat@1.3.11(zod@3.25.76)':
+  '@mastra/schema-compat@1.3.12(zod@4.6.7)':
     dependencies:
       json-schema-to-zod: 2.8.1
-      zod: 3.25.76
+      zod: 4.6.7
       zod-from-json-schema: 0.5.6
 
-  '@mastra/schema-compat@1.3.11(zod@4.6.5)':
+  '@mastra/schema-compat@1.3.13(zod@4.6.7)':
     dependencies:
       json-schema-to-zod: 2.8.1
-      zod: 4.6.5
+      zod: 4.6.7
       zod-from-json-schema: 0.5.6
 
-  '@mastra/schema-compat@1.3.12(zod@3.25.76)':
+  '@mastra/schema-compat@1.3.14(zod@4.6.7)':
     dependencies:
       json-schema-to-zod: 2.8.1
-      zod: 3.25.76
+      zod: 4.6.7
       zod-from-json-schema: 0.5.6
 
-  '@mastra/schema-compat@1.3.12(zod@4.6.5)':
+  '@mastra/schema-compat@1.3.15(zod@4.6.7)':
     dependencies:
       json-schema-to-zod: 2.8.1
-      zod: 4.6.5
-      zod-from-json-schema: 0.5.6
-
-  '@mastra/schema-compat@1.3.13(zod@3.25.76)':
-    dependencies:
-      json-schema-to-zod: 2.8.1
-      zod: 3.25.76
-      zod-from-json-schema: 0.5.6
-
-  '@mastra/schema-compat@1.3.13(zod@4.6.5)':
-    dependencies:
-      json-schema-to-zod: 2.8.1
-      zod: 4.6.5
-      zod-from-json-schema: 0.5.6
-
-  '@mastra/schema-compat@1.3.14(zod@3.25.76)':
-    dependencies:
-      json-schema-to-zod: 2.8.1
-      zod: 3.25.76
-      zod-from-json-schema: 0.5.6
-
-  '@mastra/schema-compat@1.3.14(zod@4.6.5)':
-    dependencies:
-      json-schema-to-zod: 2.8.1
-      zod: 4.6.5
-      zod-from-json-schema: 0.5.6
-
-  '@mastra/schema-compat@1.3.15(zod@3.25.76)':
-    dependencies:
-      json-schema-to-zod: 2.8.1
-      zod: 3.25.76
-      zod-from-json-schema: 0.5.6
-
-  '@mastra/schema-compat@1.3.15(zod@4.6.5)':
-    dependencies:
-      json-schema-to-zod: 2.8.1
-      zod: 4.6.5
-      zod-from-json-schema: 0.5.6
-
-  '@mastra/schema-compat@1.3.16(zod@3.25.76)':
-    dependencies:
-      json-schema-to-zod: 2.8.1
-      zod: 3.25.76
+      zod: 4.6.7
       zod-from-json-schema: 0.5.6
 
   '@mastra/schema-compat@1.3.16(zod@4.6.7)':
@@ -3722,12 +3636,12 @@ snapshots:
 
   '@modelcontextprotocol/core@2.0.0':
     dependencies:
-      zod: 4.6.5
+      zod: 4.6.7
 
   '@modelcontextprotocol/server@2.0.0':
     dependencies:
       '@modelcontextprotocol/core': 2.0.0
-      zod: 4.6.5
+      zod: 4.6.7
 
   '@napi-rs/wasm-runtime@1.2.5(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)':
     dependencies:
@@ -3831,21 +3745,21 @@ snapshots:
     dependencies:
       escape-string-regexp: 5.0.0
 
-  '@standard-community/standard-json@0.3.6(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(zod@3.25.76)':
+  '@standard-community/standard-json@0.3.6(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(zod@4.6.7)':
     dependencies:
       '@standard-schema/spec': 1.1.0
       '@types/json-schema': 7.0.15
       quansync: 0.2.11
     optionalDependencies:
-      zod: 3.25.76
+      zod: 4.6.7
 
-  '@standard-community/standard-openapi@0.2.10(@standard-community/standard-json@0.3.6(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(zod@3.25.76))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(zod@3.25.76)':
+  '@standard-community/standard-openapi@0.2.10(@standard-community/standard-json@0.3.6(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(zod@4.6.7))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(zod@4.6.7)':
     dependencies:
-      '@standard-community/standard-json': 0.3.6(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(zod@3.25.76)
+      '@standard-community/standard-json': 0.3.6(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
       openapi-types: 12.1.3
     optionalDependencies:
-      zod: 3.25.76
+      zod: 4.6.7
 
   '@standard-schema/spec@1.1.0': {}
 
@@ -3950,14 +3864,6 @@ snapshots:
 
   agent-base@7.1.4: {}
 
-  ai@7.0.148(zod@3.25.76):
-    dependencies:
-      '@ai-sdk/gateway': 4.0.121(zod@3.25.76)
-      '@ai-sdk/provider': 4.0.31
-      '@ai-sdk/provider-utils': 5.0.65(zod@3.25.76)
-      zod: 3.25.76
-    optional: true
-
   ai@7.0.148(zod@4.6.7):
     dependencies:
       '@ai-sdk/gateway': 4.0.121(zod@4.6.7)
@@ -4053,7 +3959,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  chat@4.41.0(ai@7.0.148(zod@3.25.76))(zod@3.25.76):
+  chat@4.41.0(ai@7.0.148(zod@4.6.7))(zod@4.6.7):
     dependencies:
       '@workflow/serde': 4.1.0-beta.2
       mdast-util-to-string: 4.0.0
@@ -4063,8 +3969,8 @@ snapshots:
       remend: 1.3.0
       unified: 11.0.5
     optionalDependencies:
-      ai: 7.0.148(zod@3.25.76)
-      zod: 3.25.76
+      ai: 7.0.148(zod@4.6.7)
+      zod: 4.6.7
     transitivePeerDependencies:
       - supports-color
 
@@ -4312,11 +4218,11 @@ snapshots:
       function-bind: 1.1.2
     optional: true
 
-  hono-openapi@1.3.3(hono@4.13.9)(zod@3.25.76):
+  hono-openapi@1.3.3(hono@4.13.9)(zod@4.6.7):
     dependencies:
       '@hono/standard-validator': 0.4.0(@standard-schema/spec@1.1.0)(hono@4.13.9)
-      '@standard-community/standard-json': 0.3.6(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(zod@3.25.76)
-      '@standard-community/standard-openapi': 0.2.10(@standard-community/standard-json@0.3.6(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(zod@3.25.76))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(zod@3.25.76)
+      '@standard-community/standard-json': 0.3.6(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(zod@4.6.7)
+      '@standard-community/standard-openapi': 0.2.10(@standard-community/standard-json@0.3.6(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(zod@4.6.7))(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(zod@4.6.7)
       '@standard-schema/spec': 1.1.0
       '@types/json-schema': 7.0.15
       hono: 4.13.9
@@ -5326,11 +5232,7 @@ snapshots:
 
   zod-from-json-schema@0.5.6:
     dependencies:
-      zod: 4.6.5
-
-  zod@3.25.76: {}
-
-  zod@4.6.5: {}
+      zod: 4.6.7
 
   zod@4.6.7: {}
 
