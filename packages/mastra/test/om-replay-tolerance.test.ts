@@ -29,6 +29,7 @@ import {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 type Observation = { messageTokens: number; bufferTokens: number | false };
@@ -40,6 +41,7 @@ function setup(options: {
   evidenceRepeats?: number | (() => number);
   beforeActorStep?: (step: number) => Promise<void> | void;
   missingObservationalMemoryResults?: "fail" | "live";
+  onActorCall?: (call: number) => void;
 }) {
   const store = new InMemoryStore();
   const domain = store.stores.memory;
@@ -108,6 +110,7 @@ function setup(options: {
     provider: "fixture",
     doStream: async ({ prompt }) => {
       actorPrompts.push(JSON.stringify(prompt));
+      options.onActorCall?.(actorPrompts.length);
       step += 1;
       await options.beforeActorStep?.(step);
       if (step > options.toolSteps()) {
@@ -282,7 +285,10 @@ async function replay(
  */
 async function replaySlowObserverBaseline(
   evidenceRepeats: number,
-  replayStallMs = 0,
+  {
+    onActorCall,
+    replayStallMs = 0,
+  }: { onActorCall?: (call: number) => void; replayStallMs?: number } = {},
 ) {
   let delayMs = 300;
   let stallMs = 0;
@@ -291,6 +297,7 @@ async function replaySlowObserverBaseline(
     observe: () => new Promise((resolve) => setTimeout(resolve, delayMs)),
     toolSteps: () => 5,
     evidenceRepeats,
+    onActorCall,
     beforeActorStep: (step) =>
       step === 3 && stallMs > 0
         ? new Promise((resolve) => setTimeout(resolve, stallMs))
@@ -342,8 +349,23 @@ it("replays a baseline whose slow observer merged buffer rounds without live OM 
   await replaySlowObserverBaseline(34);
 });
 
+it("replays a baseline whose first tool call came a minute after the user message", async () => {
+  // Mastra's observer prompt labels the tool call with its time because its
+  // minute differs from the message's. The replay runs within one minute, so
+  // its prompt has no such label.
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-26T22:43:59Z") });
+  let shifted = false;
+  await replaySlowObserverBaseline(34, {
+    onActorCall: () => {
+      if (shifted) return;
+      shifted = true;
+      vi.setSystemTime(Date.now() + 60_000);
+    },
+  });
+});
+
 it("replays a slow-observer baseline whose replay stalls longer than the observer took", async () => {
-  await replaySlowObserverBaseline(34, 600);
+  await replaySlowObserverBaseline(34, { replayStallMs: 600 });
 });
 
 it("keeps a baseline that ended just under the observation threshold unobserved in replay", async () => {
