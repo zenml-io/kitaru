@@ -34,7 +34,12 @@ from kitaru.api_models.v1.session_node import (
 from kitaru.cli.insight_report import REPORT_SECTION_KEY as CORE_SECTION_KEY
 from kitaru.worker.task_runner import MAX_RESULT_BYTES
 from kitaru_model_swap import analyzer as analyzer_module
-from kitaru_model_swap.calls import Collection, RecordedCall, reservation_usage
+from kitaru_model_swap.calls import (
+    Collection,
+    RecordedCall,
+    reservation_usage,
+    sample_calls,
+)
 from kitaru_model_swap.endpoint import Usage, read_usage
 from kitaru_model_swap.normalize import (
     RecordedOutcome,
@@ -219,6 +224,45 @@ def test_new_groups_beyond_the_sample_size_are_counted_not_kept(
 
     assert len(collection.calls) == 1
     assert collection.group_seen.total() == 33
+
+
+def test_sample_spreads_across_the_import_and_ignores_fetch_order(
+    quickstart_sessions: list[Any],
+) -> None:
+    sessions = []
+    for copy in range(6):
+        for item in quickstart_sessions:
+            session_id = uuid.uuid5(item.session.id, str(copy))
+            nodes = [
+                node.model_copy(
+                    update={
+                        "id": uuid.uuid5(node.id, str(copy)),
+                        "session_id": session_id,
+                    }
+                )
+                for node in item.nodes
+            ]
+            session = item.session.model_copy(update={"id": session_id})
+            sessions.append(
+                item.model_copy(update={"session": session, "nodes": nodes})
+            )
+    params = ModelSwapParams.model_validate(
+        {"candidates": [REFERENCE], "max_calls": 20}
+    )
+
+    def sample(ordered: list[Any]) -> list[RecordedCall]:
+        collection = Collection(max_per_group=params.max_calls)
+        for session in ordered:
+            collection.add_session(session, params)
+        return sample_calls(collection.calls, params.max_calls)
+
+    sampled = sample(sessions)
+    first_ten = {session.session.id for session in sessions[:10]}
+    sampled_sessions = {call.session_id for call in sampled}
+
+    assert len(sampled_sessions) > 10
+    assert len(sampled_sessions - first_ten) > len(sampled_sessions) // 2
+    assert {c.node_id for c in sample(sessions[::-1])} == {c.node_id for c in sampled}
 
 
 async def test_failed_calls_do_not_lower_the_cost_per_call(

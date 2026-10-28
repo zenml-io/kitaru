@@ -451,8 +451,11 @@ async def test_no_equivalent_names_finalists_instead_of_a_cheapest(
     best = {c["goal"]: c for c in report(insights)["best_for"]}
 
     assert best["Closest to today"]["candidate"] == "cheap-open-model"
-    assert "Cheapest" not in best
-    assert "Fastest" not in best
+    assert best["Cheapest"]["candidate"] == ""
+    assert best["Fastest"]["candidate"] == ""
+    assert (
+        "No candidate is within 10 points of today's model" in (best["Cheapest"]["why"])
+    )
     assert best["Worth a full replay"]["candidate"] == "cheap-open-model"
     assert "cannot name an equivalent" in best["Worth a full replay"]["why"]
 
@@ -495,7 +498,8 @@ async def test_noisy_reference_names_finalists_only(
     )
     best = {c["goal"]: c for c in report(insights)["best_for"]}
 
-    assert "Cheapest" not in best
+    assert best["Cheapest"]["candidate"] == ""
+    assert "matches its own recording only" in best["Cheapest"]["why"]
     assert best["Worth a full replay"]["candidate"] == "cheap-open-model"
     assert "matches its own recording only" in best["Worth a full replay"]["why"]
 

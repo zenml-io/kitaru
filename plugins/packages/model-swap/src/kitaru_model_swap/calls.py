@@ -13,6 +13,8 @@
 #  limitations under the License.
 """Collect and sample the recorded model calls of an import."""
 
+import hashlib
+import heapq
 import json
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -35,6 +37,8 @@ _CHARS_PER_TOKEN = 4
 _DEFAULT_OUTPUT_TOKENS = 500
 _RESERVE_OUTPUT_FACTOR = 4
 _MIN_RESERVED_OUTPUT = 2048
+# Fixed so reruns over the same import sample the same calls.
+_SAMPLE_SEED = b"kitaru-model-swap-sample-v1"
 
 
 @dataclass(frozen=True)
@@ -55,11 +59,12 @@ class RecordedCall:
 class Collection:
     """Replayable calls plus coverage and volume counts for an import.
 
-    Sampling visits groups of node name and model round-robin, so it never
-    takes more than `max_per_group` calls from one group, nor any call from
-    a group first seen after `max_per_group` groups. Such calls are counted
-    but not kept. `group_seen` counts every replayable call per group, so
-    per-call costs can be weighted by how often each kind of call occurs.
+    Each group of node name and model keeps the `max_per_group` calls with
+    the lowest sample rank, a seeded random draw across the whole import
+    rather than its first sessions. Calls beyond that, and every call from a
+    group first seen after `max_per_group` groups, are counted but not kept.
+    `group_seen` counts every replayable call per group, so per-call costs
+    can be weighted by how often each kind of call occurs.
     """
 
     max_per_group: int
@@ -72,7 +77,10 @@ class Collection:
     first_started: datetime | None = None
     last_started: datetime | None = None
     group_seen: Counter[tuple[str, str | None]] = field(default_factory=Counter)
-    _group_sizes: Counter[tuple[str, str | None]] = field(default_factory=Counter)
+    # Per group, a max-heap of (-rank, index into `calls`) of the kept calls.
+    _kept: dict[tuple[str, str | None], list[tuple[int, int]]] = field(
+        default_factory=dict
+    )
 
     def add_session(
         self, session: SessionWithNodesResponse, params: ModelSwapParams
@@ -102,12 +110,26 @@ class Collection:
             self.replayable[result.schema_source] += 1
             group = (node.name, node.model or node.requested_model)
             self.group_seen[group] += 1
-            kept = group in self._group_sizes
-            if not kept and len(self._group_sizes) >= self.max_per_group:
-                continue
-            if self._group_sizes[group] < self.max_per_group:
-                self._group_sizes[group] += 1
+            kept = self._kept.get(group)
+            if kept is None:
+                if len(self._kept) >= self.max_per_group:
+                    continue
+                kept = self._kept[group] = []
+            rank = _get_sample_rank(node.id)
+            if len(kept) < self.max_per_group:
+                heapq.heappush(kept, (-rank, len(self.calls)))
                 self.calls.append(_recorded_call(session.session.id, node, result))
+            elif rank < -kept[0][0]:
+                # Reuse the slot of the highest-ranked kept call it displaces.
+                index = kept[0][1]
+                heapq.heapreplace(kept, (-rank, index))
+                self.calls[index] = _recorded_call(session.session.id, node, result)
+
+
+def _get_sample_rank(node_id: UUID) -> int:
+    """Draw a seeded random rank for a call, independent of fetch order."""
+    digest = hashlib.sha256(_SAMPLE_SEED + node_id.bytes).digest()
+    return int.from_bytes(digest[:8])
 
 
 def _recorded_call(
@@ -194,11 +216,12 @@ def reserved_output_tokens(
 def sample_calls(calls: list[RecordedCall], max_calls: int) -> list[RecordedCall]:
     """Pick up to `max_calls`, spread evenly across node names and models.
 
-    Groups are visited round-robin in recorded order, so a small sample still
-    covers every kind of call and the selection is repeatable.
+    Groups are visited round-robin, so a small sample still covers every kind
+    of call. Within a group, calls are taken by their seeded sample rank, so
+    the selection is spread across the import and repeatable.
     """
     groups: dict[tuple[str, str | None], list[RecordedCall]] = defaultdict(list)
-    for call in calls:
+    for call in sorted(calls, key=lambda call: _get_sample_rank(call.node_id)):
         groups[(call.node_name, call.model)].append(call)
     queues = list(groups.values())
     sampled: list[RecordedCall] = []

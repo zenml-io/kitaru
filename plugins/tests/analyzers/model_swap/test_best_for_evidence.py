@@ -18,8 +18,10 @@ from typing import Any
 
 import httpx
 
+from kitaru_model_swap.html import render_section
 from kitaru_model_swap.params import ModelSwapParams
 from kitaru_model_swap.pricing import resolve_price
+from kitaru_model_swap.report import render_markdown
 from kitaru_model_swap.runner import CallResult, Runner
 
 from .test_mix_weighting import call, candidate, reply, report
@@ -124,8 +126,13 @@ def test_comparability_uses_the_calls_both_answered() -> None:
     assert cheap["tool_choice_rate"] == 0.9059
     assert cheap["paired"] == {"calls": 70, "rate": 0.8857, "reference_rate": 1.0}
     assert goals(built)["Closest to today"] == "cheap"
-    assert "Cheapest" not in goals(built)
-    assert "Fastest" not in goals(built)
+    assert goals(built)["Cheapest"] == ""
+    assert goals(built)["Fastest"] == ""
+    rows = {row["goal"]: row["why"] for row in built["best_for"]}
+    assert rows["Cheapest"].startswith(
+        "No candidate is within 10 points of today's model (closest: cheap at "
+        "89% vs today's model's own 100% on the calls both answered)"
+    )
 
 
 def test_rankings_show_how_many_calls_were_answered() -> None:
@@ -137,3 +144,62 @@ def test_rankings_show_how_many_calls_were_answered() -> None:
 
     assert "(answered 30 of 30 calls)" in rows["Closest to today"]
     assert "(answered 30 of 30 calls)" in rows["Cheapest"]
+
+
+def screen_against_a_cheap_reference(close_cost: str) -> dict[str, Any]:
+    """Screen a cheap reference, a close candidate, and a cheaper distant one."""
+    calls = [call(i) for i in range(20)]
+    results = [reply(c, "reference", "0.1") for c in calls]
+    for i, c in enumerate(calls):
+        results.append(
+            replace(reply(c, "close", close_cost), agreement="different_tool")
+            if i == 0
+            else reply(c, "close", close_cost)
+        )
+        results.append(
+            replace(reply(c, "distant", "0.01"), agreement="different_tool")
+            if i % 2
+            else reply(c, "distant", "0.01")
+        )
+    return report(
+        calls,
+        results,
+        candidates=[
+            candidate("reference", reference=True),
+            candidate("close"),
+            candidate("distant"),
+        ],
+    )
+
+
+def test_reference_is_never_named_cheapest() -> None:
+    # Only "close" is within 10 points of today's model, and it costs more than
+    # today's model; "distant" is cheaper but falls outside the band.
+    built = screen_against_a_cheap_reference(close_cost="1")
+    rows = {row["goal"]: row for row in built["best_for"]}
+
+    assert all(row["candidate"] != "reference" for row in built["best_for"])
+    assert rows["Cheapest"]["candidate"] == ""
+    assert rows["Cheapest"]["why"] == (
+        "No candidate within 10 points of today's model costs less than it "
+        "($0.10000000 per call). Cheaper candidates fall outside that band "
+        "(cheapest: distant at $0.01000000 per call, 50% vs today's model's own "
+        "100% on the calls both answered). Decide with full replays."
+    )
+    # Every candidate answers in 1s, so none is faster than today's model.
+    assert rows["Fastest"]["candidate"] == ""
+    assert "faster than today's model" in rows["Fastest"]["why"]
+    assert "- **Cheapest:** No pick. No candidate within" in render_markdown(built)
+    assert "<td>No pick</td>" in render_section(built, None)
+
+
+def test_cheaper_comparable_candidate_is_still_picked() -> None:
+    built = screen_against_a_cheap_reference(close_cost="0.05")
+    rows = {row["goal"]: row for row in built["best_for"]}
+
+    assert rows["Cheapest"]["candidate"] == "close"
+    assert rows["Cheapest"]["why"] == (
+        "$0.05000000 per call against $0.10000000 today (answered 20 of 20 "
+        "calls), within 10 points of today's model: 95% vs today's model's own "
+        "100% on the calls both answered."
+    )

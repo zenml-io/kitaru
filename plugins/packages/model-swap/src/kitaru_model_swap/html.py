@@ -94,7 +94,7 @@ def _best_for(choices: list[dict[str, str]]) -> str:
         "decide.</p>"
         + _table(
             ["Goal", "Candidate", "Why"],
-            [[c["goal"], c["candidate"], c["why"]] for c in choices],
+            [[c["goal"], c["candidate"] or "No pick", c["why"]] for c in choices],
         )
         + '<p class="muted">Quality here means matching your current model. '
         "Your verdicts on the disagreements below decide which answers are "
@@ -433,6 +433,7 @@ def _coverage(coverage: dict[str, Any]) -> str:
     """Show which recorded calls were replayed and why others were not."""
     rows = [
         ["Sessions", coverage["sessions"]],
+        ["Sessions sampled", coverage["sessions_sampled"]],
         ["Model calls seen", coverage["llm_calls_seen"]],
         ["Replayable with real tool schemas", coverage["replayable"]],
         ["Replayable only with inferred schemas", coverage["replayable_inferred"]],

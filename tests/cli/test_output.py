@@ -470,6 +470,83 @@ def test_human_values_preserve_literal_rich_markup_characters() -> None:
     assert "[bold red]literal[/bold red]" in stdout
 
 
+@pytest.mark.parametrize("command", ["worker.list", "worker.get"])
+@pytest.mark.parametrize(
+    ("scope", "expected"),
+    [
+        (
+            {
+                "claims": [
+                    {"kind": kind} for kind in ("importer", "analyzer", "evaluator")
+                ]
+            },
+            ("importer", "analyzer", "evaluator"),
+        ),
+        (
+            {
+                "claims": [
+                    {
+                        "kind": "agent",
+                        "agent_version_id": "019f0000-1111-7222-8333-444444444444",
+                    }
+                ],
+                "selectors": [
+                    {"key": "pool", "values": ["cpu", "gpu"], "required": True},
+                    {"key": "region", "values": [], "required": False},
+                ],
+                "job_id": "019f0000-1111-7222-8333-555555555555",
+            },
+            (
+                "agent=019f0000-1111-7222-8333-444444444444",
+                "pool in [cpu, gpu] (required)",
+                "region in [] (if present)",
+                "job=019f0000-1111-7222-8333-555555555555",
+            ),
+        ),
+    ],
+)
+def test_human_worker_scope_shows_claims_and_restrictions(
+    command: str, scope: dict[str, Any], expected: tuple[str, ...]
+) -> None:
+    """Restricted workers must not appear to claim every task."""
+    worker = {"id": "worker-id", "name": "utility", "status": "live", "scope": scope}
+    result = (
+        CommandResult(items=[worker])
+        if command == "worker.list"
+        else CommandResult(item=worker)
+    )
+    stdout, _ = _render_text(command, result, rich=True, columns=320)
+
+    for text in expected:
+        assert text in stdout
+    assert "all" not in stdout
+
+
+def test_human_status_shows_live_worker_scopes_and_heartbeat_meaning() -> None:
+    """Status distinguishes a worker heartbeat from its task claims."""
+    stdout, _ = _render_text(
+        "status",
+        CommandResult(
+            item={
+                "live_worker_count": 1,
+                "live_workers": [
+                    {
+                        "id": "worker-id",
+                        "name": "utility",
+                        "scope": {"claims": [{"kind": "importer"}]},
+                    }
+                ],
+            }
+        ),
+        rich=True,
+    )
+
+    assert "recent heartbeat" in stdout
+    assert "utility" in stdout
+    assert "worker-id" in stdout
+    assert "importer" in stdout
+
+
 def test_human_list_renders_empty_state_pagination_and_next_actions() -> None:
     """Human lists explain empty pages and expose exact continuation data."""
     stdout, _ = _render_text(
