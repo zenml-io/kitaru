@@ -3430,16 +3430,7 @@ async def experiment_run_list(
     _spec(
         ("experiment", "run", "get"),
         "Get an experiment run and its aggregate progress by exact UUID.",
-        parameters=(
-            ParameterSpec("RUN", "UUID", "argument", True, "Experiment-run ID."),
-            ParameterSpec(
-                "--aggregate",
-                "boolean",
-                "option",
-                False,
-                "Include pinned baseline and result evaluation aggregates.",
-            ),
-        ),
+        parameters=experiment_runs.GET_PARAMETERS,
         errors=_UUID_READ_ERRORS,
     ),
 )

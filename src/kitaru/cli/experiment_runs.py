@@ -36,6 +36,18 @@ from kitaru.cli.registration import (
     page_result,
     resolve_asset,
 )
+from kitaru.cli.schema import ParameterSpec
+
+GET_PARAMETERS = (
+    ParameterSpec("RUN", "UUID", "argument", True, "Experiment-run ID."),
+    ParameterSpec(
+        "--aggregate",
+        "boolean",
+        "option",
+        False,
+        "Include pinned baseline and result evaluation aggregates.",
+    ),
+)
 
 _TERMINAL_STATUSES = {
     ExperimentRunStatus.COMPLETED,
