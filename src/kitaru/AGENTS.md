@@ -35,8 +35,9 @@ Adding a new persistent public API resource named `Order` touches these places. 
 7. `server/adapters/db/repositories/order_repository.py`: SQL repository.
 8. `server/adapters/rest/mapping/orders.py`: DTO and filter conversions.
 9. `server/adapters/rest/routers/orders.py`: routes, registered in
-   `server/api/app.py`, service dependency added to
-   `server/adapters/rest/dependencies.py`.
+   `server/api/app.py`, service dependency added to the
+   `server/adapters/rest/dependencies` package as `rest/AGENTS.md`
+   describes.
 10. `api_models/v1/order.py`: request, list params, and response DTOs.
 11. `client/resources/orders.py`: SDK resource, registered in
     `client/api_client.py`.
