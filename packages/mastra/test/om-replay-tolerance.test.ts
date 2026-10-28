@@ -310,7 +310,10 @@ async function replaySlowObserverBaseline(
   const baselineContext = contextOf(fixture.actorPrompts.splice(0));
   // The slow observer was still running over the first evidence while the
   // actor read more, and its result covers the later evidence too.
-  expect(baselineContext).toContain("raw=2,3,4 observed=1");
+  // Newer Mastra can activate the first observation one actor step later.
+  expect(baselineContext).toContainEqual(
+    expect.stringMatching(/^raw=2,3,4(?:,5)? observed=1$/),
+  );
   delayMs = 0;
   stallMs = replayStallMs;
   await clearProcessBufferingState();
@@ -343,13 +346,16 @@ const JUST_UNDER_THRESHOLD: Record<string, number> = {
   "1.74": 30,
   "1.75": 30,
   "1.76": 30,
+  "1.77": 30,
+  "1.78": 30,
+  "1.79": 30,
 };
 
 it("replays a baseline whose slow observer merged buffer rounds without live OM calls", async () => {
   await replaySlowObserverBaseline(34);
 });
 
-it("replays a baseline whose first tool call came a minute after the user message", async () => {
+it("replays a baseline whose first tool call fell in the minute after the user message", async () => {
   // Mastra's observer prompt labels the tool call with its time because its
   // minute differs from the message's. The replay runs within one minute, so
   // its prompt has no such label.
@@ -359,7 +365,10 @@ it("replays a baseline whose first tool call came a minute after the user messag
     onActorCall: () => {
       if (shifted) return;
       shifted = true;
-      vi.setSystemTime(Date.now() + 60_000);
+      // Cross the minute with a short jump. Mastra 1.79 renews its 15-second
+      // thread lease on real timers, so a longer jump of the faked clock
+      // expires the lease and cancels the run.
+      vi.setSystemTime(Date.now() + 1_000);
     },
   });
 });

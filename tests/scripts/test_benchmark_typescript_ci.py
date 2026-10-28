@@ -30,6 +30,9 @@ CANONICAL = [
     "kitaru-mastra-compat-1.74",
     "kitaru-mastra-compat-1.75",
     "kitaru-mastra-compat-1.76",
+    "kitaru-mastra-compat-1.77",
+    "kitaru-mastra-compat-1.78",
+    "kitaru-mastra-compat-1.79",
     "kitaru-vercel-ai",
     *EXAMPLES,
 ]
