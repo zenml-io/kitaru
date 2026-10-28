@@ -16,7 +16,6 @@
 import pytest
 from pydantic import BaseModel, SecretStr
 
-from conftest import FakeBlobRepository, FakePluginRepository
 from kitaru.server.api import bootstrap
 from kitaru.server.api.bootstrap import (
     DEFAULT_PLUGIN_DEFINITIONS,
@@ -25,6 +24,7 @@ from kitaru.server.api.bootstrap import (
 )
 from kitaru.server.domain.names import RESERVED_NAMESPACE
 from kitaru.server.domain.plugin import PackagePluginSource, PluginKind
+from kitaru_test_support import FakeBlobRepository, FakePluginRepository
 
 
 class SampleConnection(BaseModel):

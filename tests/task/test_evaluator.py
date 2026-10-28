@@ -29,12 +29,6 @@ from task_fixtures import (
     start_task,
 )
 
-from conftest import (
-    create_agent_task,
-    create_agent_version,
-    create_evaluation_task,
-    create_job,
-)
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
@@ -59,6 +53,12 @@ from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind
 from kitaru.task import evaluator as evaluator_module
 from kitaru.task.evaluator import EvaluationError, SessionView, call_evaluator, run
+from kitaru_test_support import (
+    create_agent_task,
+    create_agent_version,
+    create_evaluation_task,
+    create_job,
+)
 
 
 @pytest.fixture

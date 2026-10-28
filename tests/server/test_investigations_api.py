@@ -20,14 +20,6 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeInvestigationRepository,
-    FakeSessionRepository,
-    create_agent,
-    create_session,
-    override_idempotency,
-)
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_investigation_service,
@@ -39,6 +31,14 @@ from kitaru.server.application.services.investigation_service import (
     InvestigationService,
 )
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeInvestigationRepository,
+    FakeSessionRepository,
+    create_agent,
+    create_session,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 DEFAULT_QUESTIONS = [{"key": "cause", "question": "What caused it?"}]
