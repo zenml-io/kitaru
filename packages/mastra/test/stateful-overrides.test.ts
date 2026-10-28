@@ -11,6 +11,7 @@ import {
   type MastraMemoryLease,
   MEMORY_REPLAY_KEY,
 } from "../src/memory.js";
+import { getMastraVersion } from "../src/stream-recording.js";
 import {
   createMemoryRuntime,
   RESOURCE,
@@ -316,7 +317,9 @@ it("finishes the native stream before delayed observation and finalizes replay l
           (node) =>
             node.name === "memory_mutation" &&
             (node.attributes as Record<string, unknown>).memory_method ===
-              "updateBufferedObservations",
+              (Number(getMastraVersion().split(".")[1]) >= 77
+                ? "appendBufferedObservations"
+                : "updateBufferedObservations"),
         ),
     ).toBe(true);
   } finally {
