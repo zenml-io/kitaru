@@ -1,17 +1,18 @@
-import { createHash } from "node:crypto";
 import type { JsonValue } from "@zenml-io/kitaru";
 import {
   MAX_MASTRA_REPLAY_ITEMS,
   MAX_MASTRA_REPLAY_JSON_BYTES,
-  redactUrlCredentials,
   type SecretKeyClassifier,
 } from "@zenml-io/kitaru/adapter";
 import { isCount } from "./attachment-tokens.js";
 import { decodeMemoryValue, encodeMemoryValue } from "./memory-snapshot.js";
+import {
+  getOMInputFingerprint,
+  type OMFingerprintFormat,
+} from "./om-fingerprint.js";
 import { MastraReplayReasonError } from "./replay-reasons.js";
 import {
   createInlineFileReader,
-  fileReference,
   type InlineFileReader,
 } from "./stateful-files.js";
 
@@ -172,102 +173,6 @@ export interface OMResultTapeOptions {
   readInlineFile?: InlineFileReader;
   /** Which keys in a recorded result name credentials, as for `encodeMemoryValue`. */
   isSecretKey?: SecretKeyClassifier;
-}
-
-const VOLATILE_KEYS = new Set(["createdAt", "updatedAt", "abortSignal"]);
-const VOLATILE_TEXT: ReadonlyArray<readonly [RegExp, string]> = [
-  [
-    /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g,
-    "<timestamp>",
-  ],
-  [
-    /\b(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,? )?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.? \d{1,2},? \d{4}\b/g,
-    "<date>",
-  ],
-  [/\b\d{1,2}:\d{2}(?::\d{2})?\s?[AP]M\b/gi, "<time>"],
-  [
-    /\b\d+ (?:second|minute|hour|day|week|month|year)s? (?:ago|later)\b/g,
-    "<relative-time>",
-  ],
-  [
-    /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
-    "<id>",
-  ],
-];
-
-// Mastra labels an attachment by its file name or URL, and a replay's history
-// holds the captured reference in place of the URL. The part's data still
-// identifies the file.
-const ATTACHMENT_LABEL = /\[(File|Image) #(\d+): [^\]\n]*\]/g;
-
-function normalizeText(text: string): string {
-  // Replay history holds redacted URLs, so the baseline hashes them redacted too.
-  return VOLATILE_TEXT.reduce(
-    (current, [pattern, replacement]) => current.replace(pattern, replacement),
-    redactUrlCredentials(text),
-  ).replace(ATTACHMENT_LABEL, "[$1 #$2]");
-}
-
-/**
- * Hash an OM call's input without the values that change on every run.
- *
- * Mastra renders message times and ids into the observer prompt and stamps
- * each prompt part with its creation time, so an unchanged replay would never
- * match its baseline if those values were hashed. Attachment bytes hash as
- * their content reference, the form a replay's recorded history holds.
- */
-export function getOMInputFingerprint(
-  input: unknown,
-  mapString: (value: string) => string = (value) => value,
-  onFileContent?: (reference: string) => void,
-  readInlineFile: InlineFileReader = createInlineFileReader(),
-): string {
-  try {
-    const text = JSON.stringify(
-      input,
-      function (this: unknown, key: string, value: unknown) {
-        if (VOLATILE_KEYS.has(key)) return undefined;
-        // The holder keeps the bytes as they were before a Buffer's toJSON.
-        const holder =
-          typeof this === "object" && this !== null
-            ? (this as Record<string, unknown>)
-            : undefined;
-        // Inline attachment text hashes as its content reference, so the
-        // same file hashes alike as base64, a data URL, or bytes.
-        if (
-          typeof value === "string" &&
-          holder &&
-          (holder.type === "file" || holder.type === "image") &&
-          key === (holder.type === "image" ? "image" : "data")
-        ) {
-          const inline = readInlineFile(holder);
-          if (inline) return inline.reference;
-        }
-        if (typeof value === "string") return normalizeText(mapString(value));
-        const bytes = holder?.[key];
-        if (
-          bytes instanceof Uint8Array &&
-          typeof holder?.mediaType === "string"
-        ) {
-          const reference =
-            readInlineFile({
-              type: "file",
-              data: bytes,
-              mediaType: holder.mediaType,
-            })?.reference ??
-            fileReference({ bytes, mediaType: holder.mediaType });
-          onFileContent?.(reference);
-          return reference;
-        }
-        return value;
-      },
-    );
-    return createHash("sha256")
-      .update(text ?? "undefined")
-      .digest("hex");
-  } catch {
-    return "unavailable";
-  }
 }
 
 function countJsonItems(value: JsonValue, remaining: number): number {
@@ -628,15 +533,21 @@ export function createOMResultTape(
         cause: "no_recorded_result",
       });
     }
-    const fingerprint = getOMInputFingerprint(
-      input,
-      options.mapString,
-      undefined,
-      readInlineFile,
-    );
-    const matching = calls.find(
-      (candidate) => !candidate.used && candidate.fingerprint === fingerprint,
-    );
+    const findUnused = (format: OMFingerprintFormat) => {
+      const fingerprint = getOMInputFingerprint(
+        input,
+        options.mapString,
+        undefined,
+        readInlineFile,
+        format,
+      );
+      return calls.find(
+        (candidate) => !candidate.used && candidate.fingerprint === fingerprint,
+      );
+    };
+    // A tape recorded before fingerprints dropped Mastra's clock markers
+    // holds legacy fingerprints.
+    const matching = findUnused("current") ?? findUnused("legacy");
     if (matching) {
       const result = use(matching, method);
       const steps = matching.result?.actorStepsAtResult;

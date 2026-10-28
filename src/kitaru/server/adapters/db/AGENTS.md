@@ -29,7 +29,7 @@ This file covers repository, ORM, and transaction mechanics.
   pass only `created`.
 - Repositories live one module per resource under `repositories/`, implement
   the application-layer Protocol, and take the session in the constructor.
-- Repository and ORM syntax gates run in `just python-standards-check` (KIT001-KIT004). Import-linter allows ORM imports only inside the DB adapter and migrations.
+- Repository and ORM syntax gates run in `just python-standards-check`. Import-linter allows ORM imports only inside the DB adapter and migrations.
 - Write methods end with `flush()` so the SQL runs and constraint violations surface inside the repository method. The request session commits at the REST boundary, through `KitaruAPIRoute` (`adapters/rest/route.py`) after the route handler succeeds and before the response is returned. Any exception skips the commit and pending writes roll back when the session closes.
 - Session-number allocation deliberately uses an independent `engine.begin()` transaction. It commits the counter before session creation and releases the agent lock; a failed creation leaves a gap.
 - `query` methods build a filtered, unordered `Select` and pass it to the
@@ -53,11 +53,7 @@ This file covers repository, ORM, and transaction mechanics.
 - `get(..., exclusive=True)` on a repository emits `SELECT ... FOR UPDATE`.
   Queue-style claim methods lock internally with `FOR UPDATE SKIP LOCKED`
   instead of exposing a flag.
-- Ids and timestamps are client-side defaults (`default`, `onupdate`).
-  Flush sets them on the row, so repositories return `to_domain()` without
-  `refresh()`.
-- `TimestampMixin.updated` renews through its client-side `onupdate` hook on
-  every UPDATE. Never set `updated` by hand.
+- Ids and timestamps are client-side defaults (`default`, `onupdate`), so flush sets them on the row and `TimestampMixin.updated` renews on every UPDATE.
 - A column the database itself generates (`server_default`, trigger) must be
   fetched in the flush via `eager_defaults` RETURNING. A post-flush attribute
   access on an expired column raises `MissingGreenlet` on async sessions.

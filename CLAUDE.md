@@ -108,15 +108,15 @@ For adapter, importer, specialized UI API, docs, CI, and release work, load the 
 
 ## Code style
 
-- **US English spelling** everywhere (code, comments, docs): "initialize", "color", "serialize"
+- **US English spelling** everywhere (code, comments, docs): "initialize", "color", "serialize". `just typos` enforces it.
 - **Comments explain *why*, not *what*.** No change-tracking comments ("Updated from X", "Refactored this"). No narrating obvious code (`x = x + 1  # increment x`). Add comments only for intent, trade-offs, constraints, edge cases, or non-obvious decisions. Prefer expressive names and small functions over inline commentary.
 - **Name functions for the action, not the return value.** `_get_bearer_credential()`, not `_bearer_credential()`. `_get_account_name()`, not `_account_name()`. A bare noun reads as an attribute access at the call site, which hides that work is happening.
 - **Docstrings describe the symbol, not its callers.** State what the thing does, never who calls it or why. `"""Set the account name and contact email."""`, not `"""Set the identity fields mirrored from an external account."""`. Same for `"""Response body for the statistics endpoint."""` and `"""Used by the job runner."""`. A caller named in a docstring is wrong as soon as a second caller appears, and the reader cannot tell whether the stated context is a real constraint or just where it happened to be used first. If a caller genuinely depends on something, that belongs in the code or in a comment at the line that needs it. Such a comment is short, precise, and technical, and it states why the code below is written the way it is. Lead with the action it explains, as in `# Defer the payload columns because ...`. Never prefix it with `Why:` or any other label.
-- **Prefer typing over dynamic attribute checks.** Use Protocols/ABCs or `isinstance` narrowing instead of `getattr`/`hasattr`. If dynamic access is unavoidable, isolate it in a small typed helper.
+- **Prefer typing over dynamic attribute checks.** Use Protocols/ABCs or `isinstance` narrowing instead of `getattr`/`hasattr`. If dynamic access is unavoidable, isolate it in a small typed helper. `just python-standards-check` rejects `hasattr`.
 - Keep runtime annotation names resolvable when defining models and routes. Ruff enforces eager annotations to avoid reliance on resolving postponed names during runtime inspection.
 - **Util function placement:** Put a helper on the class if it's tied to the class's behavior or heavily used by subclasses (saves imports, subclasses just call `self.method()`). Put truly generic helpers in a standalone generic file, including helpers that are generic enough that other modules might use them in the future, even while they have a single caller.
 - **Keep code files at or under 1000 lines.** `just file-size-check` enforces it. Files listed in `scripts/file_size_baseline.json` predate the rule and may shrink but not grow: put new code in a new module, and after shrinking a listed file run `uv run python scripts/check_file_sizes.py --update` to lower its recorded count.
-- **`_underscore` means private.** `_method()` on a class → only call from within that class. `_function()` in a module → only call from within that module. Do not call private methods/functions from outside their owning class or module.
+- **`_underscore` means private.** `_method()` on a class → only call from within that class. `_function()` in a module → only call from within that module. Do not call private methods/functions from outside their owning class or module. Ruff (`SLF001`) rejects cross-class private access in production code.
 
 ## Versioning and changelog
 
