@@ -19,6 +19,7 @@ which `kitaru insight report` embeds without calling any model.
 """
 
 import hashlib
+import json
 import math
 import re
 import statistics
@@ -60,6 +61,9 @@ REPORT_METADATA_KEY = "kitaru.model_swap/v1"
 REPORT_SECTION_KEY = "kitaru.report_section/v1"
 SUMMARY_INSIGHT_NAME = "model-swap-summary"
 _EXCERPT = 600
+# The worker fails a task whose result is larger than this, discarding a
+# report whose calls were already paid for.
+_MAX_RESULT_BYTES = 1024 * 1024
 _REVIEW_ORDER: dict[bool | None, int] = {False: 0, None: 1, True: 2}
 _TEXT_GROUP = "text answer"
 _SAME_TOOL = frozenset({"same_tool_same_args", "same_tool_different_args"})
@@ -166,19 +170,10 @@ def build_report(
         and result.agreement not in AGREEING
     ]
     # Which disagreements are kept must not depend on the judge, whose rulings
-    # text inside an answer can sway, so the cap is applied in a fixed order
-    # first. Only the kept ones are then ordered for review within each group:
-    # answers the judge found different first, then unsure or not judged ones,
-    # then likely equivalent ones.
+    # text inside an answer can sway, so they stay in a fixed order here and
+    # are only ordered for review once build_insights has trimmed them.
     disagreements.sort(key=lambda item: (item["group"], item["candidate"]))
     kept = disagreements[: params.max_disagreements]
-    kept.sort(
-        key=lambda item: (
-            item["group"],
-            _REVIEW_ORDER[item["judge_equivalent"]],
-            item["candidate"],
-        )
-    )
     coverage = _coverage(collection, sampled)
     weight = population_weight(sampled, collection.group_seen)
     mix = (
@@ -1189,13 +1184,55 @@ def _mean_tokens(usages: list[Usage]) -> dict[str, float] | None:
 def build_insights(
     report: dict[str, Any], *, dashboard_url: str | None
 ) -> list[InsightInput]:
-    """Turn a report into insight cards; the summary carries the full report."""
-    summary, *cards = _build_cards(report)
+    """Turn a report into insight cards that fit within the task result limit.
+
+    The summary carries the full report. When the cards would be too large,
+    fewer disagreements are listed, while totals and spend stay unchanged.
+    """
+    disagreements = report["disagreements"]
+    keep = len(disagreements)
+    insights = _assemble_insights(report, disagreements, dashboard_url)
+    while keep and _get_result_size(insights) > _MAX_RESULT_BYTES:
+        keep //= 2
+        insights = _assemble_insights(report, disagreements[:keep], dashboard_url)
+    return insights
+
+
+def _assemble_insights(
+    report: dict[str, Any],
+    disagreements: list[dict[str, Any]],
+    dashboard_url: str | None,
+) -> list[InsightInput]:
+    """Build the insight cards of a report listing the given disagreements."""
+    listed = report | {"disagreements": _order_for_review(disagreements)}
+    summary, *cards = _build_cards(listed)
     summary.metadata[REPORT_SECTION_KEY] = {
-        "html": render_section(report, dashboard_url),
+        "html": render_section(listed, dashboard_url),
         "covers": [card.name for card in cards],
     }
     return [summary, *cards]
+
+
+def _order_for_review(disagreements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Order disagreements within each group by the judge's ruling.
+
+    Answers the judge found different come first, then unsure or not judged
+    ones, then likely equivalent ones.
+    """
+    return sorted(
+        disagreements,
+        key=lambda item: (
+            item["group"],
+            _REVIEW_ORDER[item["judge_equivalent"]],
+            item["candidate"],
+        ),
+    )
+
+
+def _get_result_size(insights: list[InsightInput]) -> int:
+    """Count the bytes of insights serialized as a task result."""
+    encoded = json.dumps([insight.model_dump(mode="json") for insight in insights])
+    return len(encoded.encode("utf-8"))
 
 
 def _build_cards(report: dict[str, Any]) -> list[InsightInput]:
