@@ -37,6 +37,17 @@ from kitaru.task.importer import (
     ImportedNode,
     ImportedSession,
 )
+from kitaru_langfuse_importer.node_metadata import (
+    get_node_attributes,
+    get_node_metadata,
+)
+from kitaru_langfuse_importer.records import (
+    InvalidImport,
+    decode_dict,
+    decode_json,
+    get_first,
+    get_metadata_value,
+)
 
 SOURCE_PARENT_LINK_KIND = "source_parent"
 MAX_TREE_DEPTH = 64
@@ -44,34 +55,6 @@ MAX_TOOL_SCAN_DEPTH = 64
 _TRACE_SHAPE = "trace"
 _OBSERVATION_SHAPE = "observation"
 _EVENT_SHAPE = "ingestion_event"
-_METADATA_KEYS = {
-    "agent_name",
-    "deployment.environment.name",
-    "environment",
-    "gen_ai.agent.name",
-    "gen_ai.operation.name",
-    "gen_ai.provider.name",
-    "gen_ai.request.model",
-    "gen_ai.response.model",
-    "gen_ai.system",
-    "name",
-    "sdk_span_type",
-    "service.name",
-    "service.version",
-}
-_RESOURCE_METADATA_KEYS = {
-    "deployment.environment.name",
-    "service.name",
-    "service.version",
-}
-_TRACE_CONTEXT_FIELDS = {
-    "traceEnvironment": "environment",
-    "traceHtmlPath": "html_path",
-    "traceRelease": "release",
-    "traceTags": "tags",
-    "traceVersion": "version",
-}
-
 _TOOL_CALL_KINDS = {
     "function-call",
     "tool-call",
@@ -277,7 +260,7 @@ def _normalize_tool_call_arguments(value: Any, depth: int = 0) -> Any:
         for key, child in value.items()
     }
     if _kind(value) in _TOOL_CALL_KINDS and "arguments" in value:
-        normalized["arguments"] = _decode_json(value["arguments"])
+        normalized["arguments"] = decode_json(value["arguments"])
     return normalized
 
 
@@ -475,10 +458,6 @@ def _populate_node_fields(nodes: list[ImportedNode]) -> None:
             node.reasoning_selectors = _reasoning_selectors(node.outputs)
 
 
-class InvalidImport(ValueError):
-    """Raised when a Langfuse payload cannot be parsed."""
-
-
 @dataclass(frozen=True, slots=True)
 class _Turn:
     """One source trace within a multi-turn session."""
@@ -490,14 +469,6 @@ class _Turn:
     ended_at: datetime | None = None
 
 
-def _first(record: dict[str, Any], *names: str) -> Any:
-    """Return the first present field."""
-    for name in names:
-        if name in record:
-            return record[name]
-    return None
-
-
 def _first_nonempty(record: dict[str, Any], *names: str) -> Any:
     """Return the first non-empty field."""
     for name in names:
@@ -505,23 +476,6 @@ def _first_nonempty(record: dict[str, Any], *names: str) -> Any:
         if value not in (None, ""):
             return value
     return None
-
-
-def _decode_json(value: Any) -> Any:
-    """Decode a JSON string while preserving ordinary strings."""
-    if not isinstance(value, str):
-        return value
-    stripped = value.strip()
-    if not stripped or stripped[0] not in '[{"':
-        return value
-    try:
-        return json.loads(stripped)
-    except RecursionError as exc:
-        raise InvalidImport("Nested JSON exceeds the decoding depth limit") from exc
-    except json.JSONDecodeError:
-        return value
-    except ValueError as exc:
-        raise InvalidImport("Embedded JSON contains an invalid value") from exc
 
 
 def _datetime(value: Any) -> datetime | None:
@@ -572,12 +526,6 @@ def _integer(value: Any) -> int | None:
     return result
 
 
-def _dict(value: Any) -> dict[str, Any]:
-    """Return a decoded dictionary or an empty one."""
-    decoded = _decode_json(value)
-    return decoded if isinstance(decoded, dict) else {}
-
-
 def _path_value(value: Any, path: str) -> Any:
     """Resolve a dotted path or JSON Pointer against one observation."""
     if not path.strip():
@@ -593,7 +541,7 @@ def _path_value(value: Any, path: str) -> Any:
         parts = path.split(".")
     current = value
     for part in parts:
-        current = _decode_json(current)
+        current = decode_json(current)
         if isinstance(current, dict) and part in current:
             current = current[part]
             continue
@@ -606,7 +554,7 @@ def _path_value(value: Any, path: str) -> Any:
                 return None
             continue
         return None
-    return _decode_json(current)
+    return decode_json(current)
 
 
 def _is_missing_join_value(value: Any) -> bool:
@@ -661,7 +609,7 @@ def _join_value(
             str(value)
             for record in observations
             if not _is_missing_join_value(
-                value := _first(record, "sessionId", "session_id")
+                value := get_first(record, "sessionId", "session_id")
             )
         }
         if len(session_ids) > 1:
@@ -687,56 +635,6 @@ def _join_value(
     return next(iter(values)), selector, False
 
 
-def _metadata_value(record: dict[str, Any], *keys: str) -> Any:
-    """Return the first non-empty value from Langfuse metadata layers."""
-    metadata = _dict(record.get("metadata"))
-    attributes = _dict(metadata.get("attributes"))
-    resource_attributes = _dict(metadata.get("resourceAttributes"))
-    for key in keys:
-        for source in (attributes, metadata, resource_attributes):
-            value = source.get(key)
-            if value not in (None, ""):
-                return value
-        for flattened_key in (f"attributes.{key}", f"resourceAttributes.{key}"):
-            value = metadata.get(flattened_key)
-            if value not in (None, ""):
-                return value
-    return None
-
-
-def _source_metadata(record: dict[str, Any]) -> dict[str, Any]:
-    """Return bounded metadata useful for debugging and filtering."""
-    metadata = _dict(record.get("metadata"))
-    attributes = _dict(metadata.get("attributes"))
-    resource_attributes = _dict(metadata.get("resourceAttributes"))
-    selected: dict[str, Any] = {}
-    for source in (metadata, attributes):
-        for key in _METADATA_KEYS:
-            if key in source:
-                selected[f"langfuse.{key}"] = source[key]
-            flattened_key = f"attributes.{key}"
-            if flattened_key in metadata:
-                selected[f"langfuse.{key}"] = metadata[flattened_key]
-    for key in _RESOURCE_METADATA_KEYS:
-        if key in resource_attributes:
-            selected[f"langfuse.{key}"] = resource_attributes[key]
-        flattened_key = f"resourceAttributes.{key}"
-        if flattened_key in metadata:
-            selected[f"langfuse.{key}"] = metadata[flattened_key]
-    for source_field, target_field in _TRACE_CONTEXT_FIELDS.items():
-        if source_field in record:
-            selected[f"langfuse.trace.{target_field}"] = record[source_field]
-    for source_field, target_field in (
-        ("environment", "environment"),
-        ("promptName", "prompt_name"),
-        ("promptVersion", "prompt_version"),
-        ("version", "version"),
-    ):
-        if source_field in record and record[source_field] not in (None, ""):
-            selected[f"langfuse.{target_field}"] = record[source_field]
-    return selected
-
-
 def _detect_shape(record: dict[str, Any]) -> str:
     """Detect one supported Langfuse record shape."""
     if isinstance(record.get("observations"), list):
@@ -747,7 +645,7 @@ def _detect_shape(record: dict[str, Any]) -> str:
         or event_type in {"trace", "span", "generation", "event"}
     ):
         return _EVENT_SHAPE
-    if _first(record, "traceId", "trace_id") is not None:
+    if get_first(record, "traceId", "trace_id") is not None:
         return _OBSERVATION_SHAPE
     raise InvalidImport("Could not detect the Langfuse record shape")
 
@@ -805,8 +703,8 @@ def _events_to_traces(
     project_records: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for event in records:
         body = dict(event["body"])
-        observation_id = _first(body, "id", "observationId")
-        trace_id = _first(body, "traceId", "trace_id")
+        observation_id = get_first(body, "id", "observationId")
+        trace_id = get_first(body, "traceId", "trace_id")
         if observation_id not in (None, "") and trace_id not in (None, ""):
             observation_trace_ids[str(observation_id)].add(str(trace_id))
 
@@ -814,7 +712,7 @@ def _events_to_traces(
         event_type = str(event.get("type", "")).lower()
         body = dict(event["body"])
         if event_type.startswith("trace") or event_type == "trace":
-            trace_id = str(_first(body, "id", "traceId", "trace_id") or "")
+            trace_id = str(get_first(body, "id", "traceId", "trace_id") or "")
             if not trace_id:
                 raise InvalidImport("A Langfuse trace event has no trace id")
             project_records[trace_id].append(body)
@@ -822,8 +720,8 @@ def _events_to_traces(
                 body
             )
             continue
-        observation_id = str(_first(body, "id", "observationId") or "")
-        trace_id = str(_first(body, "traceId", "trace_id") or "")
+        observation_id = str(get_first(body, "id", "observationId") or "")
+        trace_id = str(get_first(body, "traceId", "trace_id") or "")
         if observation_id and not trace_id:
             matches = observation_trace_ids.get(observation_id, set())
             if len(matches) == 1:
@@ -872,7 +770,7 @@ def _trace_rows_to_observations(
     """Flatten trace rows while carrying trace context onto observations."""
     observations: list[dict[str, Any]] = []
     for trace in records:
-        trace_id = str(_first(trace, "id", "traceId", "trace_id") or "")
+        trace_id = str(get_first(trace, "id", "traceId", "trace_id") or "")
         if not trace_id:
             raise InvalidImport("A Langfuse trace row has no trace id")
         project_records = [
@@ -916,16 +814,16 @@ def _trace_rows_to_observations(
 
 def _node_type(record: dict[str, Any]) -> tuple[NodeType, str | None]:
     """Map one observation to a conservative node type and tool name."""
-    observation_type = str(_first(record, "type", "observationType") or "").upper()
-    metadata = _dict(record.get("metadata"))
-    attributes = _dict(metadata.get("attributes"))
+    observation_type = str(get_first(record, "type", "observationType") or "").upper()
+    metadata = decode_dict(record.get("metadata"))
+    attributes = decode_dict(metadata.get("attributes"))
     operation = str(
-        _first(
+        get_first(
             record,
             "operationName",
             "operation_name",
         )
-        or _metadata_value(record, "gen_ai.operation.name")
+        or get_metadata_value(record, "gen_ai.operation.name")
         or ""
     ).lower()
     explicit_tool = observation_type == "TOOL" or operation in {
@@ -933,9 +831,9 @@ def _node_type(record: dict[str, Any]) -> tuple[NodeType, str | None]:
         "tool",
         "tool_call",
     }
-    tool_name = _first(record, "toolName", "tool_name")
+    tool_name = get_first(record, "toolName", "tool_name")
     if tool_name is None:
-        tool_name = _metadata_value(record, "gen_ai.tool.name")
+        tool_name = get_metadata_value(record, "gen_ai.tool.name")
     function_name = attributes.get("name")
     if function_name in (None, ""):
         function_name = metadata.get("attributes.name")
@@ -955,7 +853,7 @@ def _node_type(record: dict[str, Any]) -> tuple[NodeType, str | None]:
 
 def _node_status(record: dict[str, Any]) -> NodeStatus:
     """Map provider status fields to a terminal node status."""
-    level = str(_first(record, "level", "status") or "").upper()
+    level = str(get_first(record, "level", "status") or "").upper()
     if level in {"ERROR", "FAILED", "FAILURE"}:
         return NodeStatus.FAILED
     return NodeStatus.COMPLETED
@@ -963,7 +861,7 @@ def _node_status(record: dict[str, Any]) -> NodeStatus:
 
 def _tokens(record: dict[str, Any]) -> TokenUsage | None:
     """Map Langfuse usage data."""
-    usage = _dict(_first(record, "usageDetails", "usage_details"))
+    usage = decode_dict(get_first(record, "usageDetails", "usage_details"))
     input_usage = _first_nonempty(record, "inputUsage", "input_usage")
     if input_usage is None:
         input_usage = _first_nonempty(usage, "input", "input_tokens")
@@ -1000,7 +898,7 @@ def _tool_call_ids(value: Any) -> set[str]:
     def walk(item: Any, depth: int = 0, *, tool_call: bool = False) -> None:
         if depth > MAX_TOOL_SCAN_DEPTH:
             raise InvalidImport("Tool-call output exceeds the scanning depth limit")
-        decoded = _decode_json(item)
+        decoded = decode_json(item)
         if isinstance(item, str) and decoded != item:
             walk(decoded, depth + 1, tool_call=tool_call)
             return
@@ -1019,7 +917,7 @@ def _tool_call_ids(value: Any) -> set[str]:
             "tool_use",
         }
         if is_tool_call:
-            call_id = _first(item, "id", "toolCallId", "tool_call_id")
+            call_id = get_first(item, "id", "toolCallId", "tool_call_id")
             if call_id not in (None, ""):
                 result.add(str(call_id))
 
@@ -1032,7 +930,7 @@ def _tool_call_ids(value: Any) -> set[str]:
 
 def _tool_call_id(record: dict[str, Any]) -> str | None:
     """Return the causal tool-call id recorded on one tool observation."""
-    value = _first(record, "toolCallId", "tool_call_id") or _metadata_value(
+    value = get_first(record, "toolCallId", "tool_call_id") or get_metadata_value(
         record,
         "gen_ai.tool.call.id",
         "tool_call_id",
@@ -1055,7 +953,7 @@ def _infer_tool_call_parents(
         node_type, _ = _node_type(record)
         if node_type is not NodeType.LLM_CALL:
             continue
-        trace_id = str(_first(record, "traceId", "trace_id") or "")
+        trace_id = str(get_first(record, "traceId", "trace_id") or "")
         for call_id in _tool_call_ids(record.get("output")):
             requesting_nodes[(trace_id, call_id)].add(external_id)
 
@@ -1067,7 +965,7 @@ def _infer_tool_call_parents(
         call_id = _tool_call_id(record)
         if call_id is None:
             continue
-        trace_id = str(_first(record, "traceId", "trace_id") or "")
+        trace_id = str(get_first(record, "traceId", "trace_id") or "")
         candidates = requesting_nodes.get((trace_id, call_id), set())
         if len(candidates) != 1:
             continue
@@ -1155,11 +1053,11 @@ def _validate_model_fields(record: dict[str, Any]) -> None:
         value = record.get(key)
         if value is not None and not isinstance(value, str):
             raise InvalidImport(f"Langfuse {key} must be a string or null")
-    metadata = _dict(record.get("metadata"))
+    metadata = decode_dict(record.get("metadata"))
     sources = (
         metadata,
-        _dict(metadata.get("attributes")),
-        _dict(metadata.get("resourceAttributes")),
+        decode_dict(metadata.get("attributes")),
+        decode_dict(metadata.get("resourceAttributes")),
     )
     for key in (
         "gen_ai.request.model",
@@ -1289,7 +1187,7 @@ class LangfuseJSONLImporter:
 
         trace_records: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for record in records:
-            trace_id = str(_first(record, "traceId", "trace_id") or "")
+            trace_id = str(get_first(record, "traceId", "trace_id") or "")
             if not trace_id:
                 raise InvalidImport("A Langfuse observation has no trace id")
             trace_records[trace_id].append(record)
@@ -1376,7 +1274,7 @@ class LangfuseJSONLImporter:
             ordered = sorted(
                 observations,
                 key=lambda record: (
-                    _datetime(_first(record, "startTime", "start_time"))
+                    _datetime(get_first(record, "startTime", "start_time"))
                     or datetime.min.replace(tzinfo=UTC),
                     str(record.get("id", "")),
                 ),
@@ -1389,8 +1287,10 @@ class LangfuseJSONLImporter:
             roots = [
                 record
                 for record in ordered
-                if not _first(record, "parentObservationId", "parent_observation_id")
-                or str(_first(record, "parentObservationId", "parent_observation_id"))
+                if not get_first(record, "parentObservationId", "parent_observation_id")
+                or str(
+                    get_first(record, "parentObservationId", "parent_observation_id")
+                )
                 not in ids
             ]
             if len(roots) != 1:
@@ -1399,13 +1299,15 @@ class LangfuseJSONLImporter:
                 )
             root = roots[0] if roots else (ordered[0] if ordered else {})
             root_by_trace[trace_id] = root
-            turn_input = _decode_json(_first(root, "traceInput", "input"))
-            turn_output = _decode_json(_first(root, "traceOutput", "output"))
+            turn_input = decode_json(get_first(root, "traceInput", "input"))
+            turn_output = decode_json(get_first(root, "traceOutput", "output"))
             trace_start = min(
                 (
                     value
                     for record in ordered
-                    if (value := _datetime(_first(record, "startTime", "start_time")))
+                    if (
+                        value := _datetime(get_first(record, "startTime", "start_time"))
+                    )
                 ),
                 default=None,
             )
@@ -1413,7 +1315,7 @@ class LangfuseJSONLImporter:
                 (
                     value
                     for record in ordered
-                    if (value := _datetime(_first(record, "endTime", "end_time")))
+                    if (value := _datetime(get_first(record, "endTime", "end_time")))
                 ),
                 default=None,
             )
@@ -1426,7 +1328,7 @@ class LangfuseJSONLImporter:
                     ended_at=trace_end,
                 )
             )
-            trace_name = _first(root, "traceName", "trace_name")
+            trace_name = get_first(root, "traceName", "trace_name")
             if trace_name:
                 trace_names.append(str(trace_name))
             for record in ordered:
@@ -1435,7 +1337,9 @@ class LangfuseJSONLImporter:
                     raise InvalidImport(
                         f"Trace '{trace_id}' contains an observation without an id"
                     )
-                parent = _first(record, "parentObservationId", "parent_observation_id")
+                parent = get_first(
+                    record, "parentObservationId", "parent_observation_id"
+                )
                 parent_id = str(parent) if parent is not None else None
                 parent_source_id = (
                     f"{trace_id}:{parent_id}" if parent_id in ids else None
@@ -1456,7 +1360,7 @@ class LangfuseJSONLImporter:
         )
         raw_nodes.sort(
             key=lambda item: (
-                _datetime(_first(item[2], "startTime", "start_time"))
+                _datetime(get_first(item[2], "startTime", "start_time"))
                 or datetime.min.replace(tzinfo=UTC),
                 item[0],
             )
@@ -1479,29 +1383,31 @@ class LangfuseJSONLImporter:
             status = _node_status(record)
             total_cost = _first_nonempty(record, "totalCost", "total_cost")
             if total_cost is None:
-                total_cost = _dict(_first(record, "costDetails", "cost_details")).get(
-                    "total"
-                )
+                total_cost = decode_dict(
+                    get_first(record, "costDetails", "cost_details")
+                ).get("total")
             nodes_with_parents.append(
                 (
                     ImportedNode(
                         external_id=source_node_id,
-                        trace_id=str(_first(record, "traceId", "trace_id")),
+                        trace_id=str(get_first(record, "traceId", "trace_id")),
                         node_type=node_type,
                         name=str(record.get("name") or record.get("type") or "span"),
                         status=status,
                         error=(
-                            str(_first(record, "statusMessage", "status_message"))
+                            str(get_first(record, "statusMessage", "status_message"))
                             if status is NodeStatus.FAILED
-                            and _first(record, "statusMessage", "status_message")
+                            and get_first(record, "statusMessage", "status_message")
                             else None
                         ),
-                        started_at=_datetime(_first(record, "startTime", "start_time")),
-                        ended_at=_datetime(_first(record, "endTime", "end_time")),
-                        inputs=_decode_json(record.get("input")),
-                        outputs=_decode_json(record.get("output")),
+                        started_at=_datetime(
+                            get_first(record, "startTime", "start_time")
+                        ),
+                        ended_at=_datetime(get_first(record, "endTime", "end_time")),
+                        inputs=decode_json(record.get("input")),
+                        outputs=decode_json(record.get("output")),
                         requested_model=(
-                            _metadata_value(record, "gen_ai.request.model")
+                            get_metadata_value(record, "gen_ai.request.model")
                             or _first_nonempty(
                                 record,
                                 "providedModelName",
@@ -1510,13 +1416,13 @@ class LangfuseJSONLImporter:
                             )
                         ),
                         model=(
-                            _metadata_value(record, "gen_ai.response.model")
+                            get_metadata_value(record, "gen_ai.response.model")
                             or _first_nonempty(record, "model", "modelId", "model_id")
-                            or _metadata_value(record, "gen_ai.request.model")
+                            or get_metadata_value(record, "gen_ai.request.model")
                         ),
                         model_provider=(
                             _first_nonempty(record, "modelProvider", "model_provider")
-                            or _metadata_value(
+                            or get_metadata_value(
                                 record,
                                 "gen_ai.provider.name",
                                 "gen_ai.system",
@@ -1524,16 +1430,13 @@ class LangfuseJSONLImporter:
                         ),
                         tokens=_tokens(record),
                         cost=_decimal(total_cost),
-                        model_params=_dict(
-                            _first(record, "modelParameters", "model_parameters")
+                        model_params=decode_dict(
+                            get_first(record, "modelParameters", "model_parameters")
                         )
                         or None,
                         tool_name=tool_name,
-                        attributes={
-                            "langfuse.type": record.get("type"),
-                            "langfuse.level": record.get("level"),
-                        },
-                        metadata=_source_metadata(record),
+                        attributes=get_node_attributes(record),
+                        metadata=get_node_metadata(record, node_type),
                         children=[],
                     ),
                     inferred_parents.get(source_node_id, parent_source_id),
@@ -1552,9 +1455,9 @@ class LangfuseJSONLImporter:
             else SessionStatus.COMPLETED
         )
         session_error = (
-            str(_first(latest_root, "statusMessage", "status_message"))
+            str(get_first(latest_root, "statusMessage", "status_message"))
             if session_status is SessionStatus.FAILED
-            and _first(latest_root, "statusMessage", "status_message")
+            and get_first(latest_root, "statusMessage", "status_message")
             else None
         )
         started_at = min(
@@ -1583,7 +1486,7 @@ class LangfuseJSONLImporter:
                     for _, observations in traces
                     for record in observations
                     if (
-                        value := _first(
+                        value := get_first(
                             record,
                             "traceEnvironment",
                             "environment",
@@ -1605,7 +1508,7 @@ class LangfuseJSONLImporter:
                     for _, observations in traces
                     for record in observations
                     if (
-                        value := _first(
+                        value := get_first(
                             record,
                             "traceVersion",
                             "version",

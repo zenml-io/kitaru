@@ -13,7 +13,7 @@
   "plugins/packages/braintrust-importer/src/kitaru_braintrust_importer/importer.py": 1176,
   "plugins/packages/claude-agent-sdk/src/kitaru_claude_agent_sdk/recording.py": 1096,
   "plugins/packages/evaluator/src/kitaru_evaluator/deterministic.py": 1475,
-  "plugins/packages/langfuse-importer/src/kitaru_langfuse_importer/importer.py": 1684,
+  "plugins/packages/langfuse-importer/src/kitaru_langfuse_importer/importer.py": 1587,
   "plugins/packages/langsmith-importer/src/kitaru_langsmith_importer/importer.py": 1197,
   "plugins/packages/mlflow-importer/src/kitaru_mlflow_importer/importer.py": 1243,
   "plugins/packages/post-import-insights/src/kitaru_post_import_insights/profiling.py": 2349,

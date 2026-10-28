@@ -19,6 +19,7 @@ kitaru-langsmith-importer = { workspace = true }
 kitaru-logfire-importer = { workspace = true }
 kitaru-mastra-importer = { workspace = true }
 kitaru-mlflow-importer = { workspace = true }
+kitaru-model-swap = { workspace = true }
 kitaru-openai-agents = { workspace = true }
 kitaru-phoenix-importer = { workspace = true }
 kitaru-post-import-insights = { workspace = true }
@@ -37,6 +38,7 @@ dev = [
     "kitaru-logfire-importer[adapter]",
     "kitaru-mastra-importer",
     "kitaru-mlflow-importer[api]",
+    "kitaru-model-swap",
     "kitaru-openai-agents",
     "kitaru-phoenix-importer[adapter]",
     "kitaru-post-import-insights[openai]",
@@ -100,6 +102,7 @@ known-first-party = [
     "kitaru_langsmith_importer",
     "kitaru_mastra_importer",
     "kitaru_mlflow_importer",
+    "kitaru_model_swap",
     "kitaru_openai_agents",
     "kitaru_phoenix_importer",
     "kitaru_post_import_insights",

@@ -194,6 +194,20 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         connection_schema=OpenAIConnection,
     ),
     DefaultPluginDefinition(
+        kind=PluginKind.ANALYZER,
+        name="kitaru/model-swap",
+        description=(
+            "Replay recorded model calls against candidate models and compare "
+            "answers and cost."
+        ),
+        # Candidate keys vary per run, so the connection carries whichever
+        # variables the candidates name instead of a fixed schema.
+        provider="model-swap",
+        entrypoint="kitaru_model_swap.analyzer:analyze_model_swap",
+        requirement="kitaru-model-swap==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
         name=f"{RESERVED_NAMESPACE}/braintrust",
         description="Import Braintrust project-log and UI exports.",

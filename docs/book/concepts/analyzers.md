@@ -7,7 +7,7 @@ icon: chart-pie
 
 An [evaluator](evaluators.md) reads one session and writes a verdict about it. An **analyzer** reads a set of sessions at once and writes one or more **insights**: named, typed observations about the set as a whole, such as how sessions split by outcome or how a metric is distributed across them.
 
-Analyzers are global plugins without agent scoping. They can declare a provider and connection schema, and can use deterministic checks, a model, or both. The built-in [post-import insights](../guides/post-import-insights.md) analyzers offer deterministic and OpenAI-backed analysis as separate choices; imports run only explicitly selected analyzers.
+Analyzers are global plugins without agent scoping. They can declare a provider and connection schema, and can use deterministic checks, a model, or both. The built-in [post-import insights](../guides/post-import-insights.md) analyzers offer deterministic and OpenAI-backed analysis as separate choices; imports run only explicitly selected analyzers. The built-in [model-swap](../guides/model-swap.md) analyzer compares candidate models on recorded model calls for quality, cost, speed, and openness.
 
 ## The analyzer contract
 

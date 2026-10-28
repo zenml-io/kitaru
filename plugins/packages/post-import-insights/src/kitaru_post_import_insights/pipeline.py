@@ -71,7 +71,7 @@ _CTA_LABELS = {
     "model-call-distribution": "Investigate model call counts",
     "total-activity-distribution": "Investigate recorded activity",
     "recorded-duration-distribution": "Investigate session duration",
-    "model-mix": "Investigate model mix",
+    "model-mix": "Investigate model choice",
 }
 
 PROMPT_VERSION = "2026-09-09.1"

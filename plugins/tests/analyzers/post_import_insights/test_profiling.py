@@ -2189,7 +2189,7 @@ def test_model_mix_briefing_states_label_counts_without_naming_labels() -> None:
         "label (3 of 4 calls)."
     )
     assert "at least one model-call node" in sections["Where to look first"]
-    assert "single model override" in sections["One hypothesis to test"]
+    assert "kitaru-model-swap" in sections["One hypothesis to test"]
     assert "gpt-4o" not in candidate.investigation_prompt
     assert "claude-sonnet" not in candidate.investigation_prompt
 
@@ -2237,7 +2237,7 @@ def test_distribution_evidence_uses_each_metrics_own_maximum() -> None:
         )
     config = ProfilingConfig(max_contributing_sessions=1)
     result = profile_sessions(sessions, config=config)
-    assert result.analysis_version == "2026-10-22.1"
+    assert result.analysis_version == "2026-10-23.1"
     assert profile_sessions(reversed(sessions), config=config) == result
     for candidate_id, number in [
         ("tool-call-distribution", 1),

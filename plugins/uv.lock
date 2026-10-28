@@ -31,6 +31,7 @@ members = [
     "kitaru-logfire-importer",
     "kitaru-mastra-importer",
     "kitaru-mlflow-importer",
+    "kitaru-model-swap",
     "kitaru-openai-agents",
     "kitaru-phoenix-importer",
     "kitaru-post-import-insights",
@@ -52,6 +53,7 @@ dev = [
     { name = "kitaru-logfire-importer", extras = ["adapter"], editable = "packages/logfire-importer" },
     { name = "kitaru-mastra-importer", editable = "packages/mastra-importer" },
     { name = "kitaru-mlflow-importer", extras = ["api"], editable = "packages/mlflow-importer" },
+    { name = "kitaru-model-swap", editable = "packages/model-swap" },
     { name = "kitaru-openai-agents", editable = "packages/openai-agents" },
     { name = "kitaru-phoenix-importer", extras = ["adapter"], editable = "packages/phoenix-importer" },
     { name = "kitaru-post-import-insights", extras = ["openai"], editable = "packages/post-import-insights" },
@@ -1648,6 +1650,23 @@ requires-dist = [
     { name = "mlflow-tracing", marker = "extra == 'api'", specifier = ">=3.16,<4" },
 ]
 provides-extras = ["api"]
+
+[[package]]
+name = "kitaru-model-swap"
+version = "0.1.0"
+source = { editable = "packages/model-swap" }
+dependencies = [
+    { name = "genai-prices" },
+    { name = "httpx" },
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "genai-prices", specifier = ">=0.1.1,<0.2" },
+    { name = "httpx", specifier = ">=0.27,<1" },
+    { name = "kitaru", editable = "../" },
+]
 
 [[package]]
 name = "kitaru-openai-agents"
