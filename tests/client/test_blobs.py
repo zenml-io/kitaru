@@ -18,11 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import (
-    FakeBlobDataStore,
-    FakeBlobRepository,
-    asgi_api_client,
-)
+from conftest import asgi_api_client
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import (
@@ -38,6 +34,10 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.blob import BlobStorageBackend
+from kitaru_test_support import (
+    FakeBlobDataStore,
+    FakeBlobRepository,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

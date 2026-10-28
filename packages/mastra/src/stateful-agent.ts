@@ -43,6 +43,7 @@ import {
   assertMemoryReplayVersions,
   bindOMResultModels,
   createIsolatedMemoryReplay,
+  getBufferingTapeOptions,
   getMemoryModelId,
   getMemoryStoreSemantics,
   isAsyncBufferingRunning,
@@ -966,13 +967,7 @@ export function createMemoryReplayAgent(
         isCapturedFile: baselineFiles
           ? (reference) => baselineFiles?.hasFile(reference) ?? false
           : undefined,
-        isBuffered: (phase) =>
-          omEngine !== null &&
-          isAsyncBufferingRunning(
-            omEngine,
-            selector,
-            phase === "observer" ? "observation" : "reflection",
-          ),
+        ...getBufferingTapeOptions(() => omEngine, selector),
       },
     );
     let memoryStore: MastraMemoryStoreSemantics;

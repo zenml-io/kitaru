@@ -92,6 +92,22 @@ def test_routes_commit_through_kitaru_route(
     )
 
 
+def test_routes_never_use_put(routes: list[tuple[str, APIRoute]]) -> None:
+    """Update resources with PATCH, never PUT."""
+    put = {path for path, route in routes if "PUT" in (route.methods or ())}
+    assert not put, "Use PATCH /{id} for updates, never PUT."
+
+
+def test_delete_routes_answer_204(routes: list[tuple[str, APIRoute]]) -> None:
+    """Answer 204 for every delete."""
+    delete = {
+        path
+        for path, route in routes
+        if "DELETE" in (route.methods or ()) and route.status_code != 204
+    }
+    assert not delete, "Declare status_code=204 on delete routes."
+
+
 def test_routes_require_authorization(routes: list[tuple[str, APIRoute]]) -> None:
     """Depend on an authorize variant unless the route is listed as public."""
     public = {

@@ -19,12 +19,7 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import (
-    FakeAccountRepository,
-    FakePasswordHasher,
-    local_settings,
-    override_idempotency,
-)
+from conftest import local_settings
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -35,6 +30,11 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakePasswordHasher,
+    override_idempotency,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin", is_admin=True))
 NON_ADMIN_ACTOR = AuthContext(

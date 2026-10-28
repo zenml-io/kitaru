@@ -22,32 +22,6 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
-from conftest import (
-    FakeImportRepository,
-    FakeJobRepository,
-    FakePluginRepository,
-    FakeTaskRepository,
-    JobAndTaskServices,
-    ReplayServices,
-    build_job_and_task_services,
-    build_replay_services,
-    build_task_actor,
-    build_worker_actor,
-    create_agent,
-    create_agent_task,
-    create_agent_version,
-    create_analysis_task,
-    create_blob,
-    create_evaluation_task,
-    create_import,
-    create_import_task,
-    create_job,
-    create_plugin,
-    create_replay,
-    create_secret,
-    create_session,
-    create_worker,
-)
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.imports import ImportStats
 from kitaru.api_models.v1.job import JobKind, JobStatus
@@ -88,6 +62,32 @@ from kitaru.server.domain.task import (
     TaskUpdateRequiresStatus,
 )
 from kitaru.server.domain.worker import WorkerNotFound
+from kitaru_test_support import (
+    FakeImportRepository,
+    FakeJobRepository,
+    FakePluginRepository,
+    FakeTaskRepository,
+    JobAndTaskServices,
+    ReplayServices,
+    build_job_and_task_services,
+    build_replay_services,
+    build_task_actor,
+    build_worker_actor,
+    create_agent,
+    create_agent_task,
+    create_agent_version,
+    create_analysis_task,
+    create_blob,
+    create_evaluation_task,
+    create_import,
+    create_import_task,
+    create_job,
+    create_plugin,
+    create_replay,
+    create_secret,
+    create_session,
+    create_worker,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
