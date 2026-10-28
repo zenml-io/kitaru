@@ -62,7 +62,7 @@ Replace `yourtask` with a unique task identifier. The pipeline reports failure i
 
 ## Coding Style
 
-- Follow US English spelling in code and docs (`initialize`, `serialize`, `color`).
+- Follow US English spelling in code and docs (`initialize`, `serialize`, `color`); `just typos` enforces it.
 - Ruff enforces production signatures, modern annotations, Google docstring structure, and eager annotations. ty checks types and suppressions. Run `just check`.
 - Models and routes inspect annotations at runtime; keep referenced names resolvable.
 - Name a function or method for the action it performs, not the value it
@@ -74,8 +74,8 @@ Replace `yourtask` with a unique task identifier. The pipeline reports failure i
   external account". A caller named in a docstring is wrong as soon as a second
   caller appears.
 - Keep comments focused on why the code exists or why a trade-off was chosen.
-- Treat leading underscore names as private to their module or class.
-- Prefer Protocols/ABCs or `isinstance` over `getattr`/`hasattr` for capability checks.
+- Treat leading underscore names as private to their module or class. Ruff (`SLF001`) rejects access to another class's private members in production code.
+- Prefer Protocols/ABCs or `isinstance` over `getattr`/`hasattr` for capability checks; `just python-standards-check` rejects `hasattr`.
 - Put helpers on the class when tied to its behavior; use standalone utilities
   only for generic cross-module functions.
 - Prefer Pydantic models for data structures.
