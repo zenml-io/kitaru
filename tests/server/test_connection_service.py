@@ -18,7 +18,6 @@ import uuid
 import pytest
 from pydantic import SecretStr
 
-from conftest import FakeConnectionRepository, FakeSecretRepository
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.connection import (
@@ -38,6 +37,7 @@ from kitaru.server.domain.connection import (
 from kitaru.server.domain.names import validate_name
 from kitaru.server.domain.secret import SecretNotFound
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import FakeConnectionRepository, FakeSecretRepository
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 

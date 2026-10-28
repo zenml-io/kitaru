@@ -34,7 +34,7 @@ from kitaru.api_models.v1.experiment_run import (
 )
 from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.cli import app as app_module
-from kitaru.cli import experiment_runs
+from kitaru.cli import experiment_runs, invocation_context
 from kitaru.cli.output import (
     CLIError,
     OutputContext,
@@ -685,7 +685,7 @@ def argv_client(monkeypatch: pytest.MonkeyPatch) -> StubRunsClient:
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
     return client
 
 

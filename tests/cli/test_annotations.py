@@ -28,7 +28,7 @@ from kitaru.api_models.v1.annotation import (
     InvestigationAnswerCreateRequest,
     ManualAnnotationCreateRequest,
 )
-from kitaru.cli import annotations
+from kitaru.cli import annotations, invocation_context
 from kitaru.cli import app as app_module
 from kitaru.cli.output import CLIError
 from kitaru.cli.schema import describe_schema
@@ -258,7 +258,7 @@ def argv_client(monkeypatch: pytest.MonkeyPatch) -> StubAnnotationClient:
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
     return client
 
 

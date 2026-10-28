@@ -20,24 +20,6 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeBlobDataStore,
-    FakeBlobRepository,
-    FakeImportRepository,
-    FakeReplayRepository,
-    FakeSessionRepository,
-    FakeTaskRepository,
-    build_payload_store,
-    create_agent,
-    create_agent_task,
-    create_agent_version,
-    create_import,
-    create_import_task,
-    create_replay,
-    create_session,
-)
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
@@ -85,6 +67,24 @@ from kitaru.server.domain.task import (
     TaskResultSessionAlreadyLinked,
 )
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeBlobDataStore,
+    FakeBlobRepository,
+    FakeImportRepository,
+    FakeReplayRepository,
+    FakeSessionRepository,
+    FakeTaskRepository,
+    build_payload_store,
+    create_agent,
+    create_agent_task,
+    create_agent_version,
+    create_import,
+    create_import_task,
+    create_replay,
+    create_session,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
