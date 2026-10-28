@@ -30,7 +30,7 @@ from kitaru.api_models.v1.connection import (
     ConnectionUpdateRequest,
 )
 from kitaru.cli import app as app_module
-from kitaru.cli import connections
+from kitaru.cli import connections, invocation_context, registration
 from kitaru.cli.output import CLIError, CommandResult
 
 _SCHEMA = {
@@ -580,7 +580,7 @@ def argv_client(monkeypatch: pytest.MonkeyPatch) -> StubConnectionClient:
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
     return client
 
 
@@ -734,10 +734,10 @@ def test_importer_register_sends_a_connection_schema_file(
     async def fake_open_client():
         yield SimpleNamespace()
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
-    monkeypatch.setattr(app_module.registration, "register_plugin", register_plugin)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
+    monkeypatch.setattr(registration, "register_plugin", register_plugin)
     monkeypatch.setattr(
-        app_module.registration,
+        registration,
         "prepare_plugin_source",
         lambda **_kwargs: SimpleNamespace(),
     )
@@ -778,7 +778,7 @@ def test_importer_register_rejects_a_malformed_connection_schema(
     async def fake_open_client():
         yield SimpleNamespace()
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert (
         app_module.main(
