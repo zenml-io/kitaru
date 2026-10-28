@@ -17,7 +17,7 @@ export interface AttachmentTokenCount {
  */
 export type AttachmentTokenCounts = Record<string, AttachmentTokenCount>;
 
-type OMEngine = NonNullable<Awaited<Memory["omEngine"]>>;
+export type OMEngine = NonNullable<Awaited<Memory["omEngine"]>>;
 
 interface AttachmentCounter {
   countAttachmentPartSync(part: unknown): number | undefined;

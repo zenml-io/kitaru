@@ -23,13 +23,8 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from conftest import (
-    FakeAccountRepository,
-    FakeApiKeyRepository,
-    FakePasswordHasher,
-    stub_auth_session,
-)
 from conftest import local_settings as base_local_settings
+from conftest import stub_auth_session
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
@@ -49,6 +44,11 @@ from kitaru.server.filtering import (
     FilterExpression,
     NotExpression,
     OrExpression,
+)
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakeApiKeyRepository,
+    FakePasswordHasher,
 )
 
 

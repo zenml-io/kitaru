@@ -18,15 +18,6 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeCohortRepository,
-    FakeCohortVersionRepository,
-    FakeExperimentRunRepository,
-    FakeSessionRepository,
-    create_agent,
-    create_experiment_run,
-)
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.auth import AuthContext
@@ -43,6 +34,15 @@ from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort import CohortInUse, CohortNotFound, DuplicateCohortName
 from kitaru.server.domain.cohort_version import CohortVersion
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeCohortRepository,
+    FakeCohortVersionRepository,
+    FakeExperimentRunRepository,
+    FakeSessionRepository,
+    create_agent,
+    create_experiment_run,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
