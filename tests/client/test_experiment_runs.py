@@ -20,12 +20,17 @@ from functools import partial
 import pytest
 
 from conftest import asgi_api_client
+from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.experiment import ExperimentCreateRequest
 from kitaru.api_models.v1.experiment_run import (
+    EvaluationAggregateResponse,
+    EvaluationStats,
+    EvaluationValue,
     ExperimentRunCreateRequest,
     ExperimentRunJobsListParams,
     ExperimentRunListParams,
     ExperimentRunResponse,
+    ReplayEvaluationValues,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.job import JobResponse
@@ -35,6 +40,7 @@ from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    get_experiment_run_evaluation_service,
     get_experiment_run_service,
     get_experiment_service,
 )
@@ -43,11 +49,15 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.api.run_cancellation import get_run_canceler
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.replay import ReplayStatusCounts
+from kitaru.server.application.services.experiment_run_evaluation_service import (
+    ExperimentRunEvaluationService,
+)
 from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
 )
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
+from kitaru.server.domain.evaluation import Evaluation
 from kitaru.server.domain.experiment_run import ExperimentRun
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru_test_support import (
@@ -95,6 +105,13 @@ async def api_client(services: ReplayServices) -> AsyncGenerator[KitaruAPIClient
     )
     app.dependency_overrides[get_experiment_run_service] = lambda: (
         services.experiment_run_service
+    )
+    app.dependency_overrides[get_experiment_run_evaluation_service] = lambda: (
+        ExperimentRunEvaluationService(
+            repository=services.experiment_runs,
+            replay_repository=services.replays,
+            evaluation_repository=services.evaluations,
+        )
     )
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     app.dependency_overrides[get_run_canceler] = lambda: partial(
@@ -216,6 +233,119 @@ async def test_get_not_found(api_client: KitaruAPIClient) -> None:
     """Surface HTTP 404 as a typed error."""
     with pytest.raises(NotFoundError):
         await api_client.experiment_runs.get(uuid.uuid4())
+
+
+async def test_get_evaluation_aggregates(
+    api_client: KitaruAPIClient,
+    agent_id: uuid.UUID,
+    experiment_id: uuid.UUID,
+    run_request: ExperimentRunCreateRequest,
+    services: ReplayServices,
+) -> None:
+    """Round-trip pinned evaluation statistics and per-replay values."""
+    run = await api_client.experiments.start_run(experiment_id, run_request)
+    replay = (await services.replays.list_by_experiment_run(run.id))[0]
+    config = await services.experiments.get_replay_config(replay.replay_config_id)
+    evaluator_version_id = config.evaluators[0].evaluator_version_id
+    result = await create_session(
+        services.sessions,
+        ACCOUNT.id,
+        agent_id=agent_id,
+        agent_version_id=run_request.agent_version_id,
+        status=SessionStatus.COMPLETED,
+    )
+    replay.link_result_session(result.id)
+    await services.replays.update(replay)
+    await services.evaluations.create_task_evaluations(
+        [
+            Evaluation(
+                owner_id=ACCOUNT.id,
+                evaluator_version_id=evaluator_version_id,
+                session_id=session_id,
+                name="accuracy",
+                data_type=EvaluationDataType.FLOAT,
+                score=score,
+                passed=passed,
+                min_score=0.0,
+                max_score=1.0,
+                target_score=0.8,
+            )
+            for session_id, score, passed in [
+                (replay.baseline_session_id, 0.4, False),
+                (result.id, 0.9, True),
+            ]
+        ],
+        replay_id=replay.id,
+    )
+
+    aggregates = await api_client.experiment_runs.get_evaluation_aggregates(run.id)
+
+    assert aggregates == [
+        EvaluationAggregateResponse(
+            name="accuracy",
+            evaluator_version_id=evaluator_version_id,
+            evaluator_name="accuracy",
+            evaluator_version=1,
+            data_type=EvaluationDataType.FLOAT,
+            baseline=EvaluationStats(
+                count=1,
+                mean=0.4,
+                min=0.4,
+                max=0.4,
+                pass_rate=0.0,
+                min_score=0.0,
+                max_score=1.0,
+                target_score=0.8,
+            ),
+            result=EvaluationStats(
+                count=1,
+                mean=0.9,
+                min=0.9,
+                max=0.9,
+                pass_rate=1.0,
+                min_score=0.0,
+                max_score=1.0,
+                target_score=0.8,
+            ),
+            replays=[
+                ReplayEvaluationValues(
+                    replay_id=replay.id,
+                    baseline=EvaluationValue(
+                        score=0.4,
+                        passed=False,
+                        min_score=0.0,
+                        max_score=1.0,
+                        target_score=0.8,
+                    ),
+                    result=EvaluationValue(
+                        score=0.9,
+                        passed=True,
+                        min_score=0.0,
+                        max_score=1.0,
+                        target_score=0.8,
+                    ),
+                )
+            ],
+        )
+    ]
+
+
+async def test_get_evaluation_aggregates_empty(
+    api_client: KitaruAPIClient,
+    experiment_id: uuid.UUID,
+    run_request: ExperimentRunCreateRequest,
+) -> None:
+    """Return an empty list when the run has no linked evaluations."""
+    run = await api_client.experiments.start_run(experiment_id, run_request)
+    assert await api_client.experiment_runs.get_evaluation_aggregates(run.id) == []
+
+
+async def test_get_evaluation_aggregates_not_found(
+    api_client: KitaruAPIClient,
+) -> None:
+    """Surface a missing run's HTTP 404 as a typed SDK error."""
+    with pytest.raises(NotFoundError):
+        await api_client.experiment_runs.get_evaluation_aggregates(uuid.uuid4())
 
 
 async def test_list_and_iter(

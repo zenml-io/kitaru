@@ -45,6 +45,5 @@
   "tests/server/test_session_service.py": 1773,
   "tests/server/test_sessions_api.py": 1386,
   "tests/server/test_task_service.py": 1245,
-  "tests/server/test_ui_experiment_runs_api.py": 1102,
   "tests/task/test_importer.py": 1489
 }
