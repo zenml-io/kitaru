@@ -20,17 +20,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI
 
-from conftest import (
-    FakeAccountRepository,
-    FakeApiKeyRepository,
-    FakePasswordHasher,
-    ReplayServices,
-    create_experiment_run,
-    create_job,
-    create_replay,
-    local_settings,
-    stub_auth_session,
-)
+from conftest import local_settings, stub_auth_session
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
@@ -48,6 +38,15 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.evaluation import Evaluation
 from kitaru.server.domain.plugin import PackagePluginSource, Plugin, PluginKind
 from kitaru.server.domain.replay_config import ReplayConfig, default_tool_policy
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakeApiKeyRepository,
+    FakePasswordHasher,
+    ReplayServices,
+    create_experiment_run,
+    create_job,
+    create_replay,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

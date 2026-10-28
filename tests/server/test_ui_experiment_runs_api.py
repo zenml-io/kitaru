@@ -33,15 +33,15 @@ from experiment_run_aggregate_fixtures import (
 )
 from fastapi import FastAPI
 
-from conftest import (
-    ReplayServices,
-    build_replay_services,
-)
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.server.application.services.experiment_run_evaluation_service import (
     ExperimentRunEvaluationService,
 )
 from kitaru.server.domain.plugin import PackagePluginSource, Plugin, PluginKind
+from kitaru_test_support import (
+    ReplayServices,
+    build_replay_services,
+)
 
 
 @pytest.fixture

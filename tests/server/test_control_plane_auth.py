@@ -21,11 +21,7 @@ from typing import Any
 import httpx
 import pytest
 
-from conftest import (
-    FakeAccountRepository,
-    FakeControlPlaneClient,
-    control_plane_settings,
-)
+from conftest import control_plane_settings
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.adapters.auth.control_plane import (
     SERVER_ID_HEADER,
@@ -38,6 +34,10 @@ from kitaru.server.adapters.auth.control_plane import (
 )
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakeControlPlaneClient,
+)
 
 SERVER_ID = uuid.uuid4()
 

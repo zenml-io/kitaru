@@ -30,12 +30,6 @@ from experiment_run_aggregate_fixtures import (
 )
 from fastapi import FastAPI, Request
 
-from conftest import (
-    ReplayServices,
-    build_replay_services,
-    create_job,
-    create_replay,
-)
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -46,6 +40,12 @@ from kitaru.server.application.services.experiment_run_evaluation_service import
     ExperimentRunEvaluationService,
 )
 from kitaru.server.domain.replay_config import ReplayConfig, default_tool_policy
+from kitaru_test_support import (
+    ReplayServices,
+    build_replay_services,
+    create_job,
+    create_replay,
+)
 
 
 @pytest.fixture
