@@ -25,9 +25,7 @@ The SDK gets a round-trip test in `tests/client/` routing the client through
 
 ## Fakes
 
-Fake repositories live in `tests/conftest.py` and implement the full
-repository Protocol, including domain error behavior and `updated` timestamp
-renewal on update.
+Fake repositories live in the `tests/kitaru_test_support/` package, one module per group of related resources, and implement the full repository Protocol, including domain error behavior and `updated` timestamp renewal on update. Tests import them from the package, for example `from kitaru_test_support import FakeSessionRepository`; add a new public helper to the package `__all__`. `tests/conftest.py` keeps the pytest hooks, the fixtures, and the PostgreSQL, settings, and ASGI client helpers, which tests still import with `from conftest import ...`. Keep every file under the 1,000-line limit enforced by `just file-size-check`.
 
 ## PostgreSQL
 
