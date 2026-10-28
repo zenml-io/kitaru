@@ -20,19 +20,6 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeConnectionRepository,
-    FakeEvaluationRepository,
-    FakeJobRepository,
-    FakePluginRepository,
-    FakeSessionRepository,
-    FakeTaskRepository,
-    create_plugin,
-    create_session,
-    override_idempotency,
-)
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -50,6 +37,19 @@ from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.plugin import PackagePluginSource, PluginKind
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeConnectionRepository,
+    FakeEvaluationRepository,
+    FakeJobRepository,
+    FakePluginRepository,
+    FakeSessionRepository,
+    FakeTaskRepository,
+    create_plugin,
+    create_session,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

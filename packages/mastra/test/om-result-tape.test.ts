@@ -354,17 +354,27 @@ it("holds a buffered result until the actor reaches production's step", async ()
   expect(await text(await result)).toBe("observed message 1");
 });
 
-it("releases a held buffered result once production's call duration has passed", async () => {
+it("releases a held buffered result once Mastra waits on its round, however slow the replay", async () => {
   const [entry] = await recordCalls([
     { phase: "observer", prompt: "message 1" },
   ]);
   if (!entry) throw new Error("Missing recorded entry");
+  let waitOnRound: (() => void) | undefined;
   vi.useFakeTimers();
   try {
     const replay = createOMResultTape(
       [{ ...entry, actorStepsAtResult: 5, durationMs: 300 }],
       () => {},
-      { isBuffered: () => true },
+      {
+        isBuffered: () => true,
+        onBufferWait: (phase, listener) => {
+          expect(phase).toBe("observer");
+          waitOnRound = listener;
+          return () => {
+            waitOnRound = undefined;
+          };
+        },
+      },
     );
     const observer = replay.instrument(
       answering(() => "live"),
@@ -374,16 +384,42 @@ it("releases a held buffered result once production's call duration has passed",
     const result = observer.doStream({ prompt: "message 1" }).finally(() => {
       settled = true;
     });
-    await vi.advanceTimersByTimeAsync(299);
+    // A replay that stalls far longer than production's observer took has
+    // not diverged, so the round keeps its result until the actor catches up.
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(settled).toBe(false);
-    // A replay that diverged never reaches the step, and Mastra may be
-    // waiting on this round.
-    await vi.advanceTimersByTimeAsync(1);
+    // A replay that diverged never reaches the step, and Mastra now waits on
+    // this round.
+    waitOnRound?.();
+    await vi.advanceTimersByTimeAsync(0);
     expect(settled).toBe(true);
+    expect(waitOnRound).toBeUndefined();
     expect(await text(await result)).toBe("observed message 1");
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("releases a held buffered result once the replayed actor has ended", async () => {
+  const [entry] = await recordCalls([
+    { phase: "observer", prompt: "message 1" },
+  ]);
+  if (!entry) throw new Error("Missing recorded entry");
+  const replay = createOMResultTape(
+    [{ ...entry, actorStepsAtResult: 5, durationMs: 300 }],
+    () => {},
+    { isBuffered: () => true },
+  );
+  const observer = replay.instrument(
+    answering(() => "live"),
+    "observer",
+  );
+  replay.beginActorStep();
+  const result = observer.doStream({ prompt: "message 1" });
+  // Memory settling joins the round, so it must not wait for a step the
+  // finished turn never started.
+  replay.endActorSteps();
+  expect(await text(await result)).toBe("observed message 1");
 });
 
 it("fails a blocking call closed once its phase's recorded results are used", async () => {

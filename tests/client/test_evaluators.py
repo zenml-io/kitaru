@@ -18,13 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeBlobRepository,
-    FakePluginRepository,
-    asgi_api_client,
-    override_idempotency,
-)
+from conftest import asgi_api_client
 from kitaru.api_models.v1.agent import AgentCreateRequest
 from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
@@ -47,6 +41,12 @@ from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.plugin import PluginKind
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeBlobRepository,
+    FakePluginRepository,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

@@ -39,6 +39,7 @@ function setup(options: {
   observe: (call: number) => Promise<void> | void;
   toolSteps: () => number;
   evidenceRepeats?: number | (() => number);
+  beforeActorStep?: (step: number) => Promise<void> | void;
   missingObservationalMemoryResults?: "fail" | "live";
   onActorCall?: (call: number) => void;
 }) {
@@ -111,6 +112,7 @@ function setup(options: {
       actorPrompts.push(JSON.stringify(prompt));
       options.onActorCall?.(actorPrompts.length);
       step += 1;
+      await options.beforeActorStep?.(step);
       if (step > options.toolSteps()) {
         step = 0;
         evidence = 0;
@@ -283,15 +285,23 @@ async function replay(
  */
 async function replaySlowObserverBaseline(
   evidenceRepeats: number,
-  onActorCall?: (call: number) => void,
+  {
+    onActorCall,
+    replayStallMs = 0,
+  }: { onActorCall?: (call: number) => void; replayStallMs?: number } = {},
 ) {
   let delayMs = 300;
+  let stallMs = 0;
   const fixture = setup({
     observation: { messageTokens: 1200, bufferTokens: 0.2 },
     observe: () => new Promise((resolve) => setTimeout(resolve, delayMs)),
     toolSteps: () => 5,
     evidenceRepeats,
     onActorCall,
+    beforeActorStep: (step) =>
+      step === 3 && stallMs > 0
+        ? new Promise((resolve) => setTimeout(resolve, stallMs))
+        : undefined,
   });
   const baseline = await recordBaseline(fixture);
   expect(baseline?.metadata).toMatchObject({ mastra_replay_state: "eligible" });
@@ -302,6 +312,7 @@ async function replaySlowObserverBaseline(
   // actor read more, and its result covers the later evidence too.
   expect(baselineContext).toContain("raw=2,3,4 observed=1");
   delayMs = 0;
+  stallMs = replayStallMs;
   await clearProcessBufferingState();
   const calls = await replay(fixture, baseline?.inputs);
   const [closed] = patches(calls);
@@ -344,11 +355,17 @@ it("replays a baseline whose first tool call came a minute after the user messag
   // its prompt has no such label.
   vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-26T22:43:59Z") });
   let shifted = false;
-  await replaySlowObserverBaseline(34, () => {
-    if (shifted) return;
-    shifted = true;
-    vi.setSystemTime(Date.now() + 60_000);
+  await replaySlowObserverBaseline(34, {
+    onActorCall: () => {
+      if (shifted) return;
+      shifted = true;
+      vi.setSystemTime(Date.now() + 60_000);
+    },
   });
+});
+
+it("replays a slow-observer baseline whose replay stalls longer than the observer took", async () => {
+  await replaySlowObserverBaseline(34, { replayStallMs: 600 });
 });
 
 it("keeps a baseline that ended just under the observation threshold unobserved in replay", async () => {

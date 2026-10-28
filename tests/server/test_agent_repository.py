@@ -18,12 +18,7 @@ from collections.abc import AsyncGenerator, Callable
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    pg_session,
-    postgres_available,
-)
+from conftest import pg_session, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -44,6 +39,10 @@ from kitaru.server.domain.agent import (
     DuplicateAgentName,
 )
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+)
 
 Setup = tuple[AgentRepository, uuid.UUID, Callable[[], AgentVersionRepository]]
 

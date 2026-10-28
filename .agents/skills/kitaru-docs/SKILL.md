@@ -28,7 +28,7 @@ The public marketing/runtime site lives in `zenml-io-v2`. If a task involves Ast
 - Link to diagrams with `https://assets.kitaru.ai/docs/diagrams/<slug>.png`.
 - Do not commit temporary planning/review files or prompt exports unless the user explicitly asks for a durable tracked document.
 - Treat `KITARU_*` variables as the public configuration surface.
-- CLI contracts live in `src/kitaru/cli/app.py` and are available offline through `kitaru schema`.
+- CLI contracts live in the `src/kitaru/cli/*_commands.py` modules and are available offline through `kitaru schema`.
 - The generated OpenAPI document and `src/kitaru/api_models/` are the API contract authorities.
 - Native MCP documentation must match `src/kitaru/mcp/registry.py` and `tests/mcp/snapshots/metrics.json`. Run `just mcp-schema-check`; do not copy tool counts into prose.
 - The native v2 MCP server does not expose stack or model-alias management.
