@@ -18,6 +18,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from kitaru_model_swap.calls import RecordedCall
 from kitaru_model_swap.picks import (
@@ -51,22 +52,69 @@ def split_routes(
     by_candidate: dict[str, list[CallResult]],
     sampled: list[RecordedCall],
     weight: Callable[[RecordedCall], Decimal],
-) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    reference: str | None = None,
+) -> tuple[
+    dict[str, dict[str, Any]],
+    dict[str, dict[str, Any]],
+    dict[str, dict[str, Any]],
+]:
     """Per-step results of each candidate on the learning and held-out sessions.
 
     Sessions, not calls, are split, so calls from one conversation never land
     on both sides.
     """
     key = get_route_key(sampled)
+    ref_answers = (
+        {
+            r.call.node_id: r
+            for r in get_step_results(by_candidate.get(reference, []))
+            if r.agreement is not None
+        }
+        if reference is not None
+        else None
+    )
+    overall: dict[str, dict[str, Any]] = {}
     learning: dict[str, dict[str, Any]] = {}
     held_out: dict[str, dict[str, Any]] = {}
     for name, results in by_candidate.items():
+        steps = get_step_results(results)
         halves: tuple[list[CallResult], list[CallResult]] = ([], [])
-        for r in get_step_results(results):
+        for r in steps:
             halves[0 if is_learning_session(r.call) else 1].append(r)
-        learning[name] = summarize_by_group(halves[0], key, weight)
-        held_out[name] = summarize_by_group(halves[1], key, weight)
-    return learning, held_out
+        overall[name] = _summarize_comparable_routes(steps, ref_answers, key, weight)
+        learning[name] = _summarize_comparable_routes(
+            halves[0], ref_answers, key, weight
+        )
+        held_out[name] = _summarize_comparable_routes(
+            halves[1], ref_answers, key, weight
+        )
+    return learning, held_out, overall
+
+
+def _summarize_comparable_routes(
+    results: list[CallResult],
+    reference: dict[UUID, CallResult] | None,
+    key: Callable[[RecordedCall], str],
+    weight: Callable[[RecordedCall], Decimal],
+) -> dict[str, Any]:
+    """Keep reliability counts and compare rates on common answered calls."""
+    groups = summarize_by_group(results, key, weight)
+    if reference is None:
+        return groups
+    pairs = [
+        (r, reference[r.call.node_id])
+        for r in results
+        if r.agreement is not None and r.call.node_id in reference
+    ]
+    own = summarize_by_group([r for r, _ in pairs], key)
+    ref = summarize_by_group([r for _, r in pairs], key)
+    for name, values in groups.items():
+        values["paired"] = {
+            "calls": own.get(name, {}).get("calls", 0),
+            "match_rate": own.get(name, {}).get("match_rate"),
+            "reference_rate": ref.get(name, {}).get("match_rate"),
+        }
+    return groups
 
 
 def _is_unreliable(values: dict[str, Any] | None) -> bool:
@@ -85,7 +133,11 @@ def get_best_mix(
     sampled: list[RecordedCall],
     volume: Volume,
     min_calls: int,
-    split: tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]],
+    split: tuple[
+        dict[str, dict[str, Any]],
+        dict[str, dict[str, Any]],
+        dict[str, dict[str, Any]],
+    ],
     weight: Callable[[RecordedCall], Decimal],
 ) -> dict[str, Any] | None:
     """Pick, per step, the cheapest candidate that behaves well enough.
@@ -94,16 +146,20 @@ def get_best_mix(
     router can see. Picking the best of many candidates on many steps finds
     some by luck, so each step is chosen on the learning half of the sessions
     and checked on the held-out half. A step moves to a candidate only when
-    the candidate answered at least `min_calls` of the step's calls, failed on
-    no more than a fifth of the step's calls it was sent, and its rate on the
-    learning half is within 10 points of the reference's rate there (or of the
-    best rate when there is no reference). A pick whose held-out rate, on
-    enough held-out calls, falls more than 10 points below the reference's
+    the candidate and reference answered at least `min_calls` of the same
+    step's calls (or the candidate alone when there is no reference), failed
+    on no more than a fifth of the step's calls it was sent, and its rate on
+    the learning half is within 10 points of the reference's rate on their
+    common answered calls (or of the best rate when there is no reference).
+    A pick whose rate on enough common held-out calls falls more than 10
+    points below the reference's
     held-out rate (or the learning bar), or that fails too often on the
     held-out calls, is dropped (`held_out: failed`); with too few held-out
-    calls it stays but is marked `too_few`. Otherwise the step stays on
-    today's model, as does a step where the reference itself takes the
-    recorded action less than half the time. "Rate" is whether the candidate
+    calls it stays but is marked `too_few`. When the reference has no common
+    held-out answers, the step stays on today's model with `too_few`.
+    Otherwise the step stays on today's model, as does a step where the
+    reference itself takes the recorded action less than half the time.
+    "Rate" is whether the candidate
     takes the same kind of action (the same tools, or a text answer), not
     exact wording or meaning. Today's cost is the reference's replay cost
     where the reference answered the step, since recorded calls often hit a
@@ -135,7 +191,8 @@ def get_best_mix(
     groups: list[dict[str, Any]] = []
     # (share, cost per call with the mix, cost per call today) per step
     prices: list[tuple[Decimal, Decimal | None, Decimal | None]] = []
-    learning, held_out = split
+    learning, held_out, overall_routes = split
+    learning_groups = {key(call) for call in sampled if is_learning_session(call)}
     sessions = {
         "learning": len({c.session_id for c in sampled if is_learning_session(c)}),
         "held_out": len({c.session_id for c in sampled if not is_learning_session(c)}),
@@ -145,11 +202,14 @@ def get_best_mix(
         # A step seen in only one half of the sessions cannot be split; it is
         # judged on all its calls and its pick marked as not checked.
         ref_values = (
-            learning.get(reference["name"], {}).get(group) or ref_all
+            (
+                learning.get(reference["name"], {}).get(group)
+                if group in learning_groups
+                else ref_all
+            )
             if reference
             else None
         )
-        ref_held = held_out.get(reference["name"], {}).get(group) if reference else None
         if ref_all and ref_all["cost_per_call_usd"] is not None:
             today: Decimal | None = Decimal(ref_all["cost_per_call_usd"])
             today_source: str | None = "reference replay"
@@ -157,28 +217,38 @@ def get_best_mix(
             today = compute_weighted_mean(recorded_costs[group])
             today_source = None if today is None else "recording"
         rates: dict[str, float] = {}
+        reference_rates: dict[str, float] = {}
         costs: dict[str, Decimal] = {}
         unsplit: set[str] = set()
         unreliable: list[str] = []
         too_few = False
         for c in usable:
             values = learning.get(c["name"], {}).get(group)
-            overall = c["by_route"].get(group)
+            overall = overall_routes.get(c["name"], {}).get(group)
             if _is_unreliable(overall):
                 unreliable.append(c["name"])
                 continue
             if not overall or overall["cost_per_call_usd"] is None:
                 continue
-            if overall["calls"] < min_calls:
+            overall_calls = (
+                overall["paired"]["calls"] if reference else overall["calls"]
+            )
+            if overall_calls < min_calls:
                 too_few = True
                 continue
-            if not values or not values["calls"]:
+            if group not in learning_groups:
                 unsplit.add(c["name"])
                 values = overall
-            rates[c["name"]] = values["match_rate"]
+            evidence = values.get("paired", {}) if reference and values else values
+            if not evidence or evidence["match_rate"] is None:
+                too_few = True
+                continue
+            rates[c["name"]] = evidence["match_rate"]
+            if reference:
+                reference_rates[c["name"]] = evidence["reference_rate"]
             costs[c["name"]] = Decimal(overall["cost_per_call_usd"])
         bar = ref_values["match_rate"] if ref_values else None
-        if bar is None and rates:
+        if reference is None and rates:
             bar = max(rates.values())
         # When today's model does not take the same action as its own
         # recording, agreement cannot tell candidates apart on this step.
@@ -186,7 +256,12 @@ def get_best_mix(
         if noisy:
             bar = None
         fits = (
-            [name for name, rate in rates.items() if rate >= bar - COMPARABLE_POINTS]
+            [
+                name
+                for name, rate in rates.items()
+                if rate >= reference_rates.get(name, bar) - COMPARABLE_POINTS
+                and reference_rates.get(name, bar) >= NOISY_REFERENCE
+            ]
             if bar is not None
             else []
         )
@@ -197,13 +272,16 @@ def get_best_mix(
         held_rate, held_calls, held_status = None, 0, None
         if choice is not None and bar is not None:
             held = held_out.get(choice, {}).get(group)
-            held_bar = ref_held["match_rate"] if ref_held else bar
-            held_calls = held["calls"] if held else 0
-            held_rate = held["match_rate"] if held else None
+            evidence = held.get("paired", {}) if reference and held else held
+            held_bar = evidence.get("reference_rate") if reference and evidence else bar
+            held_calls = evidence["calls"] if evidence else 0
+            held_rate = evidence["match_rate"] if evidence else None
             if choice in unsplit:
                 held_status = "no_split"
             elif _is_unreliable(held):
                 choice, held_status = None, "failed"
+            elif held_bar is None:
+                choice, held_status = None, "too_few"
             elif held_rate is None or held_calls < max(1, min_calls // 4):
                 held_status = "too_few"
             elif held_rate < held_bar - COMPARABLE_POINTS:
@@ -231,7 +309,10 @@ def get_best_mix(
         )
         prices.append((share or Decimal(0), cost, today))
     # A pick that failed on held-out sessions is a result worth showing.
-    if not any(item["candidate"] or item["held_out"] == "failed" for item in groups):
+    if not any(
+        item["candidate"] or item["held_out"] in {"failed", "too_few"}
+        for item in groups
+    ):
         return None
     summary = {
         "groups": groups,

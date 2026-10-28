@@ -99,6 +99,18 @@ def _source_metadata(record: dict[str, Any]) -> dict[str, Any]:
     return selected
 
 
+def get_node_attributes(record: dict[str, Any]) -> dict[str, Any]:
+    """Return Langfuse identity fields and recorded system instructions."""
+    attributes = {
+        "langfuse.type": record.get("type"),
+        "langfuse.level": record.get("level"),
+    }
+    instructions = get_metadata_value(record, "gen_ai.system_instructions")
+    if instructions is not None:
+        attributes["gen_ai.system_instructions"] = instructions
+    return attributes
+
+
 def get_node_metadata(record: dict[str, Any], node_type: NodeType) -> dict[str, Any]:
     """Return source metadata plus normalized tool definitions for model calls."""
     metadata = _source_metadata(record)
@@ -129,16 +141,18 @@ def _get_request_parameters(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _tool_definition(value: Any) -> dict[str, Any] | None:
-    """Normalize one tool definition to the OpenAI chat-completions form."""
+    """Normalize callable tools and preserve provider-specific definitions."""
     value = decode_json(value)
     # Anthropic marks its client tools `custom` and keeps the schema under
     # `input_schema`; both forms describe a callable function.
-    if not isinstance(value, dict) or value.get("type") not in (
+    if not isinstance(value, dict):
+        return None
+    if value.get("type") not in (
         None,
         "function",
         "custom",
     ):
-        return None
+        return value
     nested = value.get("function")
     function = nested if isinstance(nested, dict) else value
     name = function.get("name")
@@ -148,10 +162,10 @@ def _tool_definition(value: Any) -> dict[str, Any] | None:
     # OpenAI lets a function that takes no arguments omit its parameters.
     if parameters is None and value.get("type") == "function":
         parameters = {"type": "object", "properties": {}}
-    # Keep only definitions that carry a real schema; a bare name cannot be
-    # replayed against another model.
+    # A bare function name cannot be replayed. Custom tools may instead
+    # constrain generated text, so retain them for replay validation.
     if not isinstance(name, str) or not name or not isinstance(parameters, dict):
-        return None
+        return value if value.get("type") == "custom" else None
     normalized: dict[str, Any] = {"name": name}
     description = function.get("description")
     if isinstance(description, str) and description:
@@ -165,7 +179,7 @@ def _tool_definition(value: Any) -> dict[str, Any] | None:
 
 
 def _tool_definitions(values: Any) -> list[dict[str, Any]]:
-    """Normalize a list of tool definitions, dropping entries without schemas."""
+    """Normalize functions and retain provider tools for replay validation."""
     values = decode_json(values)
     if not isinstance(values, list):
         return []

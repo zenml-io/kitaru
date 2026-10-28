@@ -37,7 +37,10 @@ from kitaru.task.importer import (
     ImportedNode,
     ImportedSession,
 )
-from kitaru_langfuse_importer.node_metadata import get_node_metadata
+from kitaru_langfuse_importer.node_metadata import (
+    get_node_attributes,
+    get_node_metadata,
+)
 from kitaru_langfuse_importer.records import (
     InvalidImport,
     decode_dict,
@@ -1432,10 +1435,7 @@ class LangfuseJSONLImporter:
                         )
                         or None,
                         tool_name=tool_name,
-                        attributes={
-                            "langfuse.type": record.get("type"),
-                            "langfuse.level": record.get("level"),
-                        },
+                        attributes=get_node_attributes(record),
                         metadata=get_node_metadata(record, node_type),
                         children=[],
                     ),

@@ -173,7 +173,12 @@ def build_report(
             sampled,
             volume,
             params.min_mix_calls,
-            split_routes(by_candidate, sampled, weight),
+            split_routes(
+                by_candidate,
+                sampled,
+                weight,
+                next((c.name for c in params.candidates if c.reference), None),
+            ),
             weight,
         )
     )
