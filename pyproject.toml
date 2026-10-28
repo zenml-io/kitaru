@@ -184,6 +184,7 @@ select = [
     "DTZ001", "DTZ002", "DTZ003", "DTZ004", "DTZ005", "DTZ006", "DTZ007",
     "DTZ012", "DTZ901",
     "ERA001",  # Commented-out code; explanations of why remain a review standard.
+    "SLF001",  # Private members stay private to their class.
     "TID251",  # Runtime annotation policy, configured below.
     "TRY002", "TRY201", "TRY203",
 ]
@@ -197,7 +198,10 @@ select = [
 "scripts/google_adk_fakes.py" = ["D1"]
 # Production signatures are mandatory; fixture/callback and standalone script
 # signatures retain their own contracts. This also covers future support folders.
-"!src/**" = ["ANN001", "ANN002", "ANN003", "ANN201", "ANN202", "ANN204", "ANN205", "ANN206"]
+"!src/**" = [
+    "ANN001", "ANN002", "ANN003", "ANN201", "ANN202", "ANN204", "ANN205", "ANN206",
+    "SLF001",
+]
 # These fixtures intentionally exercise naive datetimes or JSON redaction.
 "tests/api_models/test_wire_properties.py" = ["DTZ001"]
 "tests/cli/test_redaction_properties.py" = ["DTZ001"]
