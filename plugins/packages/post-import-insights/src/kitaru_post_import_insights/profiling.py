@@ -1520,14 +1520,12 @@ def _build_model_mix_briefing(
         cohort=cohort,
         hypothesis=(
             "Check whether another model is better, cheaper, faster, or open for "
-            "these calls. Use the kitaru-model-swap skill to run the "
-            "kitaru/model-swap analyzer on this import: a dry run first, then the "
-            "comparison, then a review of where the candidates differ."
+            "these calls: run kitaru/model-swap on this import with the "
+            "kitaru-model-swap skill, then review where the candidates differ."
         ),
         held=(
-            "a candidate is judged right at least as often as the current model "
-            "on the reviewed differences while it lowers cost or latency or "
-            "offers open weights."
+            "a candidate is judged right as often as today's model on the reviewed "
+            "differences and is cheaper, faster, or open."
         ),
     )
 
