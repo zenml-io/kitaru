@@ -2,10 +2,10 @@ import { Agent } from "@mastra/core/agent";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { expect, it, vi } from "vitest";
 import { decodeMemoryValue } from "../src/memory-snapshot.js";
+import { getOMInputFingerprint } from "../src/om-fingerprint.js";
 import {
   createOMResultTape,
   getNativeOMModel,
-  getOMInputFingerprint,
   MastraOMDivergenceError,
   MastraOMRecordedFailureError,
   MastraOMSkippedCallError,
