@@ -18,7 +18,6 @@
   "plugins/packages/langfuse-importer/src/kitaru_langfuse_importer/importer.py": 1684,
   "plugins/packages/langsmith-importer/src/kitaru_langsmith_importer/importer.py": 1197,
   "plugins/packages/mlflow-importer/src/kitaru_mlflow_importer/importer.py": 1243,
-  "plugins/packages/post-import-insights/src/kitaru_post_import_insights/generation.py": 1195,
   "plugins/packages/post-import-insights/src/kitaru_post_import_insights/profiling.py": 2349,
   "plugins/packages/pydantic-ai/src/kitaru_pydantic_ai/capability.py": 1114,
   "plugins/tests/adapters/claude_agent_sdk/test_recording.py": 1203,
