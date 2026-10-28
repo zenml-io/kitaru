@@ -21,18 +21,6 @@ from functools import partial
 import httpx
 import pytest
 
-from conftest import (
-    ReplayServices,
-    build_replay_services,
-    create_agent,
-    create_agent_version,
-    create_blob,
-    create_cohort,
-    create_cohort_version,
-    create_plugin,
-    create_session,
-    override_idempotency,
-)
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -53,6 +41,18 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.experiment_run import ExperimentRun
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
+from kitaru_test_support import (
+    ReplayServices,
+    build_replay_services,
+    create_agent,
+    create_agent_version,
+    create_blob,
+    create_cohort,
+    create_cohort_version,
+    create_plugin,
+    create_session,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

@@ -28,7 +28,7 @@ concurrency:
 permissions:
   contents: read
 env:
-  KITARU_ANALYTICS_OPT_IN: false
+  KITARU_SERVER_ANALYTICS_OPT_IN: false
   ZENML_ANALYTICS_OPT_IN: false
   ZENML_LOGGING_VERBOSITY: INFO
   AUTO_OPEN_DASHBOARD: false
@@ -444,7 +444,7 @@ jobs:
         run: |
           set -euo pipefail
           while IFS= read -r package_path; do
-            uv run --no-project python scripts/smoke_plugin_artifacts.py --package "$package_path" </dev/null
+            uv run --no-project --with packaging==26.2 python scripts/smoke_plugin_artifacts.py --package "$package_path" </dev/null
           done <<< "$PACKAGE_PATHS"
   artifact-contracts:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}

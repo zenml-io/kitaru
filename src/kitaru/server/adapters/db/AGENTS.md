@@ -21,11 +21,7 @@ This file covers repository, ORM, and transaction mechanics.
   default needs a matching `(field, id)` composite `Index` in
   `__table_args__`, an Alembic revision, and `paginate()` support.
 - Declare foreign keys as a named `ForeignKeyConstraint` in `__table_args__` so `violated_constraint` can match the name.
-- Never hand-write index or constraint names. Generate them with `index_name`,
-  `unique_constraint_name`, and `foreign_key_name` from
-  `orm/orm_utils.py`, and store the result as the module-level constant
-  the repository compares against, so the ORM class and the
-  `violated_constraint` check share one source of truth.
+- Store each generated index or constraint name as the module-level constant the repository compares against, so the ORM class and the `violated_constraint` check share one source of truth. `tests/server/test_orm_conventions.py` fails for a name the `orm/orm_utils.py` helpers did not produce.
 - String columns that back a name or other bounded identifier declare an
   explicit length via `String(...)`.
 - `from_domain` passes the id and never timestamps. `to_domain` passes both

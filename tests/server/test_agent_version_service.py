@@ -18,15 +18,6 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeExperimentRunRepository,
-    FakeTaskRepository,
-    create_agent,
-    create_agent_task,
-    create_experiment_run,
-)
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.models.agent_version import (
     AgentVersionFilter,
@@ -44,6 +35,15 @@ from kitaru.server.domain.agent_version import (
     AgentVersionInUse,
     AgentVersionNotFound,
     RunSpec,
+)
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeExperimentRunRepository,
+    FakeTaskRepository,
+    create_agent,
+    create_agent_task,
+    create_experiment_run,
 )
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))

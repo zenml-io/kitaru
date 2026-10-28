@@ -18,16 +18,6 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAnnotationRepository,
-    FakeInvestigationRepository,
-    FakeSessionNodeRepository,
-    FakeSessionRepository,
-    build_session_node,
-    create_agent,
-    create_session,
-)
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.filter import FilterOp
@@ -54,6 +44,16 @@ from kitaru.server.domain.investigation import (
 )
 from kitaru.server.domain.session import SessionNotFound
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAnnotationRepository,
+    FakeInvestigationRepository,
+    FakeSessionNodeRepository,
+    FakeSessionRepository,
+    build_session_node,
+    create_agent,
+    create_session,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 QUESTION_KEY = "cause"

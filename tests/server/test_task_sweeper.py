@@ -23,18 +23,18 @@ import pytest
 from asyncpg.exceptions import LockNotAvailableError
 from sqlalchemy.exc import DBAPIError
 
-from conftest import (
-    FakeIdempotencyKeyRepository,
-    JobAndTaskServices,
-    build_job_and_task_services,
-    local_settings,
-)
+from conftest import local_settings
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.server.api import task_sweeper
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.database.service import DatabaseService
+from kitaru_test_support import (
+    FakeIdempotencyKeyRepository,
+    JobAndTaskServices,
+    build_job_and_task_services,
+)
 
 
 def _lock_not_available_error() -> DBAPIError:
