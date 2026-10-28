@@ -581,3 +581,26 @@ it("records key order after the upload sanitizer rewrites declared file URLs", a
     { output: FILE_REF },
   ]);
 });
+
+it.each([undefined, null, "successor-generation"])(
+  "round-trips legacy and current OM liveness markers: %s",
+  async (supersededBy) => {
+    const input = await fixture();
+    const row = required(input.initialSnapshot.records[0]);
+    if (supersededBy === undefined) Reflect.deleteProperty(row, "supersededBy");
+    else Object.assign(row, { supersededBy });
+    const envelope = createMemoryReplayEnvelope(input);
+    expect(envelope.version).toBe(3);
+    expect(envelope.complete).toBe(true);
+    expect(decodeMemoryReplayEnvelope(envelope)).toEqual(input);
+  },
+);
+
+it.each([false, 123, {}, []].map((supersededBy) => ({ supersededBy })))(
+  "rejects malformed OM liveness markers: $supersededBy",
+  async ({ supersededBy }) => {
+    const input = await fixture();
+    Object.assign(required(input.initialSnapshot.records[0]), { supersededBy });
+    expect(createMemoryReplayEnvelope(input).complete).toBe(false);
+  },
+);

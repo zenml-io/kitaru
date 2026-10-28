@@ -1,4 +1,5 @@
 import { Agent } from "@mastra/core/agent";
+import { InMemoryMemory } from "@mastra/core/storage";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { createTool } from "@mastra/core/tools";
 import { expect, it } from "vitest";
@@ -6,6 +7,7 @@ import { z } from "zod/v4";
 import type { MastraMemoryMutation } from "../src/memory-binding.js";
 import {
   createIsolatedMemoryReplay,
+  isAsyncBufferingRunning,
   onBufferingWait,
   serializeMemoryConfiguration,
   trackBufferingWaits,
@@ -372,6 +374,7 @@ it("replays on the record semantics of a database store unless the source was in
       ],
     }),
   ).toMatchObject({ chunksActivated: 0 });
+  current.activeObservations = historical.activeObservations;
   await domain.createReflectionGeneration({
     currentRecord: current,
     reflection: "REFLECTED",
@@ -416,10 +419,13 @@ it("replays on the record semantics of a database store unless the source was in
     reflection: "REFLECTED",
     tokenCount: 3,
   });
-  expect(
-    (await nativeDomain.getObservationalMemory(THREAD, RESOURCE))
-      ?.lastObservedAt,
-  ).toBeInstanceOf(Date);
+  const nativeReflected = await nativeDomain.getObservationalMemory(
+    THREAD,
+    RESOURCE,
+  );
+  if ("commitActiveObservations" in nativeDomain)
+    expect(nativeReflected?.lastObservedAt).toBeUndefined();
+  else expect(nativeReflected?.lastObservedAt).toBeInstanceOf(Date);
   await inMemory.finish();
 });
 
@@ -455,3 +461,218 @@ it("reports when Mastra waits on a thread's running buffer round", async () => {
     endRound();
   }
 });
+
+it("forgets a finished buffer round that Mastra removes only while its map holds it", async () => {
+  const { memory } = createMemoryRuntime();
+  const engine = await memory.omEngine;
+  if (!engine) throw new Error("Missing OM engine");
+  const selector = { threadId: THREAD, resourceId: RESOURCE };
+  trackBufferingWaits(engine);
+  const rounds = (
+    engine.buffering.constructor as unknown as {
+      asyncBufferingOps: Map<string, Promise<void>>;
+    }
+  ).asyncBufferingOps;
+  const key = engine.buffering.getObservationBufferKey(
+    engine.buffering.getLockKey(THREAD, RESOURCE),
+  );
+  let endRound!: () => void;
+  // Mastra 1.77 and later clear a finished round this way.
+  const round: Promise<void> = new Promise<void>((resolve) => {
+    endRound = resolve;
+  }).finally(() => {
+    if (rounds.get(key) === round) rounds.delete(key);
+  });
+  rounds.set(key, round);
+  expect(isAsyncBufferingRunning(engine, selector, "observation")).toBe(true);
+  endRound();
+  await round;
+  expect(isAsyncBufferingRunning(engine, selector, "observation")).toBe(false);
+});
+
+it.skipIf(!("commitActiveObservations" in InMemoryMemory.prototype))(
+  "preserves conflict and retirement no-ops under persistent replay semantics",
+  async () => {
+    const { source, initialSnapshot, configuration } = await baseline();
+    const runtime = await createIsolatedMemoryReplay({
+      invocationId: "conflict-no-ops",
+      initialSnapshot,
+      configuration,
+      resolveModel: (id) =>
+        id.endsWith("observer")
+          ? source.observer.model
+          : source.reflector.model,
+      recordMutation: async () => {},
+      finalizationWaitMs: 60_000,
+    });
+    const domain = runtime.binding.domain;
+    if (
+      !("commitActiveObservations" in domain) ||
+      typeof domain.commitActiveObservations !== "function"
+    )
+      throw new Error("Missing conflict-aware storage capability");
+    const current = await domain.getObservationalMemory(THREAD, RESOURCE);
+    if (!current) throw new Error("Missing restored record");
+    const observation = {
+      id: current.id,
+      observations: "OBSERVED",
+      tokenCount: 3,
+      lastObservedAt: new Date("2026-01-02T00:00:00Z"),
+    };
+    expect(
+      await domain.commitActiveObservations({
+        ...observation,
+        observedMessageIds: ["historical-message"],
+      }),
+    ).toEqual({ applied: true });
+    const beforeConflict = await domain.getObservationalMemory(
+      THREAD,
+      RESOURCE,
+    );
+    expect(
+      await domain.commitActiveObservations({
+        ...observation,
+        observations: "REJECTED",
+        expectedActiveObservations: "STALE",
+      }),
+    ).toEqual({ applied: false, reason: "conflict" });
+    expect(await domain.getObservationalMemory(THREAD, RESOURCE)).toEqual(
+      beforeConflict,
+    );
+    expect(await domain.commitActiveObservations(observation)).toEqual({
+      applied: true,
+    });
+    expect(
+      (await domain.getObservationalMemory(THREAD, RESOURCE))
+        ?.observedMessageIds,
+    ).toBeUndefined();
+
+    const stored = await domain.getObservationalMemory(THREAD, RESOURCE);
+    if (!stored) throw new Error("Missing stored record");
+    const rejected = await domain.createReflectionGeneration({
+      currentRecord: {
+        ...stored,
+        activeObservations: "UNRELATED SNAPSHOT",
+        lastObservedAt: new Date(0),
+        metadata: { poisoned: true },
+      },
+      reflection: "REJECTED REFLECTION",
+      tokenCount: 1,
+    });
+    expect(rejected.id).toBe(stored.id);
+    expect(await domain.getObservationalMemory(THREAD, RESOURCE)).toEqual(
+      stored,
+    );
+    const successor = await domain.createReflectionGeneration({
+      currentRecord: stored,
+      reflection: "REFLECTED",
+      tokenCount: 1,
+    });
+    const beforeRetirement = await domain.getObservationalMemoryHistory(
+      THREAD,
+      RESOURCE,
+    );
+    expect(
+      await domain.commitActiveObservations({
+        ...observation,
+        observations: "RETIRED",
+      }),
+    ).toEqual({ applied: false, reason: "retired" });
+    const head = await domain.createReflectionGeneration({
+      currentRecord: {
+        ...stored,
+        lastObservedAt: new Date(0),
+        metadata: { poisoned: true },
+      },
+      reflection: "RETIRED REFLECTION",
+      tokenCount: 1,
+    });
+    expect(head.id).toBe(successor.id);
+    expect(
+      await domain.getObservationalMemoryHistory(THREAD, RESOURCE),
+    ).toEqual(beforeRetirement);
+    expect(await snapshotMemory(source, true)).toEqual({
+      thread: initialSnapshot.thread,
+      resource: initialSnapshot.resource,
+      messages: initialSnapshot.messages,
+      records: initialSnapshot.records,
+    });
+    expect(await runtime.finish()).toBe(true);
+  },
+);
+
+it.skipIf(!("commitActiveObservations" in InMemoryMemory.prototype))(
+  "preserves metadata when persistent initialization returns an existing head",
+  async () => {
+    const { source, initialSnapshot, configuration } = await baseline();
+    const historical = initialSnapshot.records[0];
+    if (!historical) throw new Error("Missing fixture record");
+    historical.metadata = { origin: "preserved" };
+    const runtime = await createIsolatedMemoryReplay({
+      invocationId: "idempotent-initialization",
+      initialSnapshot,
+      configuration,
+      resolveModel: (id) =>
+        id.endsWith("observer")
+          ? source.observer.model
+          : source.reflector.model,
+      recordMutation: async () => {},
+      finalizationWaitMs: 60_000,
+    });
+    const domain = runtime.binding.domain;
+    const before = await domain.getObservationalMemory(THREAD, RESOURCE);
+    expect(
+      await domain.initializeObservationalMemory({
+        threadId: THREAD,
+        resourceId: RESOURCE,
+        scope: "thread",
+        config: {},
+      }),
+    ).toEqual(before);
+    expect(await domain.getObservationalMemory(THREAD, RESOURCE)).toEqual(
+      before,
+    );
+    expect(await runtime.finish()).toBe(true);
+  },
+);
+
+it.skipIf(!("commitActiveObservations" in InMemoryMemory.prototype))(
+  "carries persisted cursors and appended text through a stale reflection snapshot",
+  async () => {
+    const { source, initialSnapshot, configuration } = await baseline();
+    const runtime = await createIsolatedMemoryReplay({
+      invocationId: "append-during-reflection",
+      initialSnapshot,
+      configuration,
+      resolveModel: (id) =>
+        id.endsWith("observer")
+          ? source.observer.model
+          : source.reflector.model,
+      recordMutation: async () => {},
+      finalizationWaitMs: 60_000,
+    });
+    const domain = runtime.binding.domain;
+    const current = await domain.getObservationalMemory(THREAD, RESOURCE);
+    if (!current) throw new Error("Missing restored record");
+    const cursor = new Date("2026-01-02T00:00:00Z");
+    await domain.updateActiveObservations({
+      id: current.id,
+      observations: `${current.activeObservations}\nAPPENDED WHILE REFLECTING`,
+      tokenCount: current.observationTokenCount + 2,
+      lastObservedAt: cursor,
+    });
+    const successor = await domain.createReflectionGeneration({
+      currentRecord: current,
+      reflection: "REFLECTED",
+      tokenCount: 1,
+    });
+    expect(successor.activeObservations).toBe(
+      "REFLECTED\n\nAPPENDED WHILE REFLECTING",
+    );
+    expect(successor.lastObservedAt).toEqual(cursor);
+    expect(
+      (await domain.getObservationalMemory(THREAD, RESOURCE))?.lastObservedAt,
+    ).toEqual(cursor);
+    expect(await runtime.finish()).toBe(true);
+  },
+);

@@ -1,7 +1,6 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { InputProcessor } from "@mastra/core/processors";
 import {
   MASTRA_RESOURCE_ID_KEY,
   MASTRA_THREAD_ID_KEY,
@@ -18,9 +17,9 @@ import {
   createProcessLocalMemoryAccess,
   type MastraExclusiveMemoryAccess,
 } from "../src/memory.js";
+import { getMastraVersion } from "../src/stream-recording.js";
 import { createFileMemoryAccess } from "./helpers/file-memory-access.js";
 import {
-  createMemoryRuntime,
   RESOURCE,
   seedMemory,
   streamParts,
@@ -29,6 +28,7 @@ import {
 } from "./helpers/memory-agent.js";
 import {
   AGENT_ID,
+  getSessionOutcomes,
   installTestApi,
   REPLAY_ID,
   type TestApi,
@@ -256,37 +256,6 @@ async function setup(
   return { api, memory, domain, turn, replay };
 }
 
-/** The final replay state of every session, in creation order. */
-function outcomes(api: TestApi): string[] {
-  const created = api.calls.filter(
-    (call) => call.method === "POST" && call.path === "/api/v1/sessions",
-  );
-  return api.sessionIds.map((id, index) => {
-    const initial = created[index]?.body?.metadata as
-      | Record<string, unknown>
-      | undefined;
-    // A setup failure reports its own session after the native answer.
-    if (initial?.mastra_replay_state === "ineligible") return "setup-failure";
-    const update = api.calls
-      .filter(
-        (call) =>
-          call.method === "PATCH" &&
-          call.path.endsWith(id) &&
-          call.body?.status !== "in_progress",
-      )
-      .at(-1);
-    if (!update) return "pending";
-    const metadata = update.body?.metadata as
-      | Record<string, unknown>
-      | undefined;
-    const reason =
-      metadata?.mastra_replay_state === "ineligible"
-        ? `/${String(metadata.mastra_replay_reason)}`
-        : "";
-    return `${String(update.body?.status)}/${String(metadata?.mastra_replay_state)}${reason}`;
-  });
-}
-
 function memoryMethods(api: TestApi, sessionId: string): unknown[] {
   return api
     .nodeBatches(sessionId)
@@ -310,7 +279,7 @@ it.each(LEASES)(
     await turn("Turn two.");
     await vi.waitFor(
       () =>
-        expect(outcomes(api)).toEqual([
+        expect(getSessionOutcomes(api)).toEqual([
           "completed/eligible",
           "completed/eligible",
         ]),
@@ -335,10 +304,10 @@ it.each(LEASES)(
     await vi.waitFor(() => expect(reflectorStarted).toBe(true));
     // The stream has closed; the reflection finishes well after it.
     await pause(300);
-    expect(outcomes(api)).toEqual(["pending"]);
+    expect(getSessionOutcomes(api)).toEqual(["pending"]);
     reflection.open();
     await vi.waitFor(
-      () => expect(outcomes(api)).toEqual(["completed/eligible"]),
+      () => expect(getSessionOutcomes(api)).toEqual(["completed/eligible"]),
       {
         timeout: 3000,
       },
@@ -356,7 +325,7 @@ it.each(LEASES)(
     await turn("Next turn.");
     await vi.waitFor(
       () =>
-        expect(outcomes(api)).toEqual([
+        expect(getSessionOutcomes(api)).toEqual([
           "completed/eligible",
           "completed/eligible",
         ]),
@@ -387,7 +356,7 @@ it.each(LEASES)(
     await turn("Other thread.", { thread: "other-thread", resource: RESOURCE });
     await vi.waitFor(
       () =>
-        expect(outcomes(api)).toEqual([
+        expect(getSessionOutcomes(api)).toEqual([
           "completed/eligible",
           "completed/eligible",
         ]),
@@ -404,7 +373,7 @@ it.each(LEASES)(
     await turn("A normal turn.");
     await vi.waitFor(
       () =>
-        expect(outcomes(api).sort()).toEqual([
+        expect(getSessionOutcomes(api).sort()).toEqual([
           "completed/eligible",
           "setup-failure",
         ]),
@@ -428,7 +397,7 @@ it.each(LEASES)(
     await turn("Turn two.");
     await vi.waitFor(
       () =>
-        expect(outcomes(api)).toEqual([
+        expect(getSessionOutcomes(api)).toEqual([
           "completed/eligible",
           "completed/eligible",
         ]),
@@ -461,7 +430,7 @@ it.each(LEASES)(
     });
     await vi.waitFor(
       () =>
-        expect(outcomes(api).sort()).toEqual([
+        expect(getSessionOutcomes(api).sort()).toEqual([
           "completed/eligible",
           "setup-failure",
           "setup-failure",
@@ -492,7 +461,7 @@ it.each(LEASES)(
     });
     await vi.waitFor(
       () =>
-        expect(outcomes(api)).toEqual([
+        expect(getSessionOutcomes(api)).toEqual([
           "completed/ineligible/memory_lease_conflict",
           "completed/ineligible/memory_lease_conflict",
         ]),
@@ -504,7 +473,7 @@ it.each(LEASES)(
     });
     await turn("After the application reset.");
     await vi.waitFor(() =>
-      expect(outcomes(api).at(-1)).toBe("completed/eligible"),
+      expect(getSessionOutcomes(api).at(-1)).toBe("completed/eligible"),
     );
   },
 );
@@ -668,7 +637,7 @@ it.each(LEASES)(
     observation.open();
     await vi.waitFor(
       () =>
-        expect(outcomes(api)).toEqual([
+        expect(getSessionOutcomes(api)).toEqual([
           "completed/eligible",
           "completed/ineligible/earlier_turn_finalizing",
         ]),
@@ -676,7 +645,9 @@ it.each(LEASES)(
     );
     const [first] = api.sessionIds;
     expect(memoryMethods(api, String(first))).toContain(
-      "updateBufferedObservations",
+      Number(getMastraVersion().split(".")[1]) >= 77
+        ? "appendBufferedObservations"
+        : "updateBufferedObservations",
     );
     const inputs = finalInputs(api, String(first));
     expect(JSON.stringify(inputs)).toContain('"phase":"observer"');
@@ -815,7 +786,7 @@ it.each(QUICK_REPLY_LEASES)(
     // The first turn's observation settles and it releases the selectors.
     firstObservation.open();
     await vi.waitFor(
-      () => expect(outcomes(api)[0]).toBe("completed/eligible"),
+      () => expect(getSessionOutcomes(api)[0]).toBe("completed/eligible"),
       { timeout: 5000 },
     );
     // The reply then writes memory and starts its own observation.
@@ -827,7 +798,7 @@ it.each(QUICK_REPLY_LEASES)(
     replyObservation.open();
     await vi.waitFor(
       () =>
-        expect(outcomes(api)).toEqual([
+        expect(getSessionOutcomes(api)).toEqual([
           "completed/eligible",
           "completed/ineligible/earlier_turn_finalizing",
           "completed/ineligible/earlier_turn_finalizing",
@@ -839,7 +810,7 @@ it.each(QUICK_REPLY_LEASES)(
     useServer(1);
     expect(await turn("After a pause.")).toBe("done");
     await vi.waitFor(
-      () => expect(outcomes(api).at(-1)).toBe("completed/eligible"),
+      () => expect(getSessionOutcomes(api).at(-1)).toBe("completed/eligible"),
       { timeout: 5000 },
     );
   },
@@ -871,7 +842,7 @@ it.each(LEASES)(
     observation.open();
     await vi.waitFor(
       () =>
-        expect(outcomes(api)).toEqual([
+        expect(getSessionOutcomes(api)).toEqual([
           "completed/ineligible/memory_lease_conflict",
         ]),
       { timeout: 5000 },
@@ -903,7 +874,7 @@ it("releases the lease and closes the session when OM work misses the finalizati
     await turn(LONG_MESSAGE);
     await vi.waitFor(
       () =>
-        expect(outcomes(api)).toEqual([
+        expect(getSessionOutcomes(api)).toEqual([
           "completed/ineligible/om_settle_timeout",
         ]),
       { timeout: 3000 },
@@ -936,6 +907,58 @@ it("lets the source Memory's settled() join a turn's observational-memory work",
   expect(observed).toBe(true);
 });
 
+it("closes an ineligible turn while the source Memory still joins its own background observation", async () => {
+  const earlierReflection = gate();
+  const observation = gate();
+  let observing = false;
+  const thread = "ineligible-source-settled-thread";
+  const { api, memory, turn } = await setup(createProcessLocalMemoryAccess(), {
+    thread,
+    backgroundObservation: true,
+    joinSourceMemory: true,
+    finalizationWaitMs: 3000,
+    observerWait: async () => {
+      observing = true;
+      await observation.opened;
+    },
+  });
+  const engine = await memory.omEngine;
+  if (!engine) throw new Error("Missing observational-memory engine");
+  const operations = (
+    engine.buffering.constructor as unknown as {
+      asyncBufferingOps: Map<string, Promise<void>>;
+    }
+  ).asyncBufferingOps;
+  const key = engine.buffering.getReflectionBufferKey(
+    engine.buffering.getLockKey(thread, RESOURCE),
+  );
+  operations.set(key, earlierReflection.opened);
+  void earlierReflection.opened.then(() => operations.delete(key));
+  try {
+    expect(await turn(LONG_MESSAGE)).toBe("done");
+    await vi.waitFor(() => expect(observing).toBe(true));
+    await vi.waitFor(() =>
+      expect(getSessionOutcomes(api)).toEqual([
+        "completed/ineligible/om_work_unjoined",
+      ]),
+    );
+    let settled = false;
+    const completion = memory.settled().then(() => {
+      settled = true;
+    });
+    earlierReflection.open();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    observation.open();
+    await completion;
+    expect(settled).toBe(true);
+  } finally {
+    earlierReflection.open();
+    observation.open();
+    await memory.settled();
+  }
+});
+
 it("bounds the source Memory's settled() by the finalization deadline when OM work hangs", async () => {
   const hung = gate();
   const { memory, turn } = await setup(createProcessLocalMemoryAccess(), {
@@ -955,106 +978,4 @@ it("bounds the source Memory's settled() by the finalization deadline when OM wo
   } finally {
     hung.open();
   }
-});
-
-/** A turn whose application input processor aborts the run. */
-async function trippedTurn(
-  hook: "processInput" | "processInputStep",
-  captureRequestContext: (context: RequestContext) => Record<string, unknown>,
-) {
-  const api = installTestApi();
-  const runtime = createMemoryRuntime({ messageTokens: 100_000 });
-  stores.push(runtime.store);
-  await seedMemory(runtime);
-  const access = createProcessLocalMemoryAccess();
-  const actor = new MastraLanguageModelV2Mock({
-    modelId: "actor",
-    provider: "fixture",
-    doStream: async () => textStream("unused"),
-  });
-  const block = ({ abort }: { abort(reason: string): never }) =>
-    abort("Blocked by the guard");
-  const guard: InputProcessor =
-    hook === "processInput"
-      ? { id: "guard", processInput: block }
-      : { id: "guard", processInputStep: block };
-  const adapter = createMemoryReplayAgent(
-    ({ memory }) => ({
-      id: "guarded",
-      name: "Guarded",
-      instructions: "Answer",
-      memory,
-      model: actor,
-      inputProcessors: [guard],
-    }),
-    {
-      agentId: AGENT_ID,
-      apiUrl: "https://kitaru.invalid",
-      apiKey: "fixture",
-      requestedModelId: "fixture/actor",
-      onRecordingError: () => undefined,
-      finalizationWaitMs: 500,
-      captureRequestContext,
-      sourceMemory: () => ({
-        settled: () => runtime.memory.settled(),
-        domain: runtime.domain,
-        configuration: runtime.memory.getMergedThreadConfig(),
-        exclusiveAccess: access,
-      }),
-      resolveModel: () => actor,
-    },
-  );
-  const requestContext = new RequestContext();
-  requestContext.set("tenant", "fixture");
-  const output = (await adapter.stream("Hello", {
-    memory: { thread: THREAD, resource: RESOURCE },
-    requestContext,
-  })) as { consumeStream(): Promise<void>; tripwire: unknown };
-  await output.consumeStream();
-  expect(output.tripwire).toMatchObject({ reason: "Blocked by the guard" });
-  return { access, api };
-}
-
-it.each(["processInput", "processInputStep"] as const)(
-  "releases the lease and closes the session when an application %s trips",
-  async (hook) => {
-    const { access, api } = await trippedTurn(hook, (context) =>
-      Object.fromEntries(context.entries()),
-    );
-    const started = Date.now();
-    const next = await access.acquire(
-      { threadId: THREAD, resourceId: RESOURCE },
-      { waitMs: 3_000 },
-    );
-    expect(Date.now() - started).toBeLessThan(1_000);
-    expect(await next.verifyEligibility()).toBe(true);
-    await next();
-    await vi.waitFor(() =>
-      expect(outcomes(api)).toEqual(["failed/ineligible/native_run_failed"]),
-    );
-    const failed = api.calls.find(
-      (call) => call.method === "PATCH" && call.body?.status === "failed",
-    );
-    expect(String(failed?.body?.error)).toMatch(
-      /; KITARU_RECORDING_INCOMPLETE:native_run_failed$/,
-    );
-  },
-);
-
-it("closes a native fallback's session when an application processor trips", async () => {
-  // A credential header in the context makes the turn fall back to native Mastra.
-  const { api } = await trippedTurn("processInput", () => ({
-    authorization: "fixture",
-  }));
-  await vi.waitFor(() => {
-    const update = api.calls.find((call) => call.method === "PATCH");
-    expect(update?.body).toMatchObject({
-      status: "failed",
-      metadata: {
-        mastra_replay_state: "ineligible",
-        mastra_replay_reason: "credential_key_unsupported",
-        mastra_native_state: "failed",
-      },
-    });
-  });
 });

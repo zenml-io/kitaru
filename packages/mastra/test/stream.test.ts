@@ -107,7 +107,7 @@ class FakeStreamAgent extends FakeAgent {
 }
 
 describe("KitaruAgent.stream", () => {
-  it("accepts only stable Mastra 1.67 through 1.76 patch releases", () => {
+  it("accepts only stable Mastra 1.67 through 1.79 patch releases", () => {
     expect(isSupportedMastraStreamVersion("1.67.0")).toBe(true);
     expect(isSupportedMastraStreamVersion("1.67.12")).toBe(true);
     expect(isSupportedMastraStreamVersion("1.68.0")).toBe(true);
@@ -115,10 +115,15 @@ describe("KitaruAgent.stream", () => {
     expect(isSupportedMastraStreamVersion("1.71.3")).toBe(true);
     expect(isSupportedMastraStreamVersion("1.74.0")).toBe(true);
     expect(isSupportedMastraStreamVersion("1.76.0")).toBe(true);
+    expect(isSupportedMastraStreamVersion("1.77.0")).toBe(true);
+    expect(isSupportedMastraStreamVersion("1.78.0")).toBe(true);
+    expect(isSupportedMastraStreamVersion("1.79.0")).toBe(true);
+    expect(isSupportedMastraStreamVersion("1.79.12")).toBe(true);
     expect(isSupportedMastraStreamVersion("1.66.9")).toBe(false);
-    expect(isSupportedMastraStreamVersion("1.77.0")).toBe(false);
+    expect(isSupportedMastraStreamVersion("1.80.0")).toBe(false);
     expect(isSupportedMastraStreamVersion("1.67.0-beta.1")).toBe(false);
     expect(isSupportedMastraStreamVersion("1.76.0-beta.1")).toBe(false);
+    expect(isSupportedMastraStreamVersion("1.79.0-beta.1")).toBe(false);
     expect(isSupportedMastraStreamVersion("not-a-version")).toBe(false);
   });
 

@@ -360,8 +360,22 @@ export function trackBufferingWaits(engine: OMEngine): void {
   waitListeners.set(rounds, listeners);
   const setRound = rounds.set.bind(rounds);
   rounds.set = (key: string, round: Promise<void>) => {
+    // Mastra 1.77 and later delete a finished round only while the map still
+    // holds that exact promise, which is never true once it holds the copy.
+    const forget = () => {
+      if (rounds.get(key) === watched) rounds.delete(key);
+    };
     const watched = new WatchedRound<void>((resolve, reject) =>
-      round.then(resolve, reject),
+      round.then(
+        () => {
+          forget();
+          resolve();
+        },
+        (error: unknown) => {
+          forget();
+          reject(error);
+        },
+      ),
     );
     // A round nobody waits on must not report its failure as unhandled.
     Promise.prototype.then.call(watched, undefined, () => {});
@@ -462,9 +476,9 @@ function copyStoredValue<T>(value: T): T {
  *
  * Observational memory decides what to observe from the record it read at the
  * start of a step. InMemoryStore returns live objects, so later writes change
- * that record under Mastra; a database returns a copy that stays stale. Its
- * `createReflectionGeneration` also substitutes the current time for a missing
- * `lastObservedAt`, which makes Mastra treat unobserved messages as observed.
+ * that record under Mastra; a database returns a copy that stays stale.
+ * Older `createReflectionGeneration` implementations also substitute the current
+ * time for a missing `lastObservedAt`, marking unobserved messages as observed.
  */
 function applyPersistentStoreSemantics(
   domain: MemoryStorage,
@@ -477,6 +491,9 @@ function applyPersistentStoreSemantics(
   const observe = domain.updateActiveObservations.bind(domain);
   const activate = domain.swapBufferedToActive.bind(domain);
   const reflect = domain.createReflectionGeneration.bind(domain);
+  const hasConflictAwareWrites =
+    "commitActiveObservations" in domain &&
+    typeof domain.commitActiveObservations === "function";
   // The isolated store holds one thread, and InMemoryStore's history returns
   // the stored objects themselves, so assignments below change the store.
   const getStoredRecord = async (id: string) =>
@@ -490,7 +507,9 @@ function applyPersistentStoreSemantics(
   domain.getObservationalMemoryHistory = async (...args) =>
     copyStoredValue(await history(...args));
   domain.initializeObservationalMemory = async (input) => {
+    const previous = await read(input.threadId, input.resourceId);
     const created = await initialize(input);
+    if (created.id === previous?.id) return copyStoredValue(created);
     const stored = await getStoredRecord(created.id);
     if (stored) stored.metadata = undefined;
     return copyStoredValue({ ...created, metadata: undefined });
@@ -504,15 +523,42 @@ function applyPersistentStoreSemantics(
     const stored = await getStoredRecord(input.id);
     if (stored) stored.observedMessageIds = undefined;
   };
+  if (
+    "commitActiveObservations" in domain &&
+    typeof domain.commitActiveObservations === "function"
+  ) {
+    const commit = domain.commitActiveObservations;
+    domain.commitActiveObservations = async (
+      input: Parameters<MemoryStorage["updateActiveObservations"]>[0],
+    ) => {
+      const result: unknown = await Reflect.apply(commit, domain, [input]);
+      if (
+        record(result) &&
+        result.applied === true &&
+        !input.observedMessageIds
+      ) {
+        const stored = await getStoredRecord(input.id);
+        if (stored) stored.observedMessageIds = undefined;
+      }
+      return result;
+    };
+  }
   domain.swapBufferedToActive = (input) =>
     // A database activates its persisted chunks, never the caller's copy.
     activate({ ...input, bufferedChunks: undefined });
   domain.createReflectionGeneration = async (input) => {
+    const previous = await read(selector.threadId, selector.resourceId);
     const created = await reflect(input);
+    if (created.id === previous?.id || created.id === input.currentRecord.id)
+      return copyStoredValue(created);
     const stored = await getStoredRecord(created.id);
+    // Conflict-aware rollover carries the persisted head's fields, including
+    // changes made since the reflector read its snapshot.
+    const source = hasConflictAwareWrites ? previous : input.currentRecord;
+    if (!source) return copyStoredValue(created);
     const copied = {
-      lastObservedAt: input.currentRecord.lastObservedAt,
-      metadata: input.currentRecord.metadata,
+      lastObservedAt: source.lastObservedAt,
+      metadata: source.metadata,
     };
     if (stored) Object.assign(stored, copied);
     return copyStoredValue({ ...created, ...copied });
