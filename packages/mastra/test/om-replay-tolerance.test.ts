@@ -355,7 +355,7 @@ it("replays a baseline whose slow observer merged buffer rounds without live OM 
   await replaySlowObserverBaseline(34);
 });
 
-it("replays a baseline whose first tool call came a minute after the user message", async () => {
+it("replays a baseline whose first tool call fell in the minute after the user message", async () => {
   // Mastra's observer prompt labels the tool call with its time because its
   // minute differs from the message's. The replay runs within one minute, so
   // its prompt has no such label.
@@ -365,7 +365,10 @@ it("replays a baseline whose first tool call came a minute after the user messag
     onActorCall: () => {
       if (shifted) return;
       shifted = true;
-      vi.setSystemTime(Date.now() + 60_000);
+      // Cross the minute with a short jump. Mastra 1.79 renews its 15-second
+      // thread lease on real timers, so a longer jump of the faked clock
+      // expires the lease and cancels the run.
+      vi.setSystemTime(Date.now() + 1_000);
     },
   });
 });
