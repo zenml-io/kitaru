@@ -18,7 +18,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conftest import FakeDeviceRepository, create_device
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.device import DeviceFingerprint, DevicePolicy
 from kitaru.server.application.services.device_service import DeviceService
@@ -33,6 +32,7 @@ from kitaru.server.domain.device import (
     InvalidDeviceCode,
 )
 from kitaru.server.domain.keys import hash_secret
+from kitaru_test_support import FakeDeviceRepository, create_device
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 FOREIGN_ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="bob"))

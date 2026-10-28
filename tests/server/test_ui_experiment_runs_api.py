@@ -19,13 +19,6 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import (
-    ReplayServices,
-    build_replay_services,
-    create_experiment_run,
-    create_job,
-    create_replay,
-)
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -41,6 +34,13 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.evaluation import Evaluation
 from kitaru.server.domain.plugin import PackagePluginSource, Plugin, PluginKind
 from kitaru.server.domain.replay_config import ReplayConfig, default_tool_policy
+from kitaru_test_support import (
+    ReplayServices,
+    build_replay_services,
+    create_experiment_run,
+    create_job,
+    create_replay,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

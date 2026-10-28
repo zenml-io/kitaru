@@ -20,13 +20,7 @@ from typing import Any, NamedTuple
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from conftest import (
-    FakeInsightRepository,
-    FakePluginRepository,
-    FakeTaskRepository,
-    pg_session_with_engine,
-    postgres_available,
-)
+from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.insight import (
     CategoricalInsightData,
@@ -64,6 +58,11 @@ from kitaru.server.domain.plugin import (
 )
 from kitaru.server.domain.task import AnalysisTask, TaskNotFound
 from kitaru.server.filtering import FilterCondition, NotExpression
+from kitaru_test_support import (
+    FakeInsightRepository,
+    FakePluginRepository,
+    FakeTaskRepository,
+)
 
 
 class Setup(NamedTuple):
@@ -454,6 +453,34 @@ async def test_query_filters_by_import_with_pagination_and_negation(
         )
     )
     assert missing == []
+
+
+async def test_query_filters_by_task_id(setup: Setup) -> None:
+    """Select the insights one analysis task produced."""
+    version_id = await setup.make_analyzer_version_id()
+    import_id, other_import_id = uuid.uuid4(), uuid.uuid4()
+    task_id = await setup.make_task_id(version_id, import_id)
+    other_task_id = await setup.make_task_id(version_id, other_import_id)
+    matching = await _create_insight(
+        setup.insights,
+        setup.owner_id,
+        setup.agent_id,
+        task_id=task_id,
+        import_id=import_id,
+    )
+    await _create_insight(
+        setup.insights,
+        setup.owner_id,
+        setup.agent_id,
+        task_id=other_task_id,
+        import_id=other_import_id,
+    )
+    insights, _ = await setup.insights.query(
+        InsightFilter.model_validate(
+            {"expression": {"field": "task_id", "op": "eq", "value": str(task_id)}}
+        )
+    )
+    assert [insight.id for insight in insights] == [matching.id]
 
 
 @pytest.mark.parametrize("setup", ["postgres"], indirect=True)

@@ -26,6 +26,7 @@ import pytest
 
 from kitaru.api_models.v1.insight import InsightListParams, InsightResponse
 from kitaru.cli import app as app_module
+from kitaru.cli import invocation_context
 from kitaru.cli.insight_report import REPORT_SECTION_KEY, render_insight_report
 
 IMPORT_ID = uuid.UUID("01990000-0000-7000-8000-000000000010")
@@ -253,7 +254,7 @@ def use_client(monkeypatch: pytest.MonkeyPatch, client: StubClient) -> None:
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
 
 def report_argv(out: Path) -> list[str]:
