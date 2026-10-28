@@ -38,6 +38,7 @@ function setup(options: {
   observe: (call: number) => Promise<void> | void;
   toolSteps: () => number;
   evidenceRepeats?: number | (() => number);
+  beforeActorStep?: (step: number) => Promise<void> | void;
   missingObservationalMemoryResults?: "fail" | "live";
 }) {
   const store = new InMemoryStore();
@@ -108,6 +109,7 @@ function setup(options: {
     doStream: async ({ prompt }) => {
       actorPrompts.push(JSON.stringify(prompt));
       step += 1;
+      await options.beforeActorStep?.(step);
       if (step > options.toolSteps()) {
         step = 0;
         evidence = 0;
@@ -278,13 +280,21 @@ async function replay(
  * Record a turn whose slow observer is still running while the actor reads
  * more evidence, then replay it with an instant observer.
  */
-async function replaySlowObserverBaseline(evidenceRepeats: number) {
+async function replaySlowObserverBaseline(
+  evidenceRepeats: number,
+  replayStallMs = 0,
+) {
   let delayMs = 300;
+  let stallMs = 0;
   const fixture = setup({
     observation: { messageTokens: 1200, bufferTokens: 0.2 },
     observe: () => new Promise((resolve) => setTimeout(resolve, delayMs)),
     toolSteps: () => 5,
     evidenceRepeats,
+    beforeActorStep: (step) =>
+      step === 3 && stallMs > 0
+        ? new Promise((resolve) => setTimeout(resolve, stallMs))
+        : undefined,
   });
   const baseline = await recordBaseline(fixture);
   expect(baseline?.metadata).toMatchObject({ mastra_replay_state: "eligible" });
@@ -295,6 +305,7 @@ async function replaySlowObserverBaseline(evidenceRepeats: number) {
   // actor read more, and its result covers the later evidence too.
   expect(baselineContext).toContain("raw=2,3,4 observed=1");
   delayMs = 0;
+  stallMs = replayStallMs;
   await clearProcessBufferingState();
   const calls = await replay(fixture, baseline?.inputs);
   const [closed] = patches(calls);
@@ -329,6 +340,10 @@ const JUST_UNDER_THRESHOLD: Record<string, number> = {
 
 it("replays a baseline whose slow observer merged buffer rounds without live OM calls", async () => {
   await replaySlowObserverBaseline(34);
+});
+
+it("replays a slow-observer baseline whose replay stalls longer than the observer took", async () => {
+  await replaySlowObserverBaseline(34, 600);
 });
 
 it("keeps a baseline that ended just under the observation threshold unobserved in replay", async () => {
