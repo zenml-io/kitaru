@@ -19,9 +19,12 @@
   `params: Annotated[XListParams, Query()]`, convert them to the application
   filter through `<x>_list_params_to_filter` in the mapping module, and build
   the `Page` envelope from the items and next cursor the service returns.
-- Service dependencies live in `dependencies.py` as
+- Service dependencies live in the `dependencies` package as
   `get_<resource>_service(session)` returning the service bound to the SQL
-  repository.
+  repository: services that build task transitions in `execution.py`,
+  credential and authorization providers in `auth.py`, and the rest in
+  `services.py`. The package `__init__.py` re-exports every provider, so
+  routes import them from `kitaru.server.adapters.rest.dependencies`.
 - Route docstrings state the status codes clients observe, including error
   cases.
 
