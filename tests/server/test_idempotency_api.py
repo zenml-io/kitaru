@@ -19,14 +19,6 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeApiKeyRepository,
-    FakeIdempotencyKeyRepository,
-    FakeTagRepository,
-    marked_idempotent_routes,
-)
 from kitaru.server.adapters.rest.dependencies import (
     _resolve_auth_context,
     get_agent_version_service,
@@ -50,6 +42,14 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.idempotency_key import (
     MAX_IDEMPOTENCY_KEY_LENGTH,
     MAX_IDEMPOTENCY_PATH_LENGTH,
+)
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeApiKeyRepository,
+    FakeIdempotencyKeyRepository,
+    FakeTagRepository,
+    marked_idempotent_routes,
 )
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")

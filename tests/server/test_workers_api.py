@@ -21,27 +21,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from conftest import (
-    FakeAccountRepository,
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeBlobRepository,
-    FakeConnectionRepository,
-    FakeImportRepository,
-    FakeJobRepository,
-    FakePluginRepository,
-    FakeReplayRepository,
-    FakeSecretRepository,
-    FakeSessionRepository,
-    FakeTaskRepository,
-    FakeWorkerRepository,
-    create_agent_task,
-    create_job,
-    create_worker,
-    local_settings,
-    mint_worker_token,
-    stub_auth_session,
-)
+from conftest import local_settings, stub_auth_session
 from kitaru.headers import CLIENT_HEADER
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
@@ -59,6 +39,25 @@ from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeBlobRepository,
+    FakeConnectionRepository,
+    FakeImportRepository,
+    FakeJobRepository,
+    FakePluginRepository,
+    FakeReplayRepository,
+    FakeSecretRepository,
+    FakeSessionRepository,
+    FakeTaskRepository,
+    FakeWorkerRepository,
+    create_agent_task,
+    create_job,
+    create_worker,
+    mint_worker_token,
+)
 
 RUNTIME = {"platform": "bare"}
 SCOPE = {"claims": [{"kind": "agent"}]}

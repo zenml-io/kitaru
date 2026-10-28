@@ -18,17 +18,6 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    JobAndTaskServices,
-    build_job_and_task_services,
-    create_agent,
-    create_agent_version,
-    create_blob,
-    create_connection,
-    create_plugin,
-    create_secret,
-    create_session,
-)
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
@@ -65,6 +54,17 @@ from kitaru.server.domain.plugin import (
 )
 from kitaru.server.domain.task import AnalysisTask, ImportTask
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    JobAndTaskServices,
+    build_job_and_task_services,
+    create_agent,
+    create_agent_version,
+    create_blob,
+    create_connection,
+    create_plugin,
+    create_secret,
+    create_session,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 

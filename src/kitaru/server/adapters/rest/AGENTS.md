@@ -2,9 +2,8 @@
 
 - One router module per resource under `routers/`, registered in
   `server/api/app.py` with a `/api/v1/<resource>` prefix and matching tag.
-- Status codes: 201 for create, 200 for read and update, 204 for delete.
-- Updates are partial and use `PATCH /{id}`, never `PUT`. The update body
-  carries only the mutable fields.
+- Status codes: 201 for create, 200 for read and update.
+- The update body carries only the mutable fields.
 - PATCH always flows through `<x>_update_to_command` on `set_fields`, even for
   one-field bodies, so an absent field and an explicit null stay
   distinguishable.
@@ -28,4 +27,4 @@
 - Route docstrings state the status codes clients observe, including error
   cases.
 
-`tests/server/test_route_conventions.py` fails for a route built without `KitaruAPIRoute`, and for a route without an `authorize` dependency unless it is listed there as public with a reason.
+`tests/server/test_route_conventions.py` fails for a route built without `KitaruAPIRoute`, a `PUT` route, a delete that does not answer 204, and a route without an `authorize` dependency unless it is listed there as public with a reason.
