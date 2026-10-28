@@ -299,8 +299,7 @@ async def send(
                     reply,
                     unmetered_attempts=unmetered + (not reply.usage.reported),
                 )
-            failure = "rate_limited" if response.status_code == 429 else "http_error"
-            detail = f"HTTP {response.status_code}" + _error_message(response)
+            failure, detail = _classify_http_error(response)
             if response.status_code not in _RETRYABLE_STATUS:
                 break
         if attempts <= settings.max_retries:
@@ -316,21 +315,37 @@ async def send(
     )
 
 
-def _error_message(response: httpx.Response) -> str:
-    """Return the provider's error message, which says how to fix the request.
+def _classify_http_error(response: httpx.Response) -> tuple[FailureCategory, str]:
+    """Classify an HTTP error and retain the provider's message.
 
     Whole error bodies can echo the request, so only the `error.message`
     field of a JSON body is kept; `_failure` bounds it.
     """
+    failure: FailureCategory = (
+        "rate_limited" if response.status_code == 429 else "http_error"
+    )
+    detail = f"HTTP {response.status_code}"
     try:
         payload = response.json()
     except ValueError:
-        return ""
+        return failure, detail
     error = payload.get("error") if isinstance(payload, dict) else None
+    code = error.get("code") if isinstance(error, dict) else None
     message = error.get("message") if isinstance(error, dict) else error
-    if not isinstance(message, str) or not message.strip():
-        return ""
-    return ": " + " ".join(message.split())
+    message = " ".join(message.split()) if isinstance(message, str) else ""
+    if message:
+        detail += ": " + message
+    normalized = message.casefold()
+    if response.status_code == 400 and (
+        code in ("content_policy_violation", "content_filter")
+        or (
+            "prompt" in normalized
+            and "flagged as potentially violating" in normalized
+            and "usage policy" in normalized
+        )
+    ):
+        failure = "refusal"
+    return failure, detail
 
 
 def _classify(
