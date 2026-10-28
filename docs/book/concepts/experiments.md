@@ -82,20 +82,19 @@ With a `history` tool policy scoped to `cohort_version`, replayed tool calls can
 
 ## Reading a run
 
-A run's output is intentionally plain: its replays, each with a result session, and the evaluation rows on both sides. Compare them by reading the evaluations:
+A run's evaluation aggregates compare its baseline and result sessions, grouped by evaluation name, evaluator version, and data type. Read them through the SDK:
 
 ```python
-from kitaru.api_models.v1.evaluation import EvaluationListParams
-from kitaru.api_models.v1.filter import FilterCondition, FilterOp
-
-async for evaluation in client.evaluations.iter(
-    EvaluationListParams(
-        filter=FilterCondition(field="session_id", op=FilterOp.EQ, value=session_id)
-    )
-):
-    print(evaluation.name, evaluation.score, evaluation.passed)
+aggregates = await client.experiment_runs.get_evaluation_aggregates(run.id)
+for aggregate in aggregates:
+    print(aggregate.name, aggregate.baseline.mean, aggregate.result.mean)
+    print(aggregate.baseline.pass_rate, aggregate.result.pass_rate)
 ```
 
-Numbers average, booleans count into pass rates, categorical labels diff as transitions, and free text gets read. Cost and token totals ([tracked per model call](../guides/llm-calls.md)) ride on each result session, so "the cheaper model held on 18 of 20 tickets and cut cost 41%" is two loops over stored rows. The end-to-end workflow, including gating CI on a frozen cohort version, is in [Build a regression suite from production](../guides/regression-suite.md).
+From the CLI, use `kitaru experiment run get <run-id> --aggregate`. The output includes the run and its `evaluation_aggregates`; without the flag, it returns the run alone. The REST endpoint is `GET /api/v1/experiment-runs/{id}/evaluation-aggregates`.
 
-A failed replay fails the run: the comparison the experiment exists for cannot be produced for that session, and the numbers never silently shrink their denominator. Watch a run with `kitaru experiment run watch <run>`, inspect its jobs with `kitaru experiment run jobs <run>`, and cancel with `kitaru experiment run cancel <run>`; already finished replays keep their results.
+Statistics cover every evaluation linked to the run's replays. Numeric `mean` averages the recorded scores; boolean `mean` gives the share of true scores. `pass_rate` uses only evaluations with an explicit `passed` flag, independently of the score. Categorical results include value counts. Each group also includes baseline and result values for the 50 most recent replays, oldest first. Later evaluations of the same sessions do not change the run's pinned results.
+
+Cost and token totals ([tracked per model call](../guides/llm-calls.md)) remain on each result session. The end-to-end workflow, including gating CI on a frozen cohort version, is in [Build a regression suite from production](../guides/regression-suite.md).
+
+A failed replay fails the run. Aggregates describe the available evaluation rows, so inspect each side's counts and the run's progress before interpreting the comparison. Watch a run with `kitaru experiment run watch <run>`, inspect its jobs with `kitaru experiment run jobs <run>`, and cancel with `kitaru experiment run cancel <run>`; already finished replays keep their results.

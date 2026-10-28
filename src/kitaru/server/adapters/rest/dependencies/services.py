@@ -50,6 +50,9 @@ from kitaru.server.adapters.db.repositories.connection_repository import (
 from kitaru.server.adapters.db.repositories.evaluation_repository import (
     SQLEvaluationRepository,
 )
+from kitaru.server.adapters.db.repositories.experiment_run_repository import (
+    SQLExperimentRunRepository,
+)
 from kitaru.server.adapters.db.repositories.idempotency_key_repository import (
     SQLIdempotencyKeyRepository,
 )
@@ -116,6 +119,9 @@ from kitaru.server.application.services.connection_service import (
     ConnectionService,
 )
 from kitaru.server.application.services.evaluation_service import EvaluationService
+from kitaru.server.application.services.experiment_run_evaluation_service import (
+    ExperimentRunEvaluationService,
+)
 from kitaru.server.application.services.insight_service import InsightService
 from kitaru.server.application.services.investigation_service import (
     InvestigationService,
@@ -526,6 +532,24 @@ def get_evaluation_service(
     return EvaluationService(
         repository=SQLEvaluationRepository(session),
         session_repository=SQLSessionRepository(session, engine),
+    )
+
+
+def get_experiment_run_evaluation_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ExperimentRunEvaluationService:
+    """Return an experiment run evaluation service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Experiment run evaluation service bound to the SQL repositories.
+    """
+    return ExperimentRunEvaluationService(
+        repository=SQLExperimentRunRepository(session),
+        replay_repository=SQLReplayRepository(session),
+        evaluation_repository=SQLEvaluationRepository(session),
     )
 
 
