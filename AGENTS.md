@@ -39,6 +39,7 @@ Use `uv` for Python dependency management and `just` for the normal command stac
 - `just check`: run root and plugin lint/types, import and schema contracts, example coverage, formatting, and repository checks
 - `just test`: run the full pytest suite
 - `just test tests/test_file.py::test_name`: run one targeted test
+- Test parallelism: Run pytest serially (`just test`) or with at most `-n 4`; never `-n auto`. Measured on an 18-core laptop, `-n auto` finished `tests/server` only about 20% sooner than serial while using about 8x the CPU, and several agent sessions often test at once. `.claude/settings.json` caps `-n auto` at 4 workers for Claude Code; an explicit higher `-n` bypasses that cap.
 - `just build`: build wheel and sdist locally
 
 During iteration, format changed files and run tests for the changed behavior. `just fix` rewrites Python files and workflow YAML across the checkout; prefer file-scoped formatters for narrow changes and review incidental edits after a full fix.
@@ -76,7 +77,7 @@ Tests cover ordinary changes. When a change can only be proven against a live st
 
 ## Docs
 
-- Never hard-wrap prose in Markdown files. `just markdown-check` reports wrapped lines and `just fix` joins them.
+- Never hard-wrap prose in Markdown files. Keep each paragraph and each list item on one logical line; use line breaks only for Markdown structure such as headings, blank lines, list items, tables, and fenced code blocks.
 
 Kitaru docs live on three different surfaces:
 
@@ -96,8 +97,9 @@ The quickstart example lives in `examples/python/pydantic_ai_ticket_resolver/`. 
 - `main` tracks the latest released version only; do not push directly.
 - Use short, imperative commit subjects such as `Add ...` or `Update ...`.
 - Keep commit titles concise, around 50 characters when practical.
+- Never include a `[Codex] ` prefix in PR titles.
 - Link related issues when applicable.
-- Every PR description should include a `Reviewer Notes` H2 or H3 section with a concrete reproduction path for reviewers. The `PR description` workflow rejects a missing section and Conventional Commits or `[Codex]` title prefixes.
+- Every PR description should include a `Reviewer Notes` H2 or H3 section with a concrete reproduction path for reviewers.
 - Track deprecated surfaces in `DEPRECATIONS.md` at the repository root.
 - Never merge a PR that has not received an approving human review — this includes dependabot bumps and trivial changes, and it must not be bypassed with `gh pr merge --admin` or similar. Documented review of every change is part of our change-management controls (relevant to compliance frameworks such as SOC 2). Prepare the PR, request review, and wait.
 

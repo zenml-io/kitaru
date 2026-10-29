@@ -18,12 +18,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from langfuse import Langfuse, get_client
-from langfuse.api import TraceWithFullDetails
 from langfuse.types import TraceContext
 
 from kitaru.importer_adapter import ImporterBackedAdapter
 
-from .api import fetch_trace, serialize_trace, wait_for_trace
+from .api import FetchedTrace, fetch_trace, serialize_trace, wait_for_trace
 from .importer import parse
 
 __all__ = ["LangfuseAdapter"]
@@ -42,7 +41,7 @@ class LangfuseAdapter(ImporterBackedAdapter):
                 complete.
         """
         super().__init__("langfuse", parse, completeness_timeout=completeness_timeout)
-        self._completed_traces: dict[str, TraceWithFullDetails] = {}
+        self._completed_traces: dict[str, FetchedTrace] = {}
 
     @contextmanager
     def open_trace(self) -> Iterator[str]:

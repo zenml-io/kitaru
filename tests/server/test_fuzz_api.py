@@ -37,6 +37,15 @@ from typing import Any, cast
 
 import pytest
 
+# Skip before the schemas below are built: parametrizing them generates every
+# coverage-phase case at collection, about 1.3 GB that a skip marker would
+# still pay for.
+if not os.environ.get("KITARU_FUZZ"):
+    pytest.skip(
+        "API fuzzing is opt-in; set KITARU_FUZZ=1 (needs docker compose up -d db)",
+        allow_module_level=True,
+    )
+
 # The schemathesis dependency lives in the `fuzz` group, which the regular
 # test matrix does not install, so guard the import before the module loads.
 pytest.importorskip("schemathesis")
@@ -48,11 +57,6 @@ from schemathesis.checks import not_a_server_error
 from schemathesis.core.failures import Failure, FailureGroup, ServerError
 from schemathesis.generation import GenerationMode
 from schemathesis.specs.openapi.checks import response_schema_conformance
-
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("KITARU_FUZZ"),
-    reason="API fuzzing is opt-in; set KITARU_FUZZ=1 (needs docker compose up -d db)",
-)
 
 SPEC_PATH = Path(__file__).parents[2] / "openapi" / "openapi.json"
 

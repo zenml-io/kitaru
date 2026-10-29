@@ -13,7 +13,7 @@ import {
 import type { ResolvedMemoryFile } from "../src/stateful-files.js";
 import {
   createMemoryRuntime,
-  type MemoryRuntime,
+  holdBuffering,
   RESOURCE,
   seedMemory,
   streamParts,
@@ -428,26 +428,6 @@ it("starts a recorded turn without waiting for other threads' source memory work
   );
 });
 
-/**
- * Register an async buffered observation on THREAD that an earlier turn left
- * running, in Mastra's process-wide buffering map.
- */
-async function holdBuffering(runtime: MemoryRuntime): Promise<void> {
-  const engine = await runtime.memory.omEngine;
-  if (!engine) throw new Error("Missing observational-memory engine");
-  const ops = (
-    engine.buffering.constructor as unknown as {
-      asyncBufferingOps: Map<string, Promise<void>>;
-    }
-  ).asyncBufferingOps;
-  const key = engine.buffering.getObservationBufferKey(
-    engine.buffering.getLockKey(THREAD, RESOURCE),
-  );
-  const running = new Promise<void>((resolve) => hung.push(resolve));
-  ops.set(key, running);
-  void running.then(() => ops.delete(key));
-}
-
 async function bufferingSetup(options: { kitaruDown?: boolean }) {
   const api = installTestApi();
   const recorded = globalThis.fetch;
@@ -514,7 +494,7 @@ it("answers natively without waiting for an earlier turn's buffered observation"
     threadId: THREAD,
     resourceId: RESOURCE,
   });
-  await holdBuffering(runtime);
+  hung.push(await holdBuffering(runtime.memory));
   expect(await turn()).toBe("done");
   expect(modelCalls[0]).toBeLessThan(1_000);
   await earlier();
@@ -522,7 +502,7 @@ it("answers natively without waiting for an earlier turn's buffered observation"
 
 it("records a turn as ineligible instead of waiting for buffering an earlier turn left running", async () => {
   const { api, modelCalls, runtime, turn } = await bufferingSetup({});
-  await holdBuffering(runtime);
+  hung.push(await holdBuffering(runtime.memory));
   expect(await turn()).toBe("done");
   expect(modelCalls[0]).toBeLessThan(1_000);
   await vi.waitFor(

@@ -19,16 +19,7 @@ from datetime import datetime
 import pytest
 from fastapi import FastAPI
 
-from conftest import (
-    UNSCOPED_WORKER_SCOPE,
-    FakeAccountRepository,
-    FakeApiKeyRepository,
-    FakePasswordHasher,
-    FakeWorkerRepository,
-    asgi_api_client,
-    local_settings,
-    stub_auth_session,
-)
+from conftest import asgi_api_client, local_settings, stub_auth_session
 from kitaru.api_models.v1.worker import WorkerCreateRequest, WorkerRuntime
 from kitaru.client.exceptions import NotFoundError
 from kitaru.server.adapters.auth.auth_service import AuthService
@@ -43,6 +34,13 @@ from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.worker import Worker
 from kitaru.worker.auth import WorkerTokenSource
+from kitaru_test_support import (
+    UNSCOPED_WORKER_SCOPE,
+    FakeAccountRepository,
+    FakeApiKeyRepository,
+    FakePasswordHasher,
+    FakeWorkerRepository,
+)
 
 RUNTIME = WorkerRuntime(platform="bare")
 

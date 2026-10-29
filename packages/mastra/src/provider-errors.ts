@@ -1,3 +1,5 @@
+import type { JsonValue } from "@zenml-io/kitaru";
+
 const MAX_ERROR_NAME_LENGTH = 80;
 const ERROR_NAME = /^[A-Za-z][A-Za-z0-9_]*Error$/;
 const STATUS_CATEGORIES: Readonly<Record<number, string>> = {
@@ -69,4 +71,54 @@ export function describeProviderError(error: unknown): string | undefined {
   const status = getHttpStatus(error);
   if (status === undefined) return name;
   return `${name === undefined ? "" : `${name}, `}HTTP ${status}: ${getStatusCategory(status)}`;
+}
+
+const REDACTED_ERROR_MESSAGE = "[redacted]";
+
+/**
+ * Replace the provider's message in the `error` parts of a stored message.
+ *
+ * Mastra saves a failed attempt's error name and message as an `error` part
+ * on the assistant message. Providers echo request content and credentials in
+ * that message, and Mastra drops `error` parts before it builds a model
+ * prompt, so the replacement changes nothing a replayed model sees.
+ */
+export function withoutProviderErrorMessages(
+  message: Record<string, JsonValue>,
+): Record<string, JsonValue> {
+  const { content } = message;
+  if (
+    typeof message.role !== "string" ||
+    !isRecord(content) ||
+    content.format !== 2 ||
+    !Array.isArray(content.parts)
+  )
+    return message;
+  const parts: JsonValue[] = content.parts;
+  if (!parts.some(isProviderErrorPart)) return message;
+  return {
+    ...message,
+    content: {
+      ...content,
+      parts: parts.map((part) =>
+        isProviderErrorPart(part)
+          ? {
+              ...part,
+              error: { ...part.error, message: REDACTED_ERROR_MESSAGE },
+            }
+          : part,
+      ),
+    },
+  };
+}
+
+function isProviderErrorPart(
+  part: JsonValue,
+): part is { error: Record<string, JsonValue> } & Record<string, JsonValue> {
+  return (
+    isRecord(part) &&
+    part.type === "error" &&
+    isRecord(part.error) &&
+    typeof part.error.message === "string"
+  );
 }

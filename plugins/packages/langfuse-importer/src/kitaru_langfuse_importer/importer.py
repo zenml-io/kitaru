@@ -1393,6 +1393,25 @@ class LangfuseJSONLImporter:
                 or str(_first(record, "parentObservationId", "parent_observation_id"))
                 not in ids
             ]
+            logical_roots = [
+                record for record in ordered if record.get("isRootObservation") is True
+            ]
+            if logical_roots:
+                roots = logical_roots
+            if any("isRootObservation" in record for record in ordered) and not any(
+                record.get("isRootObservation") is True
+                or (
+                    record.get("isRootObservation") is None
+                    and not _first(
+                        record, "parentObservationId", "parent_observation_id"
+                    )
+                )
+                for record in ordered
+            ):
+                warnings.append(
+                    f"Trace '{trace_id}' has no exported root observation; "
+                    "trace input/output are unavailable"
+                )
             if len(roots) != 1:
                 warnings.append(
                     f"Trace '{trace_id}' has {len(roots)} root observations"

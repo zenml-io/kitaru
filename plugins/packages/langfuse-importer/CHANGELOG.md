@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Use Langfuse Python SDK 5 and the observations API for direct imports and the importer-backed adapter. API access requires Langfuse Cloud or self-hosted Langfuse 4.59.0 or later; file-only parsing does not require the SDK.
+
 ## 0.4.1 - 2026-10-08
 
 - Simplify internal event-type matching without changing import behavior.

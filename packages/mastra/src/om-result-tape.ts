@@ -1,17 +1,18 @@
-import { createHash } from "node:crypto";
 import type { JsonValue } from "@zenml-io/kitaru";
 import {
   MAX_MASTRA_REPLAY_ITEMS,
   MAX_MASTRA_REPLAY_JSON_BYTES,
-  redactUrlCredentials,
   type SecretKeyClassifier,
 } from "@zenml-io/kitaru/adapter";
 import { isCount } from "./attachment-tokens.js";
 import { decodeMemoryValue, encodeMemoryValue } from "./memory-snapshot.js";
+import {
+  getOMInputFingerprint,
+  type OMFingerprintFormat,
+} from "./om-fingerprint.js";
 import { MastraReplayReasonError } from "./replay-reasons.js";
 import {
   createInlineFileReader,
-  fileReference,
   type InlineFileReader,
 } from "./stateful-files.js";
 
@@ -28,7 +29,10 @@ export interface OMResultEntry {
   failed?: true;
   /** How many actor steps had started when the result arrived. */
   actorStepsAtResult?: number;
-  /** Milliseconds from the call's start until its result arrived. */
+  /**
+   * Milliseconds from the call's start until its result arrived. Earlier
+   * Kitaru versions hold a replayed buffered result only when it is set.
+   */
   durationMs?: number;
 }
 
@@ -143,6 +147,11 @@ export interface OMResultTapeOptions {
    * rather than blocking the actor.
    */
   isBuffered?: (phase: OMPhase) => boolean;
+  /**
+   * Call `listener` whenever Mastra waits on the running buffer round of
+   * `phase`, and at once when it already does. Return a function that stops.
+   */
+  onBufferWait?: (phase: OMPhase, listener: () => void) => () => void;
   /** Defaults to `fail`. Only a tape with recorded results reads it. */
   missingResults?: MissingOMResults;
   /**
@@ -164,102 +173,6 @@ export interface OMResultTapeOptions {
   readInlineFile?: InlineFileReader;
   /** Which keys in a recorded result name credentials, as for `encodeMemoryValue`. */
   isSecretKey?: SecretKeyClassifier;
-}
-
-const VOLATILE_KEYS = new Set(["createdAt", "updatedAt", "abortSignal"]);
-const VOLATILE_TEXT: ReadonlyArray<readonly [RegExp, string]> = [
-  [
-    /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g,
-    "<timestamp>",
-  ],
-  [
-    /\b(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,? )?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.? \d{1,2},? \d{4}\b/g,
-    "<date>",
-  ],
-  [/\b\d{1,2}:\d{2}(?::\d{2})?\s?[AP]M\b/gi, "<time>"],
-  [
-    /\b\d+ (?:second|minute|hour|day|week|month|year)s? (?:ago|later)\b/g,
-    "<relative-time>",
-  ],
-  [
-    /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
-    "<id>",
-  ],
-];
-
-// Mastra labels an attachment by its file name or URL, and a replay's history
-// holds the captured reference in place of the URL. The part's data still
-// identifies the file.
-const ATTACHMENT_LABEL = /\[(File|Image) #(\d+): [^\]\n]*\]/g;
-
-function normalizeText(text: string): string {
-  // Replay history holds redacted URLs, so the baseline hashes them redacted too.
-  return VOLATILE_TEXT.reduce(
-    (current, [pattern, replacement]) => current.replace(pattern, replacement),
-    redactUrlCredentials(text),
-  ).replace(ATTACHMENT_LABEL, "[$1 #$2]");
-}
-
-/**
- * Hash an OM call's input without the values that change on every run.
- *
- * Mastra renders message times and ids into the observer prompt and stamps
- * each prompt part with its creation time, so an unchanged replay would never
- * match its baseline if those values were hashed. Attachment bytes hash as
- * their content reference, the form a replay's recorded history holds.
- */
-export function getOMInputFingerprint(
-  input: unknown,
-  mapString: (value: string) => string = (value) => value,
-  onFileContent?: (reference: string) => void,
-  readInlineFile: InlineFileReader = createInlineFileReader(),
-): string {
-  try {
-    const text = JSON.stringify(
-      input,
-      function (this: unknown, key: string, value: unknown) {
-        if (VOLATILE_KEYS.has(key)) return undefined;
-        // The holder keeps the bytes as they were before a Buffer's toJSON.
-        const holder =
-          typeof this === "object" && this !== null
-            ? (this as Record<string, unknown>)
-            : undefined;
-        // Inline attachment text hashes as its content reference, so the
-        // same file hashes alike as base64, a data URL, or bytes.
-        if (
-          typeof value === "string" &&
-          holder &&
-          (holder.type === "file" || holder.type === "image") &&
-          key === (holder.type === "image" ? "image" : "data")
-        ) {
-          const inline = readInlineFile(holder);
-          if (inline) return inline.reference;
-        }
-        if (typeof value === "string") return normalizeText(mapString(value));
-        const bytes = holder?.[key];
-        if (
-          bytes instanceof Uint8Array &&
-          typeof holder?.mediaType === "string"
-        ) {
-          const reference =
-            readInlineFile({
-              type: "file",
-              data: bytes,
-              mediaType: holder.mediaType,
-            })?.reference ??
-            fileReference({ bytes, mediaType: holder.mediaType });
-          onFileContent?.(reference);
-          return reference;
-        }
-        return value;
-      },
-    );
-    return createHash("sha256")
-      .update(text ?? "undefined")
-      .digest("hex");
-  } catch {
-    return "unavailable";
-  }
 }
 
 function countJsonItems(value: JsonValue, remaining: number): number {
@@ -431,9 +344,10 @@ async function withReplayFileUrls(
  *   ran, and a buffered reflection ends without a result.
  * - A buffered call that matches its recorded call returns that result only
  *   once the actor has started as many steps as it had when production's
- *   result arrived, or once production's call duration has passed. Mastra
- *   starts no new buffer round while one is running, so an instant result
- *   would let it start rounds production never ran. Each such round seals
+ *   result arrived, once the actor has ended, or once Mastra waits on the
+ *   round, however long the replay takes to reach that step. Mastra starts
+ *   no new buffer round while one is running, so an instant result would
+ *   let it start rounds production never ran. Each such round seals
  *   the messages it covers, which splits later steps into more messages and
  *   raises the pending token count that decides when OM observes.
  * - A blocking call takes the next unused recorded call of its phase. With
@@ -476,25 +390,32 @@ export function createOMResultTape(
   let served = 0;
   let incomplete = false;
   let actorSteps = 0;
+  let actorStepsEnded = false;
   const holds = new Set<{ steps: number; release: () => void }>();
 
-  /** Resolve once `steps` actor steps have started, after `maxMs` at most. */
-  function waitForActorSteps(steps: number, maxMs: number): Promise<void> {
-    if (actorSteps >= steps) return Promise.resolve();
+  /**
+   * Resolve once `steps` actor steps have started, the actor has ended, or
+   * Mastra waits on the running buffer round of `phase`.
+   */
+  function waitForActorSteps(phase: OMPhase, steps: number): Promise<void> {
+    if (actorStepsEnded || actorSteps >= steps) return Promise.resolve();
     return new Promise((resolve) => {
+      let stopWatching: (() => void) | undefined;
       const hold = {
         steps,
         release() {
-          clearTimeout(timer);
+          stopWatching?.();
           holds.delete(hold);
           resolve();
         },
       };
-      // A replay that diverged may wait on this round at a step production
-      // never reached, so it waits no longer than production's observer did.
-      const timer = setTimeout(hold.release, maxMs);
-      timer.unref?.();
       holds.add(hold);
+      // A replay that diverged can block its actor on this round before the
+      // step production reached, and the round would then wait forever. A
+      // production actor that waited on the round got its result at the
+      // step where it waited, so a replay that matches production has
+      // already reached that step when Mastra waits.
+      stopWatching = options.onBufferWait?.(phase, hold.release);
     });
   }
 
@@ -502,6 +423,12 @@ export function createOMResultTape(
   function beginActorStep(): void {
     actorSteps += 1;
     for (const hold of holds) if (actorSteps >= hold.steps) hold.release();
+  }
+
+  /** Release held buffered results, because the actor starts no more steps. */
+  function endActorSteps(): void {
+    actorStepsEnded = true;
+    for (const hold of holds) hold.release();
   }
 
   function failCapture(): void {
@@ -606,20 +533,26 @@ export function createOMResultTape(
         cause: "no_recorded_result",
       });
     }
-    const fingerprint = getOMInputFingerprint(
-      input,
-      options.mapString,
-      undefined,
-      readInlineFile,
-    );
-    const matching = calls.find(
-      (candidate) => !candidate.used && candidate.fingerprint === fingerprint,
-    );
+    const findUnused = (format: OMFingerprintFormat) => {
+      const fingerprint = getOMInputFingerprint(
+        input,
+        options.mapString,
+        undefined,
+        readInlineFile,
+        format,
+      );
+      return calls.find(
+        (candidate) => !candidate.used && candidate.fingerprint === fingerprint,
+      );
+    };
+    // A tape recorded before fingerprints dropped Mastra's clock markers
+    // holds legacy fingerprints.
+    const matching = findUnused("current") ?? findUnused("legacy");
     if (matching) {
       const result = use(matching, method);
-      const { actorStepsAtResult: steps, durationMs } = matching.result ?? {};
-      return buffered && steps !== undefined && durationMs !== undefined
-        ? waitForActorSteps(steps, durationMs).then(() => result)
+      const steps = matching.result?.actorStepsAtResult;
+      return buffered && steps !== undefined
+        ? waitForActorSteps(phase, steps).then(() => result)
         : result;
     }
     const unused = calls.find((candidate) => !candidate.used);
@@ -903,7 +836,7 @@ export function createOMResultTape(
    * departures are counted in `divergence`.
    */
   async function finish(): Promise<OMTapeResult> {
-    for (const hold of holds) hold.release();
+    endActorSteps();
     while (pending.size > 0) await Promise.all([...pending]);
     if (recorded) {
       if (failedClosed) throw failedClosed;
@@ -958,5 +891,5 @@ export function createOMResultTape(
     };
   }
 
-  return { instrument, beginActorStep, finish };
+  return { instrument, beginActorStep, endActorSteps, finish };
 }

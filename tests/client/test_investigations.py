@@ -19,18 +19,7 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeImportRepository,
-    FakeInvestigationRepository,
-    FakeReplayRepository,
-    FakeSessionRepository,
-    FakeTaskRepository,
-    asgi_api_client,
-    build_payload_store,
-    override_idempotency,
-)
+from conftest import asgi_api_client
 from kitaru.api_models.v1.agent import AgentCreateRequest
 from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.investigation import (
@@ -66,6 +55,17 @@ from kitaru.server.application.services.investigation_service import (
 )
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeImportRepository,
+    FakeInvestigationRepository,
+    FakeReplayRepository,
+    FakeSessionRepository,
+    FakeTaskRepository,
+    build_payload_store,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
