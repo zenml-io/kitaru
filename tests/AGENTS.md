@@ -6,22 +6,12 @@ Ordinary async tests and fixtures are plain `async def`. pytest-asyncio runs in 
 
 Cover all four surfaces below for a new persistent public API resource. For changes to an existing resource, select the surfaces that prove the affected behavior. Transaction, locking, migration, and cross-request changes need PostgreSQL coverage; an in-memory fake cannot prove those contracts.
 
-1. Service tests against the in-memory fake repository
-   (`tests/server/test_<x>_service.py`).
-2. REST tests over `httpx.ASGITransport` with the service dependency
-   overridden to the fake (`tests/server/test_<x>s_api.py`).
-3. Repository contract tests parametrized over the in-memory fake and the SQL
-   implementation (`tests/server/test_<x>_repository.py`). One shared suite
-   runs against both backends so the fake cannot drift from the real
-   repository. The postgres parameter skips when the local database is
-   unreachable.
-4. An end-to-end PostgreSQL test that runs the app through its lifespan, which
-   also executes the Alembic migrations
-   (`tests/server/test_<x>s_api_pg.py`). Cross-request visibility proves the
-   per-request commit.
+1. Service tests against the in-memory fake repository (`tests/server/test_<x>_service.py`).
+2. REST tests over `httpx.ASGITransport` with the service dependency overridden to the fake (`tests/server/test_<x>s_api.py`).
+3. Repository contract tests parametrized over the in-memory fake and the SQL implementation (`tests/server/test_<x>_repository.py`). One shared suite runs against both backends so the fake cannot drift from the real repository. The postgres parameter skips when the local database is unreachable.
+4. An end-to-end PostgreSQL test that runs the app through its lifespan, which also executes the Alembic migrations (`tests/server/test_<x>s_api_pg.py`). Cross-request visibility proves the per-request commit.
 
-The SDK gets a round-trip test in `tests/client/` routing the client through
-`httpx.ASGITransport`.
+The SDK gets a round-trip test in `tests/client/` routing the client through `httpx.ASGITransport`.
 
 ## Fakes
 
@@ -29,12 +19,7 @@ Fake repositories live in the `tests/kitaru_test_support/` package, one module p
 
 ## PostgreSQL
 
-Tests point at `localhost:5433` (override with `KITARU_TEST_DB_HOST` and
-`KITARU_TEST_DB_PORT`) and expect `docker compose up -d db`. Each pg test
-creates a uniquely named database and drops it on teardown, so tests stay
-independent and concurrent runs never share state. A session-scoped fixture
-reaps databases left behind by a killed run, age-gated on the timestamp in
-the database name so it never drops a concurrent run's live databases.
+Tests point at `localhost:5433` (override with `KITARU_TEST_DB_HOST` and `KITARU_TEST_DB_PORT`) and expect `docker compose up -d db`. Each pg test creates a uniquely named database and drops it on teardown, so tests stay independent and concurrent runs never share state. A session-scoped fixture reaps databases left behind by a killed run, age-gated on the timestamp in the database name so it never drops a concurrent run's live databases.
 
 Set `KITARU_TEST_REQUIRE_POSTGRES=1` to fail before collection if PostgreSQL is unavailable. CI enables this for both Python 3.14 base jobs; local runs and the other Python versions keep optional database skips.
 

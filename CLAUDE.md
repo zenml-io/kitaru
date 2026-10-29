@@ -39,24 +39,11 @@ design/               # Design docs, meeting notes (gitignored, never commit)
 
 Kitaru docs live on three surfaces — know which one a task touches:
 
-1. **Hand-written docs → GitBook.** Concepts, guides, and getting-started
-   content live as plain Markdown in **`docs/book/`** and publish to
-   **`docs.zenml.io/kitaru`** via GitBook Git Sync. Edit those `.md` files
-   directly; the nav is `docs/book/toc.md` and the space config is
-   `docs/book/.gitbook.yaml`. See **`docs/book/AGENTS.md`** for GitBook
-   authoring conventions.
-2. **Generated SDK reference → `sdkdocs.kitaru.ai`.** The FumaDocs app in
-   `docs/` is a **reference-only** site. Built and deployed to the
-   `kitaru-sdkdocs` Cloudflare worker (root `wrangler.toml`). See
-   **`docs/CLAUDE.md`** for the app + deploy process.
-3. **`kitaru.ai/docs` → redirects.** The `kitaru-site` worker
-   (`docs/worker/redirect.mjs`, `wrangler.redirect.toml`) 301-redirects old
-   `kitaru.ai/docs/*` URLs to GitBook / `sdkdocs.kitaru.ai` / the changelog.
+1. **Hand-written docs → GitBook.** Concepts, guides, and getting-started content live as plain Markdown in **`docs/book/`** and publish to **`docs.zenml.io/kitaru`** via GitBook Git Sync. Edit those `.md` files directly; the nav is `docs/book/toc.md` and the space config is `docs/book/.gitbook.yaml`. See **`docs/book/AGENTS.md`** for GitBook authoring conventions.
+2. **Generated SDK reference → `sdkdocs.kitaru.ai`.** The FumaDocs app in `docs/` is a **reference-only** site. Built and deployed to the `kitaru-sdkdocs` Cloudflare worker (root `wrangler.toml`). See **`docs/CLAUDE.md`** for the app + deploy process.
+3. **`kitaru.ai/docs` → redirects.** The `kitaru-site` worker (`docs/worker/redirect.mjs`, `wrangler.redirect.toml`) 301-redirects old `kitaru.ai/docs/*` URLs to GitBook / `sdkdocs.kitaru.ai` / the changelog.
 
-Do **not** add hand-written pages to the FumaDocs app (`docs/content/docs/`) —
-they belong in `docs/book/` (GitBook). The public changelog is owned by the
-changelog repo (published to `docs.zenml.io/changelog`), not by either docs
-surface here.
+Do **not** add hand-written pages to the FumaDocs app (`docs/content/docs/`) — they belong in `docs/book/` (GitBook). The public changelog is owned by the changelog repo (published to `docs.zenml.io/changelog`), not by either docs surface here.
 
 ## Website and marketing assets
 
@@ -64,9 +51,7 @@ The Kitaru marketing site, its asset pipeline, and the runtime web APIs (waitlis
 
 ## Docs guidance
 
-Detailed authoring conventions, link rules, and accuracy requirements for all
-three docs surfaces live in **`docs/CLAUDE.md`** (loaded when you work under
-`docs/`). Keep the quickstart example setup and import path runnable without provider credentials.
+Detailed authoring conventions, link rules, and accuracy requirements for all three docs surfaces live in **`docs/CLAUDE.md`** (loaded when you work under `docs/`). Keep the quickstart example setup and import path runnable without provider credentials.
 
 ## Branching strategy
 
@@ -132,7 +117,7 @@ For adapter, importer, specialized UI API, docs, CI, and release work, load the 
 - **Keep pre-existing failures separate.** If `just check` or `just test` surfaces a failure unrelated to the requested change, diagnose and report it. Fix it only when it blocks the scoped change or the user explicitly approves expanding the task; do not absorb another contributor's work into the current commit by default.
 - **Commits:** Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature". Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`).
 - **Bug fixes:** Always add a regression test that would have caught the bug. Understand root cause before implementing the fix.
-- **PRs:** Human-readable titles with no "feat:", "doc:", or "[Codex]" prefixes. Write comprehensive descriptions: what the changes do, why they're needed, key implementation decisions, and areas needing reviewer attention.
+- **PRs:** Human-readable titles with no "feat:", "doc:", or "[Codex]" prefixes; the `PR description` workflow rejects them and a missing Reviewer Notes heading. Write comprehensive descriptions: what the changes do, why they're needed, key implementation decisions, and areas needing reviewer attention.
 - **PR reviewer guidance:** Every PR description should include a "Reviewer Notes" H2 or H3 section, but it should read like a guided walkthrough rather than a file inventory. Explain the story of the change, where the risky behavior lives, what would break if the implementation is wrong, and why the named files or functions matter.
 - **PR reproduction:** Include a concrete "Reproduction" subsection inside Reviewer Notes or immediately after it. Prefer a runnable example, API flow, or UI path that proves the behavior end to end. Tell the reviewer exactly what to run and what to look for afterward.
 - **PR local checks:** Do not create a standalone "Verification" section that only lists `just check`, `just test`, or `/simplify`. Those are still required local hygiene, but they are not useful reviewer guidance by themselves. If useful, include them as a short "Local checks run" note after the reproduction instructions.
@@ -141,7 +126,7 @@ For adapter, importer, specialized UI API, docs, CI, and release work, load the 
 
 ## Conventions
 
-- Never hard-wrap prose in Markdown files. Keep each paragraph and each list item on one logical line; use line breaks only for Markdown structure such as headings, blank lines, list items, tables, and fenced code blocks.
+- Never hard-wrap prose in Markdown files. `just markdown-check` reports wrapped lines and `just fix` joins them.
 - Python 3.11+
 - Ruff enforces complete production signatures, modern annotations, and Google docstring structure; ty checks type compatibility and suppression hygiene through `just check`.
 - src layout (`src/kitaru/`)
