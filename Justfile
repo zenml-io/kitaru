@@ -171,15 +171,15 @@ fuzz-api-models:
 
 # Heavy property-test run for the core tree (MCP tool boundary, credential redaction)
 fuzz-mcp:
-    HYPOTHESIS_PROFILE=nightly PYTHONUNBUFFERED=1 uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py tests/cli/test_redaction_properties.py -vv -s --durations=20 -o faulthandler_timeout=300 --hypothesis-show-statistics
+    HYPOTHESIS_PROFILE=nightly PYTHONUNBUFFERED=1 uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py tests/cli/test_redaction_properties.py -vv -s --durations=20 --hypothesis-show-statistics
 
 # Heavy property-test run for MCP request and response boundaries
 fuzz-mcp-boundary:
-    HYPOTHESIS_PROFILE=nightly PYTHONUNBUFFERED=1 uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py -k 'not test_schema_valid_request_with_marker_never_leaks' -vv -s --durations=20 -o faulthandler_timeout=300 --hypothesis-show-statistics
+    HYPOTHESIS_PROFILE=nightly PYTHONUNBUFFERED=1 uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py -k 'not test_schema_valid_request_with_marker_never_leaks' -vv -s --durations=20 --hypothesis-show-statistics
 
 # Heavy property-test run for MCP and CLI credential redaction
 fuzz-mcp-redaction:
-    HYPOTHESIS_PROFILE=nightly PYTHONUNBUFFERED=1 uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py::test_schema_valid_request_with_marker_never_leaks tests/cli/test_redaction_properties.py -vv -s --durations=20 -o faulthandler_timeout=300 --hypothesis-show-statistics
+    HYPOTHESIS_PROFILE=nightly PYTHONUNBUFFERED=1 uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py::test_schema_valid_request_with_marker_never_leaks tests/cli/test_redaction_properties.py -vv -s --durations=20 --hypothesis-show-statistics
 
 # Heavy property-test run for adapter capture, codec, and record/replay contracts
 fuzz-adapters:

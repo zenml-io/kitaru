@@ -28,9 +28,11 @@ jobs:
           - name: mcp-boundary
             sync-command: uv sync --frozen --extra server --extra cli --extra mcp
             recipe: fuzz-mcp-boundary
+            pytest-addopts: -n 4
           - name: mcp-redaction
             sync-command: uv sync --frozen --extra server --extra cli --extra mcp
             recipe: fuzz-mcp-redaction
+            pytest-addopts: -n 4
           - name: adapters
             sync-command: uv sync --project plugins --frozen --all-packages
             recipe: fuzz-adapters
@@ -92,6 +94,8 @@ jobs:
           HYPOTHESIS_PROFILE: nightly
           KITARU_FUZZ_RANDOM: '1'
           PYTHONUNBUFFERED: '1'
+          # Serial MCP runs exceed the process limit on the 4-vCPU runner.
+          PYTEST_ADDOPTS: ${{ matrix.pytest-addopts }}
           RECIPE: ${{ matrix.recipe }}
         shell: bash
         run: |-
