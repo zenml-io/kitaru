@@ -82,33 +82,9 @@ def get_remaining_usage(
     Returns:
         Remaining usage, or None when every remaining count is zero or unknown.
     """
-    remainder = TokenUsage(
-        input_tokens=_get_remaining_tokens(
-            totals.input_tokens, [usage.input_tokens for usage in recorded]
-        ),
-        output_tokens=_get_remaining_tokens(
-            totals.output_tokens, [usage.output_tokens for usage in recorded]
-        ),
-        cached_input_tokens=_get_remaining_tokens(
-            totals.cached_input_tokens,
-            [usage.cached_input_tokens for usage in recorded],
-        ),
-        cache_write_input_tokens=_get_remaining_tokens(
-            totals.cache_write_input_tokens,
-            [usage.cache_write_input_tokens for usage in recorded],
-        ),
-        reasoning_tokens=_get_remaining_tokens(
-            totals.reasoning_tokens, [usage.reasoning_tokens for usage in recorded]
-        ),
-    )
-    if not any(
-        (
-            remainder.input_tokens,
-            remainder.output_tokens,
-            remainder.cached_input_tokens,
-            remainder.cache_write_input_tokens,
-            remainder.reasoning_tokens,
-        )
-    ):
-        return None
-    return remainder
+    recorded_counts = [usage.model_dump() for usage in recorded]
+    remainder = {
+        name: _get_remaining_tokens(total, [counts[name] for counts in recorded_counts])
+        for name, total in totals.model_dump().items()
+    }
+    return TokenUsage(**remainder) if any(remainder.values()) else None

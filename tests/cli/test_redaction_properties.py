@@ -27,6 +27,7 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
+from kitaru.api_models.v1.session import TokenUsage
 from kitaru.cli.redaction import redact_data as cli_redact
 from kitaru.mcp.redaction import redact_data as mcp_redact
 
@@ -266,16 +267,7 @@ def test_secret_bearing_tokens_are_masked(secret: Any) -> None:
     assert cli_redact({"tokens": secret}) == {"tokens": "***"}
 
 
-@pytest.mark.parametrize(
-    "key",
-    [
-        "input_tokens",
-        "output_tokens",
-        "cached_input_tokens",
-        "cache_write_input_tokens",
-        "reasoning_tokens",
-    ],
-)
+@pytest.mark.parametrize("key", list(TokenUsage.model_fields))
 @given(count=st.none() | st.integers() | st.floats(allow_nan=False))
 def test_numeric_usage_fields_are_preserved(key: str, count: Any) -> None:
     assert cli_redact({key: count}) == {key: count}

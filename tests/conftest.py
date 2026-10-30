@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.schema import CreateColumn
 
 from kitaru.analytics.source import AnalyticsSource
 from kitaru.api_models.v1.info import AuthScheme
@@ -444,6 +445,9 @@ async def drop_test_database(settings: APISettings) -> None:
 async def add_missing_orm_columns(engine: AsyncEngine, *tables: str) -> None:
     """Add the nullable ORM columns that a historical schema lacks.
 
+    Upgrading past the revision that adds such a column then fails, because
+    the column already exists.
+
     Args:
         engine: Engine bound to a database migrated to an older revision.
         tables: Names of the tables to complete.
@@ -462,11 +466,9 @@ async def add_missing_orm_columns(engine: AsyncEngine, *tables: str) -> None:
                     continue
                 if not column.nullable:
                     raise ValueError(f"Column {name}.{column.name} is not nullable")
-                column_type = column.type.compile(dialect=connection.dialect)
+                definition = CreateColumn(column).compile(dialect=connection.dialect)
                 connection.execute(
-                    text(
-                        f'ALTER TABLE "{name}" ADD COLUMN "{column.name}" {column_type}'
-                    )
+                    text(f'ALTER TABLE "{name}" ADD COLUMN {definition}')
                 )
 
     async with engine.begin() as connection:

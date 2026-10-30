@@ -686,7 +686,7 @@ def _token_usage(record: dict[str, Any]) -> TokenUsage | None:
         values.append(parsed)
     if all(value is None for value in values):
         return None
-    if values[3] is None and values[4:] != [None, None]:
+    if values[3] is None and any(value is not None for value in values[4:]):
         values[3] = sum(value or 0 for value in values[4:])
     try:
         return TokenUsage(

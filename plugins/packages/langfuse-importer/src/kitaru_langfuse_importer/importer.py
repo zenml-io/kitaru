@@ -979,8 +979,8 @@ def _tokens(record: dict[str, Any]) -> TokenUsage | None:
     # writes by cache lifetime.
     writes = [_integer(usage.get(key)) for key in _CACHE_WRITE_DETAIL_KEYS]
     cache_writes = _integer(_first_nonempty(usage, *_CACHE_WRITE_KEYS))
-    if cache_writes is None and writes != [None] * 3:
-        cache_writes = sum(count or 0 for count in writes)
+    if cache_writes is None and any(c is not None for c in writes):
+        cache_writes = sum(c or 0 for c in writes)
     counts = {
         "input_tokens": _integer(input_usage),
         "output_tokens": _integer(output_usage),

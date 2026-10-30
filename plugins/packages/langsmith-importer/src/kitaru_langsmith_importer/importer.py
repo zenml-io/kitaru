@@ -713,7 +713,7 @@ def _tokens(record: dict[str, Any]) -> TokenUsage | None:
         ),
         "cache_write_input_tokens": (
             usage.get("cache_creation_input_tokens"),
-            None if writes == [None] * 3 else sum(count or 0 for count in writes),
+            None if all(c is None for c in writes) else sum(c or 0 for c in writes),
         ),
     }
     counts = {
