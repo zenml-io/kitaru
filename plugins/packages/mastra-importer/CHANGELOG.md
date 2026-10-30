@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Import Mastra's `inputDetails.cacheWrite` usage as `cache_write_input_tokens`.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.3+dev` with the selected compatible published core version before releasing.
+
 ## 0.2.0 - 2026-09-21
 
 - Emit `reasoning_selectors` pointing at visible reasoning in the span output instead of extracted `reasoning` text.

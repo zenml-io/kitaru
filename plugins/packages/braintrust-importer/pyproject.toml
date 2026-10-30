@@ -23,12 +23,12 @@ classifiers = [
 ]
 keywords = ["ai-agents", "braintrust", "kitaru", "observability", "traces"]
 dependencies = [
-    "kitaru>=0.27.0",
+    "kitaru==0.27.3+dev",
 ]
 
 [project.optional-dependencies]
 api = [
-    "kitaru>=0.27.0",
+    "kitaru==0.27.3+dev",
     "httpx>=0.27,<1",
 ]
 adapter = [

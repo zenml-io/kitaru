@@ -366,6 +366,7 @@ def test_invalid_cost_isolates_session(value: Any) -> None:
         "gen_ai.usage.input_tokens",
         "gen_ai.usage.output_tokens",
         "gen_ai.usage.details.cache_read_tokens",
+        "gen_ai.usage.details.cache_write_tokens",
         "gen_ai.usage.details.reasoning_tokens",
     ],
 )
@@ -567,3 +568,30 @@ def test_missing_project_identity_isolates_trace() -> None:
     parsed = parse(jsonl(row("bad", project_id=None), row("good", trace_id="trace-2")))
     assert sum(isinstance(item, ImportedSession) for item in parsed) == 1
     assert sum(isinstance(item, ImportFailure) for item in parsed) == 1
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "gen_ai.usage.details.cache_write_tokens",
+        "gen_ai.usage.cache_creation.input_tokens",
+    ],
+)
+def test_maps_cache_write_tokens(key: str) -> None:
+    """Read prompt-cache writes from PydanticAI details or the GenAI convention."""
+    attributes = {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.request.model": "claude-sonnet-4-5",
+        "gen_ai.usage.input_tokens": 2300,
+        "gen_ai.usage.details.cache_read_tokens": 800,
+        key: 300,
+    }
+
+    [session] = parse(jsonl(row("llm", span_name="chat", attributes=attributes)))
+
+    assert isinstance(session, ImportedSession)
+    [node] = flatten(session.nodes)
+    assert node.tokens is not None
+    assert node.tokens.input_tokens == 2300
+    assert node.tokens.cached_input_tokens == 800
+    assert node.tokens.cache_write_input_tokens == 300

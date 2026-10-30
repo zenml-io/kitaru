@@ -108,6 +108,8 @@ def _get_usage(entry: dict[str, Any]) -> dict[str, Any]:
                 input_counts.append(count)
                 if category == "input_cache_read":
                     tokens["cached_input_tokens"] = count
+                elif category == "input_cache_write":
+                    tokens["cache_write_input_tokens"] = count
         price = data.get("price")
         if price is not None:
             _get_number(price, "model usage price")

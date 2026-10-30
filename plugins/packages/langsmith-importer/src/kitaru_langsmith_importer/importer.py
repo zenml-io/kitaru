@@ -32,12 +32,14 @@ from pydantic_core import PydanticSerializationError
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import (
-    ImportedNode,
-    ImportedSession,
-)
+from kitaru.task.importer import ImportedNode, ImportedSession
 
 _MAX_NESTED_DEPTH = 64
+_CACHE_WRITE_DETAIL_KEYS = (
+    "cache_creation",
+    "ephemeral_5m_input_tokens",
+    "ephemeral_1h_input_tokens",
+)
 _DEFAULT_JOIN_PATHS = (
     "extra.metadata.thread_id",
     "extra.metadata.session_id",
@@ -121,11 +123,7 @@ def _role(value: dict[str, Any]) -> str | None:
 
 
 def _content_match(
-    value: Any,
-    selector: str = "",
-    depth: int = 0,
-    *,
-    visible_output_only: bool = False,
+    value: Any, selector: str = "", depth: int = 0, *, visible_output_only: bool = False
 ) -> _TextMatch | None:
     """Return one scalar text value and its selector."""
     if depth > 8:
@@ -695,32 +693,34 @@ def _tokens(record: dict[str, Any]) -> TokenUsage | None:
         or _dict(llm_output.get("token_usage"))
         or _dict(outputs.get("usage_metadata"))
     )
-    input_tokens = _integer(
-        _get_first_nonempty(
+    # Anthropic's lifetime split zeroes or drops the `cache_creation` detail.
+    details = _dict(usage.get("input_token_details"))
+    writes = [_integer(details.get(key)) for key in _CACHE_WRITE_DETAIL_KEYS]
+    candidates = {
+        "input_tokens": (
             record.get("prompt_tokens"),
             usage.get("prompt_tokens"),
             usage.get("input_tokens"),
-        )
-    )
-    output_tokens = _integer(
-        _get_first_nonempty(
+        ),
+        "output_tokens": (
             record.get("completion_tokens"),
             usage.get("completion_tokens"),
             usage.get("output_tokens"),
-        )
-    )
-    cached_tokens = _integer(
-        _get_first_nonempty(
-            usage.get("cache_read_input_tokens"), usage.get("cached_input_tokens")
-        )
-    )
-    if input_tokens is None and output_tokens is None and cached_tokens is None:
-        return None
-    return TokenUsage(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        cached_input_tokens=cached_tokens,
-    )
+        ),
+        "cached_input_tokens": (
+            usage.get("cache_read_input_tokens"),
+            usage.get("cached_input_tokens"),
+        ),
+        "cache_write_input_tokens": (
+            usage.get("cache_creation_input_tokens"),
+            None if writes == [None] * 3 else sum(count or 0 for count in writes),
+        ),
+    }
+    counts = {
+        name: _integer(_get_first_nonempty(*values))
+        for name, values in candidates.items()
+    }
+    return None if set(counts.values()) == {None} else TokenUsage(**counts)
 
 
 def _model_fields(record: dict[str, Any]) -> tuple[str | None, str | None, str | None]:

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Import prompt-cache writes from `gen_ai.usage.details.cache_write_tokens` or `llm.token_count.prompt_details.cache_write` as `cache_write_input_tokens`.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.3+dev` with the selected compatible published core version before releasing.
+
 ## 0.4.0 - 2026-09-21
 
 - Stream API imports in ordered trace batches, fetch each batch with one Phoenix request, and stop fetching when `max_sessions` is reached.

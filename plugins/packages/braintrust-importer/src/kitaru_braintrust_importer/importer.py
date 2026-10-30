@@ -668,32 +668,32 @@ def _node_type(record: dict[str, Any], *, full_export: bool) -> NodeType:
 
 
 def _token_usage(record: dict[str, Any]) -> TokenUsage | None:
-    """Map Braintrust token metrics."""
+    """Map Braintrust token metrics, summing cache-write TTL splits without a total."""
     metrics = _metrics(record)
     fields = ("prompt_tokens", "completion_tokens", "prompt_cached_tokens")
+    fields += tuple(f"prompt_cache_creation{ttl}_tokens" for ttl in ("", "_5m", "_1h"))
     values: list[int | None] = []
     for field in fields:
         value = metrics.get(field)
-        if value is None:
-            values.append(None)
-            continue
         try:
-            parsed = int(value)
+            parsed = None if value is None else int(value)
         except (TypeError, ValueError, OverflowError) as exc:
             raise InvalidImport(
                 f"Braintrust metric '{field}' must be an integer"
             ) from exc
-        if parsed < 0 or (isinstance(value, float) and value < 0):
+        if (parsed or 0) < 0 or (isinstance(value, float) and value < 0):
             raise InvalidImport(f"Braintrust metric '{field}' must be nonnegative")
         values.append(parsed)
     if all(value is None for value in values):
         return None
+    if values[3] is None and values[4:] != [None, None]:
+        values[3] = sum(value or 0 for value in values[4:])
     try:
         return TokenUsage(
             input_tokens=values[0],
             output_tokens=values[1],
             cached_input_tokens=values[2],
-            reasoning_tokens=None,
+            cache_write_input_tokens=values[3],
         )
     except ValueError as exc:
         raise InvalidImport("Braintrust token metrics are invalid") from exc

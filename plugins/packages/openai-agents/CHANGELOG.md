@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Record `input_tokens_details.cache_write_tokens` as `cache_write_input_tokens` and include cache writes in genai-prices cost estimates.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.3+dev` with the selected compatible published core version before releasing.
+
 ## 0.4.1 - 2026-10-30
 
 - Support OpenAI Agents SDK 0.23 and 0.24.

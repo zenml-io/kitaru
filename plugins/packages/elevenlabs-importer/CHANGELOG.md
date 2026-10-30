@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Import the `input_cache_write` usage category as `cache_write_input_tokens`. Input tokens still include it.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.3+dev` with the selected compatible published core version before releasing.
+
 ## 0.1.0 - 2026-10-08
 
 - Add file and API imports for finished ElevenLabs Agents conversations.
