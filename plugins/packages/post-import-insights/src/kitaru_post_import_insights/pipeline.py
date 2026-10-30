@@ -72,6 +72,12 @@ _CTA_LABELS = {
     "total-activity-distribution": "Investigate recorded activity",
     "recorded-duration-distribution": "Investigate session duration",
     "model-mix": "Investigate model mix",
+    "cost-concentration": "Investigate cost concentration",
+    "component-time-share": "Investigate where time goes",
+    "context-growth": "Investigate context growth",
+    "context-outliers": "Investigate oversized model inputs",
+    "prompt-cache": "Investigate prompt cache use",
+    "tool-paths": "Investigate tool paths",
 }
 
 PROMPT_VERSION = "2026-09-09.1"

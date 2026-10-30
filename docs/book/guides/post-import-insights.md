@@ -5,7 +5,7 @@ icon: chart-pie
 
 # Post-import insights
 
-Select post-import analyzers to find patterns in normalized sessions, such as failed tool calls, repeated calls, and outcome distributions. They store insight cards with supporting session references and investigation prompts. They run on your worker, including with a local or self-hosted server.
+Select post-import analyzers to find patterns in normalized sessions, such as failed tool calls, repeated calls, outcome distributions, cost concentrated in a few sessions, the tool or model that covers most recorded time, model input that grows within a session, low prompt-cache reads, and the tool-call paths sessions take. They store insight cards with supporting session references and investigation prompts. They run on your worker, including with a local or self-hosted server.
 
 The independently versioned `kitaru-post-import-insights` package supplies two analyzers: `kitaru/post-import-insights` uses deterministic checks without a model or API key; `kitaru/openai-post-import-insights` uses OpenAI to select findings and customize their wording. The server registers both package entrypoints; the worker installs the package when executing an analysis task. Imports run only the analyzers explicitly selected by the caller.
 
@@ -92,6 +92,8 @@ The plugin package includes its model and observability dependencies. Model call
 ## Coverage and large imports
 
 Every analyzer receives session IDs through the same [analyzer contract](../concepts/analyzers.md). The post-import plugin fetches one complete session at a time and runs its deterministic checks across every imported session, including sessions marked in progress. It does not stop after a fixed number of sessions or nodes.
+
+The cost, time, and token cards count only the sessions and calls that record the field they need, such as a session cost, both node timestamps, or input and cache-read token counts, and each card's caveat names what was left out. Sources differ on whether input tokens include cache reads. A call that reports more cache reads than input tokens must count them separately, so the analyzer reads every call to that model in the session that way; where no call settles the question, the prompt cache card gives its cache-read share as a range between the two readings. System prompts are compared between consecutive calls to the same model, and their text is not stored. The [package README](https://github.com/zenml-io/kitaru/blob/develop/plugins/packages/post-import-insights/README.md) lists each card's thresholds.
 
 Evidence references, chart categories, and model input are bounded independently of the scan. Large category sets retain the leading categories and combine the remainder without dropping their counts. Payload traversal and text inspection have per-session limits, so an unusually large payload cannot consume the inspection budget for later sessions. Read the coverage and caveats before treating a text-dependent finding as exhaustive.
 
