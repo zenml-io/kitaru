@@ -993,35 +993,31 @@ async def test_rejects_sessions_from_another_agent() -> None:
 
 
 @pytest.mark.parametrize(
-    ("origin", "import_id", "message"),
+    ("origin", "import_id"),
     [
-        (SessionOrigin.RECORDED, IMPORT_ID, "originate from an import"),
-        (SessionOrigin.REPLAY, IMPORT_ID, "originate from an import"),
-        (SessionOrigin.IMPORTED, None, "source import"),
-        (SessionOrigin.IMPORTED, uuid.UUID(int=1), "source import"),
+        (SessionOrigin.RECORDED, None),
+        (SessionOrigin.REPLAY, None),
+        (SessionOrigin.IMPORTED, uuid.UUID(int=1)),
     ],
 )
-async def test_rejects_sessions_outside_the_source_import(
-    origin: SessionOrigin,
-    import_id: uuid.UUID | None,
-    message: str,
+async def test_accepts_agent_sessions_from_any_origin_or_import(
+    origin: SessionOrigin, import_id: uuid.UUID | None
 ) -> None:
-    session = _session(1, status=SessionStatus.FAILED)
-    session.session = session.session.model_copy(
-        update={"origin": origin, "import_id": import_id}
-    )
-
-    with pytest.raises(ValueError, match=message):
-        await generate_insights([session], context=_context())
-
-
-async def test_rejects_sessions_concatenated_from_multiple_imports() -> None:
     first = _session(1, status=SessionStatus.FAILED)
     second = _session(2, status=SessionStatus.COMPLETED)
-    second.session = second.session.model_copy(update={"import_id": uuid.uuid4()})
+    second.session = second.session.model_copy(
+        update={"origin": origin, "import_id": import_id}
+    )
+    context = _context().model_copy(update={"source_import": None})
 
-    with pytest.raises(ValueError, match="source import"):
-        await generate_insights([first, second], context=_context())
+    result = await generate_insights([first, second], context=context)
+
+    assert result.coverage.sessions_analyzed == 2
+    assert result.insights
+    for insight in result.insights:
+        prompt = result.card_metadata(insight).investigation_prompt
+        assert "Import id: " not in prompt
+        assert _get_context_data(prompt)["source_import"] is None
 
 
 @pytest.mark.parametrize("duplicate", ["session", "node_id"])
@@ -1073,10 +1069,10 @@ async def test_late_invalid_stream_input_prevents_model_calls() -> None:
         for number in range(1, 1102):
             session = _session(number, status=SessionStatus.FAILED)
             if number == 1101:
-                session.session.import_id = uuid.uuid4()
+                session.session.agent_id = uuid.uuid4()
             yield session
 
-    with pytest.raises(ValueError, match="source import"):
+    with pytest.raises(ValueError, match="context agent"):
         await generate_insights(
             sessions(),
             context=_context(),

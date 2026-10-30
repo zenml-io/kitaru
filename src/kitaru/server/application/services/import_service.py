@@ -229,7 +229,13 @@ class ImportService:
         # The job was just created in this call and cannot have settled yet, so
         # the tasks skip add_tasks' settled check.
         tasks: list[Task] = [
-            await build_analysis_task(analyzer, import_, job.id, len(sessions))
+            await build_analysis_task(
+                analyzer,
+                job.id,
+                len(sessions),
+                agent_id=import_.agent_id,
+                import_id=import_.id,
+            )
             for analyzer in analyzers
         ]
         await self._tasks.create_many(tasks)

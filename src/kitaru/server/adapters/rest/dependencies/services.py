@@ -447,6 +447,7 @@ def get_task_policy(settings: APISettings) -> TaskPolicy:
         analyzer_timeout_seconds=settings.ANALYZER_TASK_TIMEOUT_SECONDS,
         max_result_bytes=settings.MAX_TASK_RESULT_BYTES,
         evaluation_pair_limit=settings.EVALUATION_PAIR_LIMIT,
+        analysis_session_limit=settings.ANALYSIS_SESSION_LIMIT,
     )
 
 

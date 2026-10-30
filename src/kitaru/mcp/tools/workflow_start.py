@@ -1,13 +1,15 @@
 #  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
-"""Evaluation and experiment-run workflow starts."""
+"""Evaluation, analysis, and experiment-run workflow starts."""
 
+from kitaru.api_models.v1.analysis import AnalysisCreateRequest
 from kitaru.api_models.v1.evaluation import EvaluationBatchCreateRequest
 from kitaru.api_models.v1.experiment_run import ExperimentRunCreateRequest
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.workflows import (
+    AnalysisStart,
     EvaluationStart,
     WorkflowStartRequest,
 )
@@ -42,6 +44,8 @@ async def handle_workflow_start(
             ],
             "result": job.model_dump(mode="json"),
         }
+    if isinstance(request, AnalysisStart):
+        return await _start_analysis(state, request)
     dto = ExperimentRunCreateRequest(
         cohort_version_id=request.cohort_version_id,
         agent_version_id=request.agent_version_id,
@@ -65,4 +69,29 @@ async def handle_workflow_start(
         "agent_version_id": str(request.agent_version_id),
         "baseline_evaluation_mode": request.baseline_evaluation_mode,
         "result": run.model_dump(mode="json"),
+    }
+
+
+async def _start_analysis(state: MCPServerState, request: AnalysisStart) -> object:
+    """Queue one analysis job and echo the requested scope."""
+    scope = request.model_dump(
+        mode="json",
+        exclude_none=True,
+        exclude={"operation", "agent_id", "analyzers", "idempotency_key"},
+    )
+    job = await state.client.analyses.create(
+        AnalysisCreateRequest(
+            agent_id=request.agent_id, analyzers=request.analyzers, **scope
+        ),
+        idempotency_key=request.idempotency_key,
+    )
+    return {
+        "operation": "analysis",
+        "agent_id": str(request.agent_id),
+        "scope": scope,
+        "analyzers": [
+            config.model_dump(mode="json", exclude_unset=True)
+            for config in request.analyzers
+        ],
+        "result": job.model_dump(mode="json"),
     }

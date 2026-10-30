@@ -1,13 +1,13 @@
 # Kitaru post-import insights
 
-Generate evidence-backed insight cards from imported Kitaru sessions. This distribution provides two independently selectable analyzers. Both profile every selected session and build deterministic candidates; the OpenAI analyzer then uses bounded analyst and editor calls to select candidates and write their descriptions.
+Generate evidence-backed insight cards from one agent's Kitaru sessions, whether they were imported or recorded live. This distribution provides two independently selectable analyzers. Both profile every selected session and build deterministic candidates; the OpenAI analyzer then uses bounded analyst and editor calls to select candidates and write their descriptions.
 
 | Catalog name | Entrypoint in `kitaru_post_import_insights.analyzer` | Required configuration |
 |---|---|---|
 | `kitaru/post-import-insights` | `analyze_post_import_sessions` | None |
 | `kitaru/openai-post-import-insights` | `analyze_openai_post_import_sessions` | OpenAI connection supplying `OPENAI_API_KEY`; defaults to `gpt-5.6-luna` with low reasoning effort and accepts an optional `model` override |
 
-Both entrypoints accept a list of session UUIDs for one agent and import, fetch each session with its nodes through `KitaruAPIClient`, and return `list[InsightInput]` for the task runner to persist. Each fetched trace is processed and released before the next fetch. Select either analyzer or both for an import. Each invocation persists its own cards; matching candidate names do not replace another analyzer's results.
+Both entrypoints accept a list of session UUIDs for one agent, fetch each session with its nodes through `KitaruAPIClient`, and return `list[InsightInput]` for the task runner to persist. Each fetched trace is processed and released before the next fetch. The sessions can come from one import, from several imports, or from live recording. When every session comes from the same import, the copied investigation prompt names that import and its provider; otherwise the prompt omits the import line. Select either analyzer or both for the same sessions. Each invocation persists its own cards; matching candidate names do not replace another analyzer's results.
 
 The API client uses `KITARU_API_URL` and `KITARU_API_TOKEN`. Both analyzers accept `agent_name` for display context. The deterministic analyzer does not accept a `model` parameter or call OpenAI. The OpenAI analyzer uses `gpt-5.6-luna` with low reasoning effort when its `model` parameter is omitted; callers can override that parameter with a compatible model available to their OpenAI project. It fails when its credential is missing.
 

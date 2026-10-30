@@ -13285,9 +13285,200 @@
       "openWorldHint": true,
       "readOnlyHint": false
     },
-    "description": "Start an evaluation batch or experiment run and return immediately.",
+    "description": "Start an evaluation batch, an analysis, or an experiment run; return at once.",
     "inputSchema": {
       "$defs": {
+        "AnalysisStart": {
+          "additionalProperties": false,
+          "description": "Run analyzers once over one agent's finished sessions matching every scope field.\n\nScope fields combine as AND. With none set, every finished session of the\nagent is analyzed. The server fixes the matching sessions when it creates\nthe job.",
+          "properties": {
+            "agent_id": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "analyzers": {
+              "items": {
+                "$ref": "#/$defs/AnalyzerConfig"
+              },
+              "maxItems": 20,
+              "minItems": 1,
+              "title": "Analyzers",
+              "type": "array"
+            },
+            "cohort_version_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cohort Version Id"
+            },
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
+            },
+            "import_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Import Id"
+            },
+            "operation": {
+              "const": "analysis",
+              "title": "Operation",
+              "type": "string"
+            },
+            "session_ids": {
+              "anyOf": [
+                {
+                  "items": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "maxItems": 1000,
+                  "minItems": 1,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Session Ids"
+            },
+            "started_after": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Started After"
+            },
+            "started_before": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Started Before"
+            },
+            "tag": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Tag"
+            }
+          },
+          "required": [
+            "operation",
+            "agent_id",
+            "analyzers"
+          ],
+          "title": "AnalysisStart",
+          "type": "object"
+        },
+        "AnalyzerConfig": {
+          "additionalProperties": false,
+          "description": "Analyzer config.",
+          "properties": {
+            "analyzer": {
+              "description": "Analyzer name.",
+              "title": "Analyzer",
+              "type": "string"
+            },
+            "connection_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Credential connection; defaults to the provider's default.",
+              "title": "Connection Id"
+            },
+            "min_sessions": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Session minimum (built-in insights: 5; others: 1).",
+              "title": "Min Sessions"
+            },
+            "params": {
+              "additionalProperties": true,
+              "description": "Plugin arguments.",
+              "title": "Params",
+              "type": "object"
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Analyzer version; defaults to latest.",
+              "title": "Version"
+            }
+          },
+          "required": [
+            "analyzer"
+          ],
+          "title": "AnalyzerConfig",
+          "type": "object"
+        },
         "BaselineEvaluationMode": {
           "description": "Baseline evaluation mode.",
           "enum": [
@@ -13431,6 +13622,7 @@
         "request": {
           "discriminator": {
             "mapping": {
+              "analysis": "#/$defs/AnalysisStart",
               "evaluation": "#/$defs/EvaluationStart",
               "experiment_run": "#/$defs/ExperimentRunStart"
             },
@@ -13439,6 +13631,9 @@
           "oneOf": [
             {
               "$ref": "#/$defs/EvaluationStart"
+            },
+            {
+              "$ref": "#/$defs/AnalysisStart"
             },
             {
               "$ref": "#/$defs/ExperimentRunStart"
@@ -13456,6 +13651,109 @@
     "name": "kitaru_workflow_start",
     "outputSchema": {
       "$defs": {
+        "AnalysisStartReceipt": {
+          "additionalProperties": false,
+          "description": "Immediate receipt for a queued analysis job.",
+          "properties": {
+            "agent_id": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "analyzers": {
+              "items": {
+                "$ref": "#/$defs/AnalyzerConfig"
+              },
+              "title": "Analyzers",
+              "type": "array"
+            },
+            "operation": {
+              "const": "analysis",
+              "title": "Operation",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobResponse"
+            },
+            "scope": {
+              "additionalProperties": true,
+              "title": "Scope",
+              "type": "object"
+            }
+          },
+          "required": [
+            "operation",
+            "agent_id",
+            "scope",
+            "analyzers",
+            "result"
+          ],
+          "title": "AnalysisStartReceipt",
+          "type": "object"
+        },
+        "AnalyzerConfig": {
+          "additionalProperties": false,
+          "description": "Analyzer config.",
+          "properties": {
+            "analyzer": {
+              "description": "Analyzer name.",
+              "title": "Analyzer",
+              "type": "string"
+            },
+            "connection_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Credential connection; defaults to the provider's default.",
+              "title": "Connection Id"
+            },
+            "min_sessions": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Session minimum (built-in insights: 5; others: 1).",
+              "title": "Min Sessions"
+            },
+            "params": {
+              "additionalProperties": true,
+              "description": "Plugin arguments.",
+              "title": "Params",
+              "type": "object"
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Analyzer version; defaults to latest.",
+              "title": "Version"
+            }
+          },
+          "required": [
+            "analyzer"
+          ],
+          "title": "AnalyzerConfig",
+          "type": "object"
+        },
         "BaselineEvaluationMode": {
           "description": "Baseline evaluation mode.",
           "enum": [
@@ -13939,6 +14237,9 @@
           "anyOf": [
             {
               "$ref": "#/$defs/EvaluationStartReceipt"
+            },
+            {
+              "$ref": "#/$defs/AnalysisStartReceipt"
             },
             {
               "$ref": "#/$defs/ExperimentRunStartReceipt"

@@ -675,13 +675,24 @@ class ImportTask(Task):
 
 
 class AnalysisTask(Task):
-    """Analysis task."""
+    """Analysis task.
+
+    The task reads `session_ids` when set, and otherwise every session of
+    `import_id`. A session list is fixed when the task is created.
+    """
 
     plugin_version_id: uuid.UUID
     agent_id: uuid.UUID
-    import_id: uuid.UUID
+    import_id: uuid.UUID | None = None
+    session_ids: list[uuid.UUID] | None = None
     connection_id: uuid.UUID | None = None
     params: dict[str, Any] = Field(default_factory=dict)
+
+    @pydantic.model_validator(mode="after")
+    def _require_scope(self) -> Self:
+        if self.import_id is None and self.session_ids is None:
+            raise ValueError("An analysis task needs an import or a session list")
+        return self
 
     def skip_if_insufficient_sessions(
         self, eligible_sessions: int, min_sessions: int, now: datetime
@@ -689,7 +700,7 @@ class AnalysisTask(Task):
         """Skip a pending analysis when below its session minimum.
 
         Args:
-            eligible_sessions: Number of eligible sessions in the import.
+            eligible_sessions: Number of eligible sessions in scope.
             min_sessions: Minimum required to run the analyzer.
             now: Current time.
         """
@@ -826,7 +837,8 @@ class AnalysisTaskDetails(FrozenModel):
     params: dict[str, Any] = Field(default_factory=dict)
     plugin: PluginSpec
     agent_id: uuid.UUID
-    import_id: uuid.UUID
+    import_id: uuid.UUID | None = None
+    session_ids: list[uuid.UUID] | None = None
 
 
 TaskDetails = Annotated[

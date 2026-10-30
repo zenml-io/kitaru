@@ -23,7 +23,7 @@
   "plugins/tests/adapters/openai_agents/test_recording.py": 1147,
   "plugins/tests/adapters/pydantic_ai/test_adapter.py": 1946,
   "plugins/tests/analyzers/post_import_insights/test_generation.py": 1875,
-  "plugins/tests/analyzers/post_import_insights/test_pipeline.py": 1310,
+  "plugins/tests/analyzers/post_import_insights/test_pipeline.py": 1306,
   "plugins/tests/analyzers/post_import_insights/test_profiling.py": 2352,
   "plugins/tests/importers/fuzz_strategies.py": 1008,
   "plugins/tests/importers/test_langfuse.py": 1473,

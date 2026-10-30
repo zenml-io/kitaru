@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Accept any sessions that belong to one agent, including live-recorded sessions and sessions from several imports. When every session comes from the same import, the cards and copied investigation prompt still name that import and its provider; otherwise the prompt omits the import line.
+
 ## 0.2.0 - 2026-10-30
 
 - Count explicit tool requests in LLM output messages when a session has no separate tool nodes, label the fallback as requests, and exclude incomplete request scans from the distribution.

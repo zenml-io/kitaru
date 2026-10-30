@@ -65,7 +65,7 @@ class GenerationMode(StrEnum):
 
 
 class SourceImportContext(_InsightGenerationModel):
-    """Stable context for the import whose sessions were analyzed."""
+    """Stable context for the one import that created every analyzed session."""
 
     import_id: uuid.UUID = Field(description="Import that created the sessions.")
     provider: str | None = Field(
@@ -88,8 +88,12 @@ class InsightGenerationContext(_InsightGenerationModel):
         max_length=MAX_NAME_LENGTH,
         description="Human-readable agent name, when supplied by the caller.",
     )
-    source_import: SourceImportContext = Field(
-        description="Import scope whose normalized sessions were analyzed."
+    source_import: SourceImportContext | None = Field(
+        default=None,
+        description=(
+            "Import that created every analyzed session, or None when the sessions "
+            "were recorded live or came from more than one import."
+        ),
     )
     server_url: str | None = Field(
         default=None,

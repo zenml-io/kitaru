@@ -48,6 +48,7 @@ MAPPING = {
     ("POST", "/api/v1/sessions"): ("sessions", "create"),
     ("POST", "/api/v1/replays"): ("replays", "create"),
     ("POST", "/api/v1/evaluations"): ("evaluations", "create"),
+    ("POST", "/api/v1/analyses"): ("analyses", "create"),
     ("POST", "/api/v1/session-runs"): ("session_runs", "create"),
     ("POST", "/api/v1/imports"): ("imports", "create"),
     ("POST", "/api/v1/imports/{import_id}/analyze"): ("imports", "analyze"),

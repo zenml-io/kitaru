@@ -462,6 +462,136 @@
         "title": "AgentVersionUpdateRequest",
         "type": "object"
       },
+      "AnalysisCreateRequest": {
+        "additionalProperties": false,
+        "description": "Analysis create request.\n\nEvery scope field that is set must match, so they combine as AND. With\nnone set, every finished session of the agent is analyzed.",
+        "properties": {
+          "agent_id": {
+            "description": "Agent whose sessions are analyzed.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "analyzers": {
+            "description": "Analyzers run across the selected sessions.",
+            "items": {
+              "$ref": "#/components/schemas/AnalyzerConfig"
+            },
+            "minItems": 1,
+            "title": "Analyzers",
+            "type": "array"
+          },
+          "cohort_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only sessions in this cohort version.",
+            "title": "Cohort Version Id"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FilterCondition"
+              },
+              {
+                "$ref": "#/components/schemas/AndFilter"
+              },
+              {
+                "$ref": "#/components/schemas/OrFilter"
+              },
+              {
+                "$ref": "#/components/schemas/NotFilter"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only sessions matching this session filter.",
+            "title": "Filter"
+          },
+          "import_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only sessions this import created. Insights also record it.",
+            "title": "Import Id"
+          },
+          "session_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only these sessions.",
+            "title": "Session Ids"
+          },
+          "started_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only sessions started at or after this time.",
+            "title": "Started After"
+          },
+          "started_before": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only sessions started before this time.",
+            "title": "Started Before"
+          },
+          "tag": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only sessions with this tag name.",
+            "title": "Tag"
+          }
+        },
+        "required": [
+          "agent_id",
+          "analyzers"
+        ],
+        "title": "AnalysisCreateRequest",
+        "type": "object"
+      },
       "AnalysisTaskDetails": {
         "description": "Analysis task details.",
         "properties": {
@@ -477,10 +607,17 @@
             "type": "string"
           },
           "import_id": {
-            "description": "Import whose sessions are analyzed.",
-            "format": "uuid",
-            "title": "Import Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Import whose sessions are analyzed when no session list is set.",
+            "title": "Import Id"
           },
           "kind": {
             "const": "analyzer",
@@ -512,14 +649,29 @@
               }
             ],
             "title": "Plugin"
+          },
+          "session_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sessions analyzed, fixed when the task was created.",
+            "title": "Session Ids"
           }
         },
         "required": [
           "analyzer_name",
           "params",
           "plugin",
-          "agent_id",
-          "import_id"
+          "agent_id"
         ],
         "title": "AnalysisTaskDetails",
         "type": "object"
@@ -12698,6 +12850,126 @@
         "summary": "Create Agent Version",
         "tags": [
           "agents"
+        ]
+      }
+    },
+    "/api/v1/analyses": {
+      "post": {
+        "description": "Run analyzers over one agent's selected sessions, as one job.\n\nClients observe HTTP 201 on success, 404 when an analyzer, version, or\nconnection does not exist, and 422 when no finished session matches, more\nsessions match than the cap allows, or the input is invalid.\n\nArgs:\n    body: Analysis create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
+        "operationId": "create_analyses_api_v1_analyses_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalysisCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Create Analyses",
+        "tags": [
+          "analyses"
         ]
       }
     },

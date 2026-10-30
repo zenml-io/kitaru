@@ -123,8 +123,11 @@ def test_task_token_round_trips() -> None:
 def test_task_token_round_trips_grants() -> None:
     """Encoding then decoding a task token recovers its granted resource ids."""
     settings = local_settings()
-    session_id = uuid.uuid4()
-    blob_id = uuid.uuid4()
+    grants = {
+        GrantKind.SESSION: frozenset({uuid.uuid4()}),
+        GrantKind.BLOB: frozenset({uuid.uuid4()}),
+        GrantKind.AGENT: frozenset({uuid.uuid4()}),
+    }
     expires_at = datetime.now(UTC) + timedelta(hours=1)
     token = JWTToken(
         subject=TaskSubject(
@@ -133,10 +136,7 @@ def test_task_token_round_trips_grants() -> None:
             worker_id=uuid.uuid4(),
             account_id=uuid.uuid4(),
             job_id=uuid.uuid4(),
-            grants={
-                GrantKind.SESSION: frozenset({session_id}),
-                GrantKind.BLOB: frozenset({blob_id}),
-            },
+            grants=grants,
         ),
         expires_at=expires_at,
     )
@@ -144,10 +144,7 @@ def test_task_token_round_trips_grants() -> None:
     decoded = JWTToken.decode(token.encode(settings), settings)
 
     assert isinstance(decoded.subject, TaskSubject)
-    assert decoded.subject.grants == {
-        GrantKind.SESSION: frozenset({session_id}),
-        GrantKind.BLOB: frozenset({blob_id}),
-    }
+    assert decoded.subject.grants == grants
 
 
 def test_decode_rejects_an_unrecognized_subject_kind() -> None:
