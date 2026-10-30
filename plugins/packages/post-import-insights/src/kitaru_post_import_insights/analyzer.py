@@ -44,19 +44,35 @@ def _get_context(
     agent_name: str | None,
     server_url: str | None,
 ) -> InsightGenerationContext:
-    """Derive the identity available on normalized analyzer sessions."""
-    if first.session.import_id is None:
-        raise ValueError("every post-import insight session must have an import ID")
-
+    """Derive the identity available on the first normalized analyzer session."""
+    import_id = first.session.import_id
     return InsightGenerationContext(
         agent_id=first.session.agent_id,
         agent_name=agent_name,
-        source_import=SourceImportContext(
-            import_id=first.session.import_id,
-            provider=_get_provider(first.session.imported_from),
+        source_import=(
+            None
+            if import_id is None
+            else SourceImportContext(
+                import_id=import_id,
+                provider=_get_provider(first.session.imported_from),
+            )
         ),
         server_url=server_url,
     )
+
+
+def _narrow_source_import(
+    source: SourceImportContext, item: SessionWithNodesResponse
+) -> SourceImportContext | None:
+    """Keep the source import only while every session shares it and its provider."""
+    if item.session.import_id != source.import_id:
+        return None
+    if (
+        source.provider is not None
+        and _get_provider(item.session.imported_from) != source.provider
+    ):
+        return source.model_copy(update={"provider": None})
+    return source
 
 
 async def _lookup_agent_name(client: KitaruAPIClient, agent_id: UUID) -> str | None:
@@ -96,7 +112,7 @@ async def analyze_post_import_sessions(
     """Generate deterministic insight cards without provider credentials.
 
     Args:
-        session_ids: IDs of imported sessions for one agent and import.
+        session_ids: IDs of sessions for one agent, recorded live or imported.
         agent_name: Optional display name included in copied prompt context.
 
     Returns:
@@ -114,7 +130,7 @@ async def analyze_openai_post_import_sessions(
     """Generate insight cards selected and edited by OpenAI.
 
     Args:
-        session_ids: IDs of imported sessions for one agent and import.
+        session_ids: IDs of sessions for one agent, recorded live or imported.
         model: OpenAI model for the bounded analyst and editor calls. Defaults
             to `gpt-5.6-luna` with low reasoning effort.
         agent_name: Optional display name included in copied prompt context.
@@ -148,7 +164,7 @@ async def _analyze_sessions(
     if not session_ids:
         return []
     context: InsightGenerationContext | None = None
-    provider: str | None = None
+    source_import: SourceImportContext | None = None
     with SessionProfiler() as profiler:
         async with KitaruAPIClient() as client:
             for session_id in session_ids:
@@ -159,9 +175,9 @@ async def _analyze_sessions(
                         agent_name=agent_name,
                         server_url=_get_server_url(client),
                     )
-                    provider = context.source_import.provider
-                elif _get_provider(normalized.session.imported_from) != provider:
-                    provider = None
+                    source_import = context.source_import
+                elif source_import is not None:
+                    source_import = _narrow_source_import(source_import, normalized)
                 validate_session(normalized, context=context)
                 profiler.consume(normalized)
                 del normalized
@@ -171,12 +187,7 @@ async def _analyze_sessions(
     if context is None:
         return []
     context = context.model_copy(
-        update={
-            "agent_name": agent_name,
-            "source_import": context.source_import.model_copy(
-                update={"provider": provider}
-            ),
-        }
+        update={"agent_name": agent_name, "source_import": source_import}
     )
     generator = None
     if model is not None:

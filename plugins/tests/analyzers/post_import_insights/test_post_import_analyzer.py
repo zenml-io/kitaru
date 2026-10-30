@@ -59,7 +59,7 @@ from kitaru_post_import_insights.generation import (
     EditorialCardCopy,
     EditorialPlan,
 )
-from kitaru_post_import_insights.models import GenerationMode
+from kitaru_post_import_insights.models import GenerationMode, SourceImportContext
 from kitaru_post_import_insights.openai_generator import MissingOpenAICredential
 from kitaru_post_import_insights.profiling import SessionProfiler
 
@@ -191,8 +191,9 @@ async def test_analyzer_returns_self_contained_insight_inputs(
         assert item.context.agent_id == AGENT_ID
         assert item.context.agent_name == "returns-agent"
         assert item.context.server_url == "https://stub-api.example.test"
-        assert item.context.source_import.import_id == IMPORT_ID
-        assert item.context.source_import.provider == "langfuse"
+        assert item.context.source_import == SourceImportContext(
+            import_id=IMPORT_ID, provider="langfuse"
+        )
         assert item.contributing_session_ids
         assert item.coverage.sessions_analyzed == 2
         assert str(IMPORT_ID) in item.investigation_prompt
@@ -324,7 +325,9 @@ async def test_analyzer_fetches_full_sessions_using_task_credentials(
             for item in metadata
         )
         assert all(
-            item.context.source_import.import_id == IMPORT_ID for item in metadata
+            item.context.source_import
+            == SourceImportContext(import_id=IMPORT_ID, provider="langfuse")
+            for item in metadata
         )
         assert any(
             evidence.node_id == views[0].nodes[0].id
@@ -598,7 +601,7 @@ async def test_empty_ids_return_without_client_or_model_initialization(
 
 @pytest.mark.parametrize(
     "invalid",
-    ["agent", "import", "origin", "duplicate", "node_session", "node_id"],
+    ["agent", "duplicate", "node_session", "node_id"],
 )
 async def test_late_invalid_session_prevents_model_initialization(
     client: StubClient, monkeypatch: pytest.MonkeyPatch, invalid: str
@@ -606,10 +609,6 @@ async def test_late_invalid_session_prevents_model_initialization(
     late = _view(302, failed_tool=True)
     if invalid == "agent":
         late.session.agent_id = uuid.uuid4()
-    elif invalid == "import":
-        late.session.import_id = uuid.uuid4()
-    elif invalid == "origin":
-        late.session.origin = SessionOrigin.RECORDED
     elif invalid == "duplicate":
         late = _view(1)
     elif invalid == "node_session":
@@ -667,8 +666,8 @@ async def test_provider_must_match_across_the_full_stream(
     cards = await analyze_post_import_sessions(client.add(views))
     assert cards
     assert all(
-        InsightGenerationResult.card_metadata(card).context.source_import.provider
-        is None
+        InsightGenerationResult.card_metadata(card).context.source_import
+        == SourceImportContext(import_id=IMPORT_ID)
         for card in cards
     )
 
@@ -685,7 +684,7 @@ async def test_analyzer_omits_invalid_optional_provider(
 
     assert insights
     metadata = InsightGenerationResult.card_metadata(insights[0])
-    assert metadata.context.source_import.provider is None
+    assert metadata.context.source_import == SourceImportContext(import_id=IMPORT_ID)
 
 
 async def test_analyzer_rejects_sessions_from_multiple_agents(
@@ -698,15 +697,56 @@ async def test_analyzer_rejects_sessions_from_multiple_agents(
         )
 
 
-async def test_analyzer_requires_an_import_identity(
+def _record_live(view: SessionWithNodesResponse) -> None:
+    view.session = view.session.model_copy(
+        update={
+            "origin": SessionOrigin.RECORDED,
+            "import_id": None,
+            "imported_from": None,
+        }
+    )
+
+
+async def test_analyzer_accepts_live_recorded_sessions(
     client: StubClient,
 ) -> None:
-    """Reject imported sessions that cannot be tied back to an import."""
-    view = _view(1)
-    view.session = view.session.model_copy(update={"import_id": None})
+    """Analyze sessions recorded live, which have no source import."""
+    views = [_view(1, failed_tool=True), _view(2)]
+    for view in views:
+        _record_live(view)
 
-    with pytest.raises(ValueError, match="import ID"):
-        await analyze_post_import_sessions(client.add([view]))
+    insights = await analyze_post_import_sessions(client.add(views))
+
+    assert insights
+    for item in insights:
+        metadata = InsightGenerationResult.card_metadata(item)
+        assert metadata.context.source_import is None
+        assert metadata.coverage.sessions_analyzed == 2
+        assert "Import id: " not in metadata.investigation_prompt
+
+
+@pytest.mark.parametrize("mixed", ["second_import", "live_first", "live_last"])
+async def test_analyzer_omits_the_import_for_mixed_sources(
+    client: StubClient, mixed: str
+) -> None:
+    """Analyze one agent's sessions from several sources without naming an import."""
+    views = [_view(number, failed_tool=number == 1) for number in range(1, 4)]
+    if mixed == "second_import":
+        views[1].session = views[1].session.model_copy(
+            update={"import_id": uuid.uuid4()}
+        )
+    else:
+        _record_live(views[0] if mixed == "live_first" else views[-1])
+
+    insights = await analyze_post_import_sessions(client.add(views))
+
+    assert insights
+    for item in insights:
+        metadata = InsightGenerationResult.card_metadata(item)
+        assert metadata.context.source_import is None
+        assert metadata.coverage.sessions_analyzed == 3
+        assert "Import id: " not in metadata.investigation_prompt
+        assert str(IMPORT_ID) not in metadata.investigation_prompt
 
 
 async def test_task_runner_loads_analyzer_and_writes_cards(
@@ -799,7 +839,11 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
     assert consumed == fetched
     assert cards
     metadata = [InsightGenerationResult.card_metadata(card) for card in cards]
-    assert all(item.context.source_import.import_id == IMPORT_ID for item in metadata)
+    assert all(
+        item.context.source_import
+        == SourceImportContext(import_id=IMPORT_ID, provider="langfuse")
+        for item in metadata
+    )
     assert all(item.context.agent_name == "returns-agent" for item in metadata)
     assert any(evidence.node_id for item in metadata for evidence in item.evidence)
     assert all(item.coverage.sessions_available == 301 for item in metadata)

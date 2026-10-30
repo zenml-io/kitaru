@@ -237,6 +237,45 @@ async def test_run_passes_all_session_ids_without_fetching_details(
     ]
 
 
+async def test_run_passes_a_fixed_session_list_without_listing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pass a task's stored session list straight to the analyzer."""
+    session_ids = [uuid.uuid4() for _ in range(3)]
+    details = AnalysisTaskDetails(
+        analyzer_name="spread",
+        params={},
+        plugin=PackagePluginSpec(
+            entrypoint="package:analyze", requirement="package==1.0"
+        ),
+        agent_id=uuid.uuid4(),
+        session_ids=session_ids,
+    )
+
+    class Tasks:
+        async def get_spec(self, requested_task_id: uuid.UUID) -> Any:
+            return SimpleNamespace(details=details)
+
+    async def reject_listing(params: SessionListParams) -> None:
+        pytest.fail("The analyzer runner listed sessions for a fixed session list")
+
+    client: Any = SimpleNamespace(tasks=Tasks())
+    client.sessions = SessionsResource(client)
+    monkeypatch.setattr(client.sessions, "list", reject_listing)
+    received: list[list[uuid.UUID]] = []
+
+    def analyze(received_ids: list[uuid.UUID]) -> list[InsightInput]:
+        received.append(received_ids)
+        return []
+
+    monkeypatch.setattr(analyzer_module, "load_source_ref", lambda ref, label: analyze)
+    monkeypatch.setattr(analyzer_module, "write_task_result", lambda result: None)
+
+    await analyzer_module.run(client, str(uuid.uuid4()))
+
+    assert received == [session_ids]
+
+
 @pytest.mark.parametrize("source", ["script", "package"])
 @pytest.mark.parametrize("async_callable", [False, True])
 async def test_analyzer_flow_end_to_end(

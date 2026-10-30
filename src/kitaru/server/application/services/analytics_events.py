@@ -208,7 +208,7 @@ def build_analysis_completed_properties(
     Args:
         task: Analysis task that transitioned to a terminal status.
         plugin: Analyzer plugin the task ran.
-        import_: Import the task analyzed.
+        import_: Import the task analyzed, if any.
 
     Returns:
         Event properties.
@@ -218,7 +218,9 @@ def build_analysis_completed_properties(
         **_plugin_properties(plugin),
         **_duration_properties(task.started_at, task.ended_at),
     }
-    if import_ is not None and import_.stats is not None:
+    if task.session_ids is not None:
+        properties["session_count"] = len(task.session_ids)
+    elif import_ is not None and import_.stats is not None:
         properties["session_count"] = import_.stats.created
     if isinstance(task.result, list):
         properties["insight_count"] = len(task.result)

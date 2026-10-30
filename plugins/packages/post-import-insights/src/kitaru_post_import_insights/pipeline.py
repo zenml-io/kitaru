@@ -21,7 +21,6 @@ from itertools import combinations
 from pydantic import BaseModel, ConfigDict, Field
 
 from kitaru.api_models.v1.insight import BinnedInsightData, InsightInput
-from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
 from kitaru_post_import_insights.generation import (
     InsightModelGenerator,
@@ -210,7 +209,7 @@ def _build_setup_preamble(server_url: str | None) -> str:
 
 
 def _build_identity_lines(context: InsightGenerationContext) -> str:
-    """Name the server, agent, and import the briefing refers to."""
+    """Name the server, agent, and any single source import of the briefing."""
     lines: list[str] = []
     if context.server_url is not None:
         lines.append(f"Server: {context.server_url}")
@@ -222,10 +221,11 @@ def _build_identity_lines(context: InsightGenerationContext) -> str:
             f"`kitaru agent get {context.agent_id}`)"
         )
     source = context.source_import
-    import_line = f"Import id: {source.import_id}"
-    if source.provider is not None:
-        import_line += f" (source: {source.provider})"
-    lines.append(import_line)
+    if source is not None:
+        import_line = f"Import id: {source.import_id}"
+        if source.provider is not None:
+            import_line += f" (source: {source.provider})"
+        lines.append(import_line)
     return "\n".join(lines)
 
 
@@ -585,14 +585,10 @@ def validate_session(
     *,
     context: InsightGenerationContext,
 ) -> None:
-    """Reject a session with inconsistent scope or ambiguous node identities."""
+    """Reject a session from another agent or with ambiguous node identities."""
     session = item.session
     if session.agent_id != context.agent_id:
         raise ValueError("every session must belong to the context agent")
-    if session.origin is not SessionOrigin.IMPORTED:
-        raise ValueError("every session must originate from an import")
-    if session.import_id != context.source_import.import_id:
-        raise ValueError("every session must belong to the context source import")
     node_ids: set[uuid.UUID] = set()
     for node in item.nodes:
         if node.session_id != session.id:

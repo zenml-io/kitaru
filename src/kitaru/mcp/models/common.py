@@ -28,6 +28,7 @@ from kitaru.api_models.v1.investigation import (
     InvestigationSessionResponse,
 )
 from kitaru.api_models.v1.job import JobResponse
+from kitaru.api_models.v1.plugin import AnalyzerConfig
 from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayResponse
 from kitaru.api_models.v1.session import SessionDetailResponse, SessionResponse
 from kitaru.api_models.v1.session_node import SessionNodeResponse
@@ -266,6 +267,16 @@ class EvaluationStartReceipt(MCPModel):
     result: JobResponse
 
 
+class AnalysisStartReceipt(MCPModel):
+    """Immediate receipt for a queued analysis job."""
+
+    operation: Literal["analysis"]
+    agent_id: uuid.UUID
+    scope: dict[str, JsonValue]
+    analyzers: list[AnalyzerConfig]
+    result: JobResponse
+
+
 class ExperimentRunStartReceipt(MCPModel):
     """Immediate receipt for a started experiment run."""
 
@@ -280,7 +291,9 @@ class ExperimentRunStartReceipt(MCPModel):
 class WorkflowStartResult(ToolResult):
     """Workflow start result with an authoritative typed receipt."""
 
-    data: EvaluationStartReceipt | ExperimentRunStartReceipt | None = None
+    data: (
+        EvaluationStartReceipt | AnalysisStartReceipt | ExperimentRunStartReceipt | None
+    ) = None
 
 
 class WorkflowCancellationReceipt(MCPModel):

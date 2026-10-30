@@ -127,6 +127,21 @@ def test_kinds() -> None:
     assert _task().kind is TaskKind.IMPORTER
 
 
+def test_analysis_task_requires_an_import_or_a_session_list() -> None:
+    """Reject an analysis task that names neither an import nor sessions."""
+    with pytest.raises(ValueError, match="needs an import or a session list"):
+        AnalysisTask(
+            job_id=uuid.uuid4(), plugin_version_id=uuid.uuid4(), agent_id=uuid.uuid4()
+        )
+    task = AnalysisTask(
+        job_id=uuid.uuid4(),
+        plugin_version_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        session_ids=[uuid.uuid4()],
+    )
+    assert task.import_id is None
+
+
 @pytest.mark.parametrize(("origin", "target"), list(TRANSITIONS))
 def test_legal_transitions(origin: TaskStatus, target: TaskStatus) -> None:
     """Every legal cell of the transition table applies."""
