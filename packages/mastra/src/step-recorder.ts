@@ -107,6 +107,10 @@ function usageTokens(usage: unknown): SessionNodeCreateRequest["tokens"] {
         : typeof inputDetails?.cacheReadTokens === "number"
           ? inputDetails.cacheReadTokens
           : undefined,
+    cache_write_input_tokens:
+      typeof inputDetails?.cacheWriteTokens === "number"
+        ? inputDetails.cacheWriteTokens
+        : undefined,
     input_tokens:
       typeof usage.inputTokens === "number" ? usage.inputTokens : undefined,
     output_tokens:

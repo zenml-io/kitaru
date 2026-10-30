@@ -29,6 +29,7 @@ function usageTokens(
 ): SessionNodeCreateRequest["tokens"] {
   const fields = {
     cached_input_tokens: usage.inputTokenDetails.cacheReadTokens,
+    cache_write_input_tokens: usage.inputTokenDetails.cacheWriteTokens,
     input_tokens: usage.inputTokens,
     output_tokens: usage.outputTokens,
     reasoning_tokens: usage.outputTokenDetails.reasoningTokens,
