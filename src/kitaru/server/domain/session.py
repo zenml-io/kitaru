@@ -343,6 +343,7 @@ class SessionRollups(FrozenModel):
     input_tokens: int = 0
     output_tokens: int = 0
     cached_input_tokens: int = 0
+    cache_write_input_tokens: int = 0
     reasoning_tokens: int = 0
     llm_call_count: int = 0
     tool_call_count: int = 0
@@ -357,6 +358,7 @@ def combine_rollups(deltas: Iterable[SessionRollups]) -> SessionRollups:
     input_tokens = 0
     output_tokens = 0
     cached_input_tokens = 0
+    cache_write_input_tokens = 0
     reasoning_tokens = 0
     llm_call_count = 0
     tool_call_count = 0
@@ -364,6 +366,7 @@ def combine_rollups(deltas: Iterable[SessionRollups]) -> SessionRollups:
         input_tokens += delta.input_tokens
         output_tokens += delta.output_tokens
         cached_input_tokens += delta.cached_input_tokens
+        cache_write_input_tokens += delta.cache_write_input_tokens
         reasoning_tokens += delta.reasoning_tokens
         llm_call_count += delta.llm_call_count
         tool_call_count += delta.tool_call_count
@@ -371,6 +374,7 @@ def combine_rollups(deltas: Iterable[SessionRollups]) -> SessionRollups:
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cached_input_tokens=cached_input_tokens,
+        cache_write_input_tokens=cache_write_input_tokens,
         reasoning_tokens=reasoning_tokens,
         llm_call_count=llm_call_count,
         tool_call_count=tool_call_count,
@@ -387,6 +391,8 @@ def rollup_delta(old: SessionRollups, new: SessionRollups) -> SessionRollups:
         input_tokens=new.input_tokens - old.input_tokens,
         output_tokens=new.output_tokens - old.output_tokens,
         cached_input_tokens=new.cached_input_tokens - old.cached_input_tokens,
+        cache_write_input_tokens=new.cache_write_input_tokens
+        - old.cache_write_input_tokens,
         reasoning_tokens=new.reasoning_tokens - old.reasoning_tokens,
         llm_call_count=new.llm_call_count - old.llm_call_count,
         tool_call_count=new.tool_call_count - old.tool_call_count,

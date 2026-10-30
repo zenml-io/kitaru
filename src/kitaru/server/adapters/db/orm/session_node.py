@@ -144,6 +144,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     input_tokens: Mapped[int | None] = mapped_column(BigInteger)
     output_tokens: Mapped[int | None] = mapped_column(BigInteger)
     cached_input_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    cache_write_input_tokens: Mapped[int | None] = mapped_column(BigInteger)
     reasoning_tokens: Mapped[int | None] = mapped_column(BigInteger)
     cost: Mapped[Decimal | None] = mapped_column(Numeric)
     model_params: Mapped[dict[str, Any] | None] = mapped_column(
@@ -216,6 +217,9 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.cached_input_tokens = (
             tokens.cached_input_tokens if tokens is not None else None
         )
+        self.cache_write_input_tokens = (
+            tokens.cache_write_input_tokens if tokens is not None else None
+        )
         self.reasoning_tokens = tokens.reasoning_tokens if tokens is not None else None
         self.cost = node.cost
         self.model_params = node.model_params
@@ -243,6 +247,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                 self.input_tokens,
                 self.output_tokens,
                 self.cached_input_tokens,
+                self.cache_write_input_tokens,
                 self.reasoning_tokens,
             )
         )
@@ -251,6 +256,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                 input_tokens=self.input_tokens,
                 output_tokens=self.output_tokens,
                 cached_input_tokens=self.cached_input_tokens,
+                cache_write_input_tokens=self.cache_write_input_tokens,
                 reasoning_tokens=self.reasoning_tokens,
             )
             if has_tokens

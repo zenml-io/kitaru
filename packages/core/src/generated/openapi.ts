@@ -9867,6 +9867,11 @@ export interface components {
          */
         TokenUsage: {
             /**
+             * Cache Write Input Tokens
+             * @description Input tokens written to the provider's prompt cache, as the source reports them. Whether `input_tokens` also counts them follows the source.
+             */
+            cache_write_input_tokens?: number | null;
+            /**
              * Cached Input Tokens
              * @description Cached input tokens.
              */

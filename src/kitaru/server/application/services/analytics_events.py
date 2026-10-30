@@ -131,6 +131,10 @@ def build_session_completed_properties(session: Session) -> dict[str, Any]:
             properties["output_tokens"] = session.tokens.output_tokens
         if session.tokens.cached_input_tokens is not None:
             properties["cached_input_tokens"] = session.tokens.cached_input_tokens
+        if session.tokens.cache_write_input_tokens is not None:
+            properties["cache_write_input_tokens"] = (
+                session.tokens.cache_write_input_tokens
+            )
         if session.tokens.reasoning_tokens is not None:
             properties["reasoning_tokens"] = session.tokens.reasoning_tokens
     return properties

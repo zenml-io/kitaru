@@ -450,6 +450,10 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 + deltas.output_tokens,
                 cached_input_tokens=func.coalesce(SessionORM.cached_input_tokens, 0)
                 + deltas.cached_input_tokens,
+                cache_write_input_tokens=func.coalesce(
+                    SessionORM.cache_write_input_tokens, 0
+                )
+                + deltas.cache_write_input_tokens,
                 reasoning_tokens=func.coalesce(SessionORM.reasoning_tokens, 0)
                 + deltas.reasoning_tokens,
                 llm_call_count=SessionORM.llm_call_count + deltas.llm_call_count,

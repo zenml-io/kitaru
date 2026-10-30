@@ -684,6 +684,8 @@ class FakeSessionRepository:
             output_tokens=(tokens.output_tokens or 0) + deltas.output_tokens,
             cached_input_tokens=(tokens.cached_input_tokens or 0)
             + deltas.cached_input_tokens,
+            cache_write_input_tokens=(tokens.cache_write_input_tokens or 0)
+            + deltas.cache_write_input_tokens,
             reasoning_tokens=(tokens.reasoning_tokens or 0) + deltas.reasoning_tokens,
         )
         now = _renewed_timestamp(stored.updated)
