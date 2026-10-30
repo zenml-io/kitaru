@@ -1,1 +1,0 @@
-- Update OpenTelemetry to 1.45.1 to fix CVE-2026-114603, unbounded parsing of W3C `tracestate` headers.

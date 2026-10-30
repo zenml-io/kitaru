@@ -1,6 +1,6 @@
 [project]
 name = "kitaru-post-import-insights"
-version = "0.1.2"
+version = "0.2.0"
 description = "Post-import session insights for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"

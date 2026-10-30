@@ -1,1 +1,0 @@
-- `kitaru-openai-agents` now supports the OpenAI Agents SDK 0.23 and 0.24 minor lines in addition to 0.19.3+.

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 - 2026-10-30
 
 - Support OpenAI Agents SDK 0.23 and 0.24.
 
