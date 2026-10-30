@@ -10498,6 +10498,18 @@
         "additionalProperties": false,
         "description": "Token usage.",
         "properties": {
+          "cache_write_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Input tokens written to the provider's prompt cache, as the source reports them. Whether `input_tokens` also counts them follows the source.",
+            "title": "Cache Write Input Tokens"
+          },
           "cached_input_tokens": {
             "anyOf": [
               {

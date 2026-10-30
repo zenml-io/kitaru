@@ -262,6 +262,53 @@ def test_agent_factory_model_calls_record_model_usage_and_cost(
         }
 
 
+@pytest.mark.parametrize(
+    "cache_writes",
+    [
+        {"cache_creation": 300},
+        # langchain-anthropic's shape when Anthropic splits writes by lifetime.
+        {
+            "cache_creation": 0,
+            "ephemeral_5m_input_tokens": 200,
+            "ephemeral_1h_input_tokens": 100,
+        },
+    ],
+)
+def test_model_call_records_and_prices_cache_writes(
+    fake_client: Any, cache_writes: dict[str, int]
+) -> None:
+    message = AIMessage(
+        content="done",
+        response_metadata={
+            "model_name": "claude-sonnet-4-5",
+            "model_provider": "anthropic",
+        },
+        usage_metadata={
+            "input_tokens": 1000,
+            "output_tokens": 500,
+            "total_tokens": 1500,
+            "input_token_details": {"cache_read": 200, **cache_writes},
+        },
+    )
+    model = OpenAIStyleFakeModel(responses=[message])
+    runner = KitaruGraphRunner.from_agent_factory(
+        create_agent, factory_kwargs={"model": model, "tools": []}
+    )
+
+    runner.invoke({"messages": [{"role": "user", "content": "hi"}]})
+
+    [node] = _model_nodes(fake_client)
+    assert node.tokens == TokenUsage(
+        input_tokens=1000,
+        output_tokens=500,
+        cached_input_tokens=200,
+        cache_write_input_tokens=300,
+    )
+    # 500 uncached, 200 cache-read, and 300 cache-write input tokens plus 500
+    # output tokens at claude-sonnet-4-5's $3 / $0.30 / $3.75 / $15 per million.
+    assert node.cost == Decimal("0.010185")
+
+
 def test_model_call_without_usage_records_identity_but_no_cost(
     fake_client: Any,
 ) -> None:

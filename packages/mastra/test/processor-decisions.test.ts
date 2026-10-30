@@ -113,7 +113,7 @@ function model() {
     content: [{ type: "text", text: "support" }],
     finishReason: "stop",
     usage: {
-      inputTokens: { total: 10, cacheRead: 2 },
+      inputTokens: { total: 10, cacheRead: 2, cacheWrite: 4 },
       outputTokens: { total: 3, reasoning: 1 },
     },
     response: { modelId: "served" },
@@ -155,6 +155,7 @@ it("captures classifier calls as decision children with usage, costs and model i
       input_tokens: 10,
       output_tokens: 3,
       cached_input_tokens: 2,
+      cache_write_input_tokens: 4,
       reasoning_tokens: 1,
     },
     inputs: [{ role: "user", content: "message" }],

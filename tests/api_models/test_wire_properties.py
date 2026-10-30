@@ -110,6 +110,7 @@ _TOKEN_USAGE = st.fixed_dictionaries(
         "input_tokens": st.one_of(st.none(), st.integers(0, 100000)),
         "output_tokens": st.one_of(st.none(), st.integers(0, 100000)),
         "cached_input_tokens": st.one_of(st.none(), st.integers(0, 100000)),
+        "cache_write_input_tokens": st.one_of(st.none(), st.integers(0, 100000)),
         "reasoning_tokens": st.one_of(st.none(), st.integers(0, 100000)),
     }
 )

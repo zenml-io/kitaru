@@ -31,7 +31,7 @@ import pytest
 from fastapi import FastAPI
 from hypothesis import settings
 from hypothesis.database import DirectoryBasedExampleDatabase
-from sqlalchemy import text
+from sqlalchemy import Connection, inspect, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -439,6 +439,38 @@ async def drop_test_database(settings: APISettings) -> None:
             )
     finally:
         await engine.dispose()
+
+
+async def add_missing_orm_columns(engine: AsyncEngine, *tables: str) -> None:
+    """Add the nullable ORM columns that a historical schema lacks.
+
+    Args:
+        engine: Engine bound to a database migrated to an older revision.
+        tables: Names of the tables to complete.
+
+    Raises:
+        ValueError: A missing column is not nullable, so adding it empty
+            would not match any row a later revision could produce.
+    """
+
+    def add_columns(connection: Connection) -> None:
+        inspector = inspect(connection)
+        for name in tables:
+            present = {column["name"] for column in inspector.get_columns(name)}
+            for column in Base.metadata.tables[name].columns:
+                if column.name in present:
+                    continue
+                if not column.nullable:
+                    raise ValueError(f"Column {name}.{column.name} is not nullable")
+                column_type = column.type.compile(dialect=connection.dialect)
+                connection.execute(
+                    text(
+                        f'ALTER TABLE "{name}" ADD COLUMN "{column.name}" {column_type}'
+                    )
+                )
+
+    async with engine.begin() as connection:
+        await connection.run_sync(add_columns)
 
 
 @asynccontextmanager

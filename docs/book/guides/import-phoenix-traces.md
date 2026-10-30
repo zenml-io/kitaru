@@ -110,7 +110,7 @@ The importer reads common OpenInference and OpenTelemetry GenAI attributes for:
 
 - inputs and outputs, including model messages, tool arguments and results, and Google ADK request and response payloads;
 - requested and resolved model names, model provider, and model parameters;
-- input, output, cached-input, and reasoning token counts;
+- input, output, cached-input, cache-write input, and reasoning token counts;
 - recorded cost;
 - tool name;
 - PydanticAI or Google ADK framework identity when provider-specific attributes establish it.

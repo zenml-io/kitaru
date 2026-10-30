@@ -129,7 +129,7 @@ Per node, the importer preserves:
 
 - **Inputs and outputs** from `mlflow.spanInputs` and `mlflow.spanOutputs`, in the provider's own message format. The node's input, output, and system-prompt text selectors point at the user message, the assistant reply, and the system prompt inside that payload, which covers the OpenAI, Anthropic, and LangChain message formats MLflow records.
 - **Model identity**: resolved model from `mlflow.llm.model`, provider from `mlflow.llm.provider`, and the requested model from the `model` field of a model call's inputs.
-- **Token usage** from `mlflow.chat.tokenUsage`: input, output, and cache-read input tokens.
+- **Token usage** from `mlflow.chat.tokenUsage`: input, output, cache-read input, and cache-creation input tokens.
 - **Cost** from the `total_cost` of `mlflow.llm.cost`, which MLflow computes from its pricing data when it knows the model and token usage.
 - **Model parameters** from LangChain's `invocation_params`.
 - **Timings** from the span's start and end timestamps.

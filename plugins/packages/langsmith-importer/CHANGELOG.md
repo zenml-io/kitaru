@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Import prompt-cache writes from `cache_creation_input_tokens`, or from the sum of `input_token_details.cache_creation`, `ephemeral_5m_input_tokens`, and `ephemeral_1h_input_tokens`, as `cache_write_input_tokens`.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.3+dev` with the selected compatible published core version before releasing.
+
 ## 0.4.0 - 2026-09-21
 
 - Emit `reasoning_selectors` pointing at visible reasoning in node outputs instead of extracted `reasoning` text.

@@ -178,6 +178,7 @@ def test_maps_native_openinference_llm_attributes() -> None:
                 "llm.token_count.prompt": 12,
                 "llm.token_count.completion": 5,
                 "llm.token_count.prompt_details.cache_read": 4,
+                "llm.token_count.prompt_details.cache_write": 3,
                 "llm.token_count.completion_details.reasoning": 2,
                 "llm.cost.total": 0.0003,
             },
@@ -197,6 +198,7 @@ def test_maps_native_openinference_llm_attributes() -> None:
     assert node.tokens.input_tokens == 12
     assert node.tokens.output_tokens == 5
     assert node.tokens.cached_input_tokens == 4
+    assert node.tokens.cache_write_input_tokens == 3
     assert node.tokens.reasoning_tokens == 2
     assert node.cost == Decimal("0.0003")
     assert node.model_params == {"temperature": 0.2}
@@ -557,6 +559,7 @@ def test_invalid_cost_isolates_session(value: Any) -> None:
         "gen_ai.usage.input_tokens",
         "gen_ai.usage.output_tokens",
         "gen_ai.usage.details.cache_read_tokens",
+        "gen_ai.usage.details.cache_write_tokens",
         "gen_ai.usage.details.reasoning_tokens",
     ],
 )

@@ -33,7 +33,7 @@ def estimate_cost(
     """Estimate one model call's USD cost and describe how it was derived.
 
     Args:
-        tokens: Token usage where input tokens include cached input tokens.
+        tokens: Token usage where input tokens include cache reads and writes.
         model: Model name to price, or None when it is unknown.
         provider: Provider identifier, or None to let the catalog infer it.
         started_at: Call start time, which selects historical prices.
@@ -50,6 +50,7 @@ def estimate_cost(
                 input_tokens=tokens.input_tokens or 0,
                 output_tokens=tokens.output_tokens or 0,
                 cache_read_tokens=tokens.cached_input_tokens or 0,
+                cache_write_tokens=tokens.cache_write_input_tokens or 0,
             ),
             model,
             provider_id=provider,

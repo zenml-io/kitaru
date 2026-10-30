@@ -25,7 +25,6 @@ from decimal import Decimal
 from importlib.metadata import version
 from typing import Any, cast
 
-from genai_prices import Usage, calc_price
 from pydantic import TypeAdapter
 from pydantic_ai import UserPromptNode
 from pydantic_ai.capabilities import (
@@ -96,7 +95,12 @@ from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.cache_keys import compute_tool_cache_key
 from kitaru.client import KitaruAPIClient
 
-from .pricing import CostCalculator, PydanticAIUsageSummary, normalize_cost
+from .pricing import (
+    CostCalculator,
+    PydanticAIUsageSummary,
+    estimate_catalog_price,
+    normalize_cost,
+)
 
 ADAPTER_VERSION = version("kitaru-pydantic-ai")
 FRAMEWORK = "pydantic_ai"
@@ -391,6 +395,7 @@ def _token_usage(response: ModelResponse) -> TokenUsage:
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
         cached_input_tokens=usage.cache_read_tokens,
+        cache_write_input_tokens=usage.cache_write_tokens,
         reasoning_tokens=reasoning if isinstance(reasoning, int) else None,
     )
 
@@ -410,6 +415,7 @@ def _calculate_cost(
         input_tokens=tokens.input_tokens or 0,
         output_tokens=tokens.output_tokens or 0,
         cached_input_tokens=tokens.cached_input_tokens or 0,
+        cache_write_input_tokens=tokens.cache_write_input_tokens or 0,
         reasoning_tokens=tokens.reasoning_tokens,
     )
     source = "user" if calculator is not None else "genai-prices"
@@ -419,19 +425,7 @@ def _calculate_cost(
         if calculator is not None:
             cost = normalize_cost(calculator(summary))
         else:
-            usage = Usage(
-                input_tokens=summary.input_tokens,
-                output_tokens=summary.output_tokens,
-                cache_read_tokens=summary.cached_input_tokens,
-            )
-            cost = normalize_cost(
-                calc_price(
-                    usage,
-                    summary.model,
-                    provider_id=summary.provider,
-                    genai_request_timestamp=started_at,
-                ).total_price
-            )
+            cost = normalize_cost(estimate_catalog_price(summary, started_at))
     except Exception as error:
         return None, {
             "cost": {

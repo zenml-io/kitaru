@@ -32,7 +32,13 @@ _SECRET_KEY = re.compile(
 _SECRET_VALUE = re.compile(r"(?i)(bearer\s+|KITKEY_|ZENPROKEY_)[^\s,;\]\}\"']+")
 
 _TOKEN_USAGE_KEYS = frozenset(
-    {"input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens"}
+    {
+        "input_tokens",
+        "output_tokens",
+        "cached_input_tokens",
+        "cache_write_input_tokens",
+        "reasoning_tokens",
+    }
 )
 _MAX_DEPTH = 64
 

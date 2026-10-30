@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Record Claude's `cache_creation_input_tokens` as `cache_write_input_tokens` on model nodes and on the terminal remainder. `input_tokens` still counts cache writes, as before.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.3+dev` with the selected compatible published core version before releasing.
+
 ## 0.1.1 - 2026-10-08
 
 - Simplify internal return syntax without changing recording behavior.

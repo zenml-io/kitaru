@@ -62,6 +62,7 @@ from kitaru.client import KitaruAPIClient
 
 from .capability import KitaruRecordingError
 from .codec import encode_tool_result
+from .usage import get_remaining_usage, get_token_usage
 
 ADAPTER_VERSION = version("kitaru-claude-agent-sdk")
 FRAMEWORK = "claude-agent-sdk"
@@ -181,53 +182,6 @@ def _capture(value: Any, *, depth: int = 0) -> Any:
             )
         return captured_items
     return {"unsupported_type": type(value).__name__}
-
-
-def _get_integer(value: Mapping[str, Any], *names: str) -> int | None:
-    """Read the first integer among alternate spellings of one usage field."""
-    for name in names:
-        candidate = value.get(name)
-        if isinstance(candidate, int) and not isinstance(candidate, bool):
-            return candidate
-    return None
-
-
-def _get_thinking_tokens(value: Mapping[str, Any]) -> int | None:
-    """Read Claude's nested thinking count for Kitaru's reasoning field."""
-    for name in ("output_tokens_details", "outputTokensDetails"):
-        details = value.get(name)
-        if isinstance(details, Mapping):
-            return _get_integer(details, "thinking_tokens", "thinkingTokens")
-    return None
-
-
-def _get_token_usage(value: Mapping[str, Any] | None) -> TokenUsage | None:
-    """Map Claude's public usage dictionary to Kitaru token fields."""
-    if not value:
-        return None
-
-    input_tokens = _get_integer(value, "input_tokens", "inputTokens")
-    cache_creation_tokens = _get_integer(
-        value, "cache_creation_input_tokens", "cacheCreationInputTokens"
-    )
-    if cache_creation_tokens is not None:
-        input_tokens = (input_tokens or 0) + cache_creation_tokens
-
-    return TokenUsage(
-        input_tokens=input_tokens,
-        output_tokens=_get_integer(value, "output_tokens", "outputTokens"),
-        cached_input_tokens=_get_integer(
-            value, "cache_read_input_tokens", "cacheReadInputTokens"
-        ),
-        reasoning_tokens=_get_thinking_tokens(value),
-    )
-
-
-def _get_remaining_tokens(total: int | None, recorded: list[int | None]) -> int | None:
-    """Return how much of a total the recorded counts leave, never below zero."""
-    if total is None:
-        return None
-    return max(total - sum(value or 0 for value in recorded), 0)
 
 
 def _get_terminal_error_text(message: ResultMessage) -> str:
@@ -686,39 +640,15 @@ class InvocationRecorder:
         so a field whose recorded counts already exceed Claude's total keeps a
         rollup above that total rather than subtracting from another node.
         """
-        totals = _get_token_usage(terminal.usage)
+        totals = get_token_usage(terminal.usage)
         if totals is None:
             return None
         recorded = [
             usage
-            for usage in (_get_token_usage(turn.usage) for turn in self._recorded_turns)
+            for usage in (get_token_usage(turn.usage) for turn in self._recorded_turns)
             if usage is not None
         ]
-        remainder = TokenUsage(
-            input_tokens=_get_remaining_tokens(
-                totals.input_tokens, [usage.input_tokens for usage in recorded]
-            ),
-            output_tokens=_get_remaining_tokens(
-                totals.output_tokens, [usage.output_tokens for usage in recorded]
-            ),
-            cached_input_tokens=_get_remaining_tokens(
-                totals.cached_input_tokens,
-                [usage.cached_input_tokens for usage in recorded],
-            ),
-            reasoning_tokens=_get_remaining_tokens(
-                totals.reasoning_tokens, [usage.reasoning_tokens for usage in recorded]
-            ),
-        )
-        if not any(
-            (
-                remainder.input_tokens,
-                remainder.output_tokens,
-                remainder.cached_input_tokens,
-                remainder.reasoning_tokens,
-            )
-        ):
-            return None
-        return remainder
+        return get_remaining_usage(totals, recorded)
 
     def _fail_unfinished_nodes(
         self, *, ended_at: datetime, error: str
@@ -761,7 +691,7 @@ class InvocationRecorder:
             ],
             model=turn.model,
             model_provider="anthropic",
-            tokens=_get_token_usage(turn.usage),
+            tokens=get_token_usage(turn.usage),
             attributes={
                 "session_id": turn.session_id,
                 "stop_reason": turn.stop_reason,

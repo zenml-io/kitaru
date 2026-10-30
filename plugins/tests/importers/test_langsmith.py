@@ -584,6 +584,41 @@ def test_cached_negative_tokens_are_isolated() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "outputs",
+    [
+        {"llm_output": {"token_usage": {"cache_creation_input_tokens": 300}}},
+        {
+            "usage_metadata": {
+                "input_tokens": 2300,
+                "input_token_details": {"cache_read": 800, "cache_creation": 300},
+            }
+        },
+        {
+            "usage_metadata": {
+                "input_token_details": {
+                    "cache_creation": 0,
+                    "ephemeral_5m_input_tokens": 200,
+                    "ephemeral_1h_input_tokens": 100,
+                },
+            }
+        },
+        {
+            "usage_metadata": {
+                "input_token_details": {"ephemeral_5m_input_tokens": 300},
+            }
+        },
+    ],
+)
+def test_maps_cache_write_tokens(outputs: dict[str, Any]) -> None:
+    """Read cache writes from Anthropic usage, LangChain, or the lifetime split."""
+    [session] = sessions(jsonl(run("llm", "llm", run_type="llm", outputs=outputs)))
+
+    tokens = session.nodes[0].tokens
+    assert tokens is not None
+    assert tokens.cache_write_input_tokens == 300
+
+
 def test_embedded_json_decoder_recursion_is_isolated() -> None:
     nested = "[" * 10000 + "0" + "]" * 10000
     assert_bad_run_isolated(run("bad", "bad", inputs=nested))

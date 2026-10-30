@@ -23,12 +23,12 @@ classifiers = [
 ]
 keywords = ["ai-agents", "kitaru", "mlflow", "observability", "traces"]
 dependencies = [
-    "kitaru>=0.27.0",
+    "kitaru==0.27.3+dev",
 ]
 
 [project.optional-dependencies]
 api = [
-    "kitaru>=0.27.0",
+    "kitaru==0.27.3+dev",
     "mlflow-tracing>=3.16,<4",
 ]
 

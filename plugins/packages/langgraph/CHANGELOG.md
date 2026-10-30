@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Record LangChain's `input_token_details.cache_creation`, plus the `ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens` split that langchain-anthropic reports instead, as `cache_write_input_tokens`, and include cache writes in genai-prices cost estimates.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.3+dev` with the selected compatible published core version before releasing.
+
 ## 0.3.0 - 2026-10-08
 
 - Serialize baseline history lookups per cache key so identical tool calls dispatched in parallel replay successive recorded occurrences instead of all replaying the first one.

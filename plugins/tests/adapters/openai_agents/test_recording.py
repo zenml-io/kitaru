@@ -178,9 +178,7 @@ async def test_records_complete_session_and_model_node(
     deterministic_agent: Agent[None],
 ) -> None:
     result = await KitaruRunner(agent_id=uuid.uuid4()).run(
-        deterministic_agent,
-        "hello",
-        run_config=RunConfig(tracing_disabled=True),
+        deterministic_agent, "hello", run_config=RunConfig(tracing_disabled=True)
     )
     client = _FakeClient.instances[0]
     nodes = _nodes(client)
@@ -1085,6 +1083,7 @@ async def test_string_model_calls_record_model_usage_cost_and_reasoning(
             input_tokens=1000,
             output_tokens=500,
             cached_input_tokens=200,
+            cache_write_input_tokens=0,
             reasoning_tokens=300,
         )
         # 800 uncached and 200 cached input tokens plus 500 output tokens at

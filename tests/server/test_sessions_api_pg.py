@@ -357,6 +357,52 @@ async def test_cost_completeness_persists_across_node_upserts(
         assert session["tokens"]["output_tokens"] == 5 * expected_calls
 
 
+async def test_cache_write_tokens_persist_and_roll_up(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Store cache-write counts per node and sum them like cache reads."""
+    response = await client.post("/api/v1/sessions", json=_session_body(agent_id))
+    session_url = f"/api/v1/sessions/{response.json()['id']}"
+
+    def llm_node(external_id: str, tokens: dict[str, int]) -> dict[str, object]:
+        return {
+            "external_id": external_id,
+            "node_type": "llm_call",
+            "name": "call",
+            "status": "completed",
+            "tokens": tokens,
+            "inputs": None,
+            "outputs": None,
+            "attributes": None,
+        }
+
+    first = {
+        "input_tokens": 1500,
+        "cached_input_tokens": 800,
+        "cache_write_input_tokens": 300,
+    }
+    nodes = [llm_node("n0", first), llm_node("n1", {"cache_write_input_tokens": 50})]
+    response = await client.post(f"{session_url}/nodes", json={"nodes": nodes})
+    assert response.status_code == 200
+    replaced = {**first, "cache_write_input_tokens": 200}
+    response = await client.post(
+        f"{session_url}/nodes", json={"nodes": [llm_node("n0", replaced)]}
+    )
+    assert response.status_code == 200
+
+    session = (await client.get(session_url)).json()
+    assert session["tokens"] == {
+        "input_tokens": 1500,
+        "output_tokens": 0,
+        "cached_input_tokens": 800,
+        "cache_write_input_tokens": 250,
+        "reasoning_tokens": 0,
+    }
+    items = (await client.get(f"{session_url}/nodes")).json()["items"]
+    assert [item["tokens"]["cache_write_input_tokens"] for item in items] == [200, 50]
+    assert items[1]["tokens"]["cached_input_tokens"] is None
+
+
 async def test_ingest_into_terminal_recorded_session_rejected(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:

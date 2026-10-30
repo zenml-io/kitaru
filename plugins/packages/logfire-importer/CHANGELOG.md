@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Import prompt-cache writes from `gen_ai.usage.details.cache_write_tokens` or `gen_ai.usage.cache_creation.input_tokens` as `cache_write_input_tokens`.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.3+dev` with the selected compatible published core version before releasing.
+
 ## 0.4.1 - 2026-10-08
 
 - Send API import queries through the Logfire SDK query client, which gives them the SDK's 30 second query timeout instead of the 5 second HTTP default, and stop importing the private `logfire._internal` region helper.
