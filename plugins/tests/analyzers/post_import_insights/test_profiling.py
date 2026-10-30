@@ -179,7 +179,7 @@ def test_spilled_high_cardinality_counts_are_exact_and_order_independent() -> No
     assert candidate.data.values[-1].label == "_Other categories (combined)"
     assert candidate.data.values[-1].value == 1081
     assert candidate.coverage.affected_sessions == 1101
-    assert "combines the remaining models" in (candidate.caveat or "")
+    assert "combines the remaining identifiers" in (candidate.caveat or "")
 
 
 @pytest.mark.parametrize(
@@ -688,6 +688,210 @@ def test_explicit_text_selector_is_used_without_exporting_selected_text() -> Non
     ids = {candidate.id for candidate in result.candidates}
     assert {"correction-language", "repeated-punctuation"} <= ids
     assert attack.lower() not in result.model_dump_json().lower()
+
+
+@pytest.mark.parametrize(
+    "customer_text", ["Please check my balance.", "That is wrong."]
+)
+def test_customer_selectors_exclude_policy_from_session_and_llm_history(
+    customer_text: str,
+) -> None:
+    messages = [
+        {"role": "user", "content": "Policy: retry if the account is wrong."},
+        {"role": "user", "content": customer_text},
+    ]
+    node = _node(
+        0,
+        session_id=_id(101),
+        node_type=NodeType.LLM_CALL,
+        inputs={"messages": messages},
+    )
+    node.input_text_selector = "/messages/1/content"
+    session = _session(1, [node], inputs={"messages": messages})
+    session.session.input_text_selector = "/messages/1/content"
+
+    result = profile_sessions([session])
+
+    if customer_text == "That is wrong.":
+        assert _candidate(result, "correction-language").coverage.occurrences == 1
+    else:
+        assert "correction-language" not in {item.id for item in result.candidates}
+
+
+def test_policy_correction_markers_do_not_claim_users_corrected_the_agent() -> None:
+    session = _session(
+        1,
+        inputs={
+            "messages": [
+                {"role": "user", "content": "Policy: retry if the account is wrong."},
+                {"role": "user", "content": "Please check my balance."},
+            ]
+        },
+    )
+
+    candidate = _candidate(profile_sessions([session]), "correction-language")
+
+    assert candidate.eyebrow == "LITERAL CORRECTION MARKERS"
+    assert candidate.title == (
+        "100% of sessions with fully inspected selected text contain literal "
+        "correction markers"
+    )
+    assert "agent policy or harness instructions" in candidate.caveat
+    assert "customer input" in candidate.investigation_prompt
+    assert "agent policy or harness instructions" in candidate.investigation_prompt
+
+
+def _session_with_tool_requests(
+    number: int, counts: list[int]
+) -> SessionWithNodesResponse:
+    nodes = [
+        _node(
+            index,
+            session_id=_id(100 + number),
+            node_type=NodeType.LLM_CALL,
+            inputs={
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "parts": [{"type": "tool_call", "name": "old_request"}],
+                    }
+                ]
+            },
+            outputs=[
+                {
+                    "role": "assistant",
+                    "parts": [
+                        {"type": "tool_call", "id": f"call-{index}-{request}"}
+                        for request in range(count)
+                    ],
+                }
+            ],
+        )
+        for index, count in enumerate(counts)
+    ]
+    return _session(number, nodes)
+
+
+@pytest.mark.parametrize("output_shape", ["list", "messages", "message"])
+def test_tool_distribution_counts_output_requests_without_tool_nodes(
+    output_shape: str,
+) -> None:
+    sessions = [_session_with_tool_requests(number, [2]) for number in (1, 2)]
+    for session in sessions:
+        node = session.nodes[0]
+        if output_shape == "messages":
+            node.outputs = {"messages": node.outputs}
+        elif output_shape == "message":
+            node.outputs = node.outputs[0]
+
+    candidate = _candidate(profile_sessions(sessions), "tool-call-distribution")
+
+    assert candidate.title == "All recorded observations have 2 requests"
+    assert candidate.eyebrow == "TOOL-REQUEST DISTRIBUTION"
+    assert candidate.data.unit == "requests"
+    assert "may not have executed" in candidate.caveat
+    assert {fact.name: fact.value for fact in candidate.facts} == {
+        "observations": 2,
+        "minimum": 2,
+        "maximum": 2,
+    }
+
+
+def test_tool_request_fallback_preserves_real_tool_counts_and_health() -> None:
+    first = _session_with_tool_requests(1, [2])
+    second = _session_with_tool_requests(2, [2])
+    for session in (first, second):
+        session.nodes.append(_node(10, session_id=session.session.id, outputs="ok"))
+
+    candidate = _candidate(profile_sessions([first, second]), "tool-call-distribution")
+
+    assert candidate.title == "All recorded observations have 1 call"
+    assert candidate.data.unit == "calls"
+
+
+def test_mixed_recorded_tools_and_output_requests_share_request_distribution() -> None:
+    recorded = _calls(1, [("lookup", {}, NodeStatus.COMPLETED, "ok")])
+    requested = _session_with_tool_requests(2, [2, 2])
+
+    result = profile_sessions([recorded, requested])
+    candidate = _candidate(result, "tool-call-distribution")
+
+    assert candidate.title == "Tool requests per session have a measurable spread"
+    assert candidate.data.unit == "requests"
+    assert isinstance(candidate.data, BinnedInsightData)
+    assert [bin_.count for bin_ in candidate.data.bins] == [1, 1, 0, 0, 0]
+    assert "recorded tool nodes where available" in candidate.caveat
+    assert profile_sessions([requested, recorded]) == result
+
+
+def test_tool_requests_do_not_invent_execution_health_or_count_input_history() -> None:
+    sessions = [_session_with_tool_requests(number, [0, 2]) for number in (1, 2)]
+    for session in sessions:
+        session.nodes[0].outputs[0]["parts"] = [
+            {"type": "text", "content": "tool_call"},
+            {"type": "tool_result", "parts": [{"type": "tool_call"}]},
+        ]
+        session.nodes[1].status = NodeStatus.FAILED
+
+    result = profile_sessions(sessions)
+
+    candidate = _candidate(result, "tool-call-distribution")
+    assert candidate.title == "All recorded observations have 2 requests"
+    assert not any(item.family == "tool_health" for item in result.candidates)
+
+
+def test_truncated_tool_requests_are_excluded_from_distribution() -> None:
+    partial = _session_with_tool_requests(1, [100])
+    complete = [_session_with_tool_requests(number, [2]) for number in (2, 3)]
+
+    result = profile_sessions(
+        [partial, *complete], config=ProfilingConfig(max_payload_items=30)
+    )
+
+    candidate = _candidate(result, "tool-call-distribution")
+    assert candidate.title == "All recorded observations have 2 requests"
+    assert candidate.coverage.sessions_analyzed == 2
+    assert candidate.contributing_session_ids == [item.session.id for item in complete]
+    assert "payload" in " ".join(result.coverage.caveats).lower()
+
+
+def test_tool_request_scan_bounds_nested_scalar_arrays() -> None:
+    partial = _session_with_tool_requests(1, [0])
+    partial.nodes[0].outputs = [[0] * 40 for _ in range(40)]
+    complete = [_session_with_tool_requests(number, [2]) for number in (2, 3)]
+
+    result = profile_sessions(
+        [partial, *complete], config=ProfilingConfig(max_payload_items=100)
+    )
+
+    candidate = _candidate(result, "tool-call-distribution")
+    assert candidate.title == "All recorded observations have 2 requests"
+    assert candidate.coverage.sessions_analyzed == 2
+    assert candidate.contributing_session_ids == [item.session.id for item in complete]
+
+
+@pytest.mark.parametrize("model_count", [1, 2])
+def test_model_mix_counts_identifiers_without_normalizing_aliases(
+    model_count: int,
+) -> None:
+    names = ["claude-opus-4-5", "global.anthropic.claude-opus-4-5-20251101-v1:0"]
+    nodes = [
+        _node(index, session_id=_id(101), node_type=NodeType.LLM_CALL, model=name)
+        for index, name in enumerate(names[:model_count])
+    ]
+    for node in nodes:
+        node.requested_model = names[0]
+
+    candidate = _candidate(profile_sessions([_session(1, nodes)]), "model-mix")
+
+    assert candidate.title == (
+        "1 recorded model identifier appears in these sessions"
+        if model_count == 1
+        else "2 recorded model identifiers appear in these sessions"
+    )
+    assert isinstance(candidate.data, CategoricalInsightData)
+    assert {item.label for item in candidate.data.values} == set(names[:model_count])
+    assert "same model" in candidate.caveat
 
 
 def test_profiles_status_tool_model_activity_and_duration_charts() -> None:
@@ -1425,7 +1629,9 @@ def test_language_signal_uses_only_sessions_with_inspected_text() -> None:
     )
     candidate = _candidate(result, "correction-language")
 
-    assert candidate.title.startswith("100% of sessions with fully inspected user text")
+    assert candidate.title.startswith(
+        "100% of sessions with fully inspected selected text"
+    )
     assert candidate.coverage.sessions_analyzed == 1
     assert {value.label: value.value for value in candidate.data.values} == {
         "Matching sessions": 1,
@@ -2031,7 +2237,7 @@ def test_distribution_evidence_uses_each_metrics_own_maximum() -> None:
         )
     config = ProfilingConfig(max_contributing_sessions=1)
     result = profile_sessions(sessions, config=config)
-    assert result.analysis_version == "2026-10-20.1"
+    assert result.analysis_version == "2026-10-23.1"
     assert profile_sessions(reversed(sessions), config=config) == result
     for candidate_id, number in [
         ("tool-call-distribution", 1),

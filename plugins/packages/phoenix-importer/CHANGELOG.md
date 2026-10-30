@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Preserve function `strict` flags and retain unsupported offered tool definitions so replay can reject an incomplete request instead of silently loosening its constraints.
 - Stop reading Pydantic AI's `model_request_parameters` attribute as model parameters. It lists the tools offered to the model, not sampling settings.
 - Keep LLM span tool definitions under the `kitaru.tool_definitions` node metadata key, normalized to the OpenAI chat-completions form, from OpenInference `llm.tools.N.tool.json_schema` or `gen_ai.tool.definitions`.
 

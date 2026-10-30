@@ -18,13 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeTagRepository,
-    asgi_api_client,
-    override_idempotency,
-)
+from conftest import asgi_api_client
 from kitaru.api_models.v1.agent import (
     AgentCreateRequest,
     AgentListParams,
@@ -62,6 +56,12 @@ from kitaru.server.application.services.agent_version_service import (
 )
 from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeTagRepository,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

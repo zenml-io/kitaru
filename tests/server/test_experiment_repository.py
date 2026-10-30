@@ -18,12 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import (
-    FakeExperimentRepository,
-    FakeTagRepository,
-    pg_session,
-    postgres_available,
-)
+from conftest import pg_session, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -53,6 +48,10 @@ from kitaru.server.domain.replay_config import (
 )
 from kitaru.server.domain.tag import Tag, TagLink
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    FakeExperimentRepository,
+    FakeTagRepository,
+)
 
 Setup = tuple[ExperimentRepository, uuid.UUID, uuid.UUID]
 

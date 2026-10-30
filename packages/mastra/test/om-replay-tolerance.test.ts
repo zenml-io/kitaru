@@ -29,6 +29,7 @@ import {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 type Observation = { messageTokens: number; bufferTokens: number | false };
@@ -38,7 +39,9 @@ function setup(options: {
   observe: (call: number) => Promise<void> | void;
   toolSteps: () => number;
   evidenceRepeats?: number | (() => number);
+  beforeActorStep?: (step: number) => Promise<void> | void;
   missingObservationalMemoryResults?: "fail" | "live";
+  onActorCall?: (call: number) => void;
 }) {
   const store = new InMemoryStore();
   const domain = store.stores.memory;
@@ -107,7 +110,9 @@ function setup(options: {
     provider: "fixture",
     doStream: async ({ prompt }) => {
       actorPrompts.push(JSON.stringify(prompt));
+      options.onActorCall?.(actorPrompts.length);
       step += 1;
+      await options.beforeActorStep?.(step);
       if (step > options.toolSteps()) {
         step = 0;
         evidence = 0;
@@ -278,13 +283,25 @@ async function replay(
  * Record a turn whose slow observer is still running while the actor reads
  * more evidence, then replay it with an instant observer.
  */
-async function replaySlowObserverBaseline(evidenceRepeats: number) {
+async function replaySlowObserverBaseline(
+  evidenceRepeats: number,
+  {
+    onActorCall,
+    replayStallMs = 0,
+  }: { onActorCall?: (call: number) => void; replayStallMs?: number } = {},
+) {
   let delayMs = 300;
+  let stallMs = 0;
   const fixture = setup({
     observation: { messageTokens: 1200, bufferTokens: 0.2 },
     observe: () => new Promise((resolve) => setTimeout(resolve, delayMs)),
     toolSteps: () => 5,
     evidenceRepeats,
+    onActorCall,
+    beforeActorStep: (step) =>
+      step === 3 && stallMs > 0
+        ? new Promise((resolve) => setTimeout(resolve, stallMs))
+        : undefined,
   });
   const baseline = await recordBaseline(fixture);
   expect(baseline?.metadata).toMatchObject({ mastra_replay_state: "eligible" });
@@ -293,8 +310,12 @@ async function replaySlowObserverBaseline(evidenceRepeats: number) {
   const baselineContext = contextOf(fixture.actorPrompts.splice(0));
   // The slow observer was still running over the first evidence while the
   // actor read more, and its result covers the later evidence too.
-  expect(baselineContext).toContain("raw=2,3,4 observed=1");
+  // Newer Mastra can activate the first observation one actor step later.
+  expect(baselineContext).toContainEqual(
+    expect.stringMatching(/^raw=2,3,4(?:,5)? observed=1$/),
+  );
   delayMs = 0;
+  stallMs = replayStallMs;
   await clearProcessBufferingState();
   const calls = await replay(fixture, baseline?.inputs);
   const [closed] = patches(calls);
@@ -320,10 +341,40 @@ const JUST_UNDER_THRESHOLD: Record<string, number> = {
   "1.69": 30,
   "1.70": 30,
   "1.71": 30,
+  "1.72": 30,
+  "1.73": 30,
+  "1.74": 30,
+  "1.75": 30,
+  "1.76": 30,
+  "1.77": 30,
+  "1.78": 30,
+  "1.79": 30,
 };
 
 it("replays a baseline whose slow observer merged buffer rounds without live OM calls", async () => {
   await replaySlowObserverBaseline(34);
+});
+
+it("replays a baseline whose first tool call fell in the minute after the user message", async () => {
+  // Mastra's observer prompt labels the tool call with its time because its
+  // minute differs from the message's. The replay runs within one minute, so
+  // its prompt has no such label.
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-26T22:43:59Z") });
+  let shifted = false;
+  await replaySlowObserverBaseline(34, {
+    onActorCall: () => {
+      if (shifted) return;
+      shifted = true;
+      // Cross the minute with a short jump. Mastra 1.79 renews its 15-second
+      // thread lease on real timers, so a longer jump of the faked clock
+      // expires the lease and cancels the run.
+      vi.setSystemTime(Date.now() + 1_000);
+    },
+  });
+});
+
+it("replays a slow-observer baseline whose replay stalls longer than the observer took", async () => {
+  await replaySlowObserverBaseline(34, { replayStallMs: 600 });
 });
 
 it("keeps a baseline that ended just under the observation threshold unobserved in replay", async () => {

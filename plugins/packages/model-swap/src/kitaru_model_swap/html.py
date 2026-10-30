@@ -94,7 +94,7 @@ def _best_for(choices: list[dict[str, str]]) -> str:
         "decide.</p>"
         + _table(
             ["Goal", "Candidate", "Why"],
-            [[c["goal"], c["candidate"], c["why"]] for c in choices],
+            [[c["goal"], c["candidate"] or "No pick", c["why"]] for c in choices],
         )
         + '<p class="muted">Quality here means matching your current model. '
         "Your verdicts on the disagreements below decide which answers are "
@@ -202,7 +202,7 @@ def _best_mix(mix: dict[str, Any] | None) -> str:
             (
                 item["candidate"]
                 + (
-                    " (too few held-out calls to confirm)"
+                    " (too few comparable held-out answers to confirm)"
                     if item.get("held_out") == "too_few"
                     else " (seen in one half of the sessions only, not checked)"
                     if item.get("held_out") == "no_split"
@@ -211,12 +211,14 @@ def _best_mix(mix: dict[str, Any] | None) -> str:
             )
             if item["candidate"]
             else (
-                f"today's model (fewer than {mix['min_calls']} calls)"
+                f"today's model (fewer than {mix['min_calls']} comparable answers)"
                 if item["too_few_calls"]
                 else "today's model (it does not match itself here)"
                 if item.get("noisy_reference")
                 else "today's model (the pick did not hold on held-out sessions)"
                 if item.get("held_out") == "failed"
+                else "today's model (too few comparable held-out answers to confirm)"
+                if item.get("held_out") == "too_few"
                 else "today's model (candidates failed too often here: "
                 + ", ".join(item["unreliable"])
                 + ")"
@@ -433,6 +435,7 @@ def _coverage(coverage: dict[str, Any]) -> str:
     """Show which recorded calls were replayed and why others were not."""
     rows = [
         ["Sessions", coverage["sessions"]],
+        ["Sessions sampled", coverage["sessions_sampled"]],
         ["Model calls seen", coverage["llm_calls_seen"]],
         ["Replayable with real tool schemas", coverage["replayable"]],
         ["Replayable only with inferred schemas", coverage["replayable_inferred"]],

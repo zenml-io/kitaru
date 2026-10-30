@@ -81,13 +81,37 @@ def _format_runtime(value: Any) -> str:
 
 
 def _format_scope(value: Any) -> str:
-    """Format worker task kinds from its scope."""
+    """Format worker claims and their restrictions."""
     if not isinstance(value, dict):
         return str(value)
-    kinds = value.get("kinds")
-    if not kinds:
-        return "all"
-    return ", ".join(str(kind) for kind in kinds)
+    claims = [
+        f"{claim['kind']}={claim['agent_version_id']}"
+        if claim.get("agent_version_id")
+        else str(claim["kind"])
+        for claim in value["claims"]
+    ]
+    parts = [", ".join(claims)]
+    for selector in value.get("selectors") or []:
+        presence = "required" if selector["required"] else "if present"
+        parts.append(
+            f"{selector['key']} in [{', '.join(selector['values'])}] ({presence})"
+        )
+    if value.get("job_id"):
+        parts.append(f"job={value['job_id']}")
+    return "; ".join(parts)
+
+
+def _format_workers(value: Any) -> str:
+    """Format live worker identities and scopes."""
+    if value is None:
+        return "unavailable"
+    return (
+        "\n".join(
+            f"{worker['name']} ({worker['id']}): {_format_scope(worker['scope'])}"
+            for worker in value
+        )
+        or "none"
+    )
 
 
 def _format_verdict(value: Any) -> str:
@@ -97,6 +121,44 @@ def _format_verdict(value: Any) -> str:
     if value is False:
         return "fail"
     return "-"
+
+
+def _format_evaluation_stats(stats: dict[str, Any]) -> str:
+    """Format evaluation counts, mean scores, pass rates, and category totals."""
+    parts = [f"count={stats['count']}"]
+    if stats.get("mean") is not None:
+        parts.append(f"mean score={stats['mean']:g}")
+    if stats.get("pass_rate") is not None:
+        parts.append(f"pass rate={100 * stats['pass_rate']:g}%")
+    if counts := stats.get("value_counts"):
+        categories = ", ".join(f"{name}={count}" for name, count in counts.items())
+        parts.append(f"values: {categories}")
+    return "; ".join(parts)
+
+
+def _format_evaluation_aggregates(value: Any) -> str:
+    """Summarize aggregate groups without including per-replay values."""
+    if not value:
+        return "No evaluation aggregates found."
+    summaries = []
+    for aggregate in value:
+        evaluator = aggregate.get("evaluator_name") or "-"
+        if aggregate.get("evaluator_version") is not None:
+            evaluator += f"@{aggregate['evaluator_version']}"
+        lines = [
+            f"{aggregate['name']} ({aggregate['data_type']})",
+            f"Evaluator: {evaluator}",
+        ]
+        if aggregate.get("evaluator_version_id") is not None:
+            lines.append(f"Evaluator version ID: {aggregate['evaluator_version_id']}")
+        lines.extend(
+            (
+                f"Baseline: {_format_evaluation_stats(aggregate['baseline'])}",
+                f"Result: {_format_evaluation_stats(aggregate['result'])}",
+            )
+        )
+        summaries.append("\n".join(lines))
+    return "\n\n".join(summaries)
 
 
 _ID = HumanField("id", "ID", no_wrap=True)
@@ -266,8 +328,14 @@ _VIEWS: dict[str, HumanView] = {
                 (
                     HumanField("authentication", "Authentication"),
                     HumanField("compatibility", "Compatibility"),
-                    HumanField("live_worker_count", "Live workers"),
                     HumanField("dashboard_url", "Dashboard"),
+                ),
+            ),
+            HumanSection(
+                "Workers (recent heartbeats)",
+                (
+                    HumanField("live_worker_count", "Live workers"),
+                    HumanField("live_workers", "Scopes", formatter=_format_workers),
                 ),
             ),
             HumanSection(
@@ -559,6 +627,16 @@ _VIEWS: dict[str, HumanView] = {
                     HumanField("baseline_evaluation_mode", "Baseline evaluation mode"),
                 ),
             ),
+            HumanSection(
+                "Evaluation aggregates",
+                (
+                    HumanField(
+                        "evaluation_aggregates",
+                        "Summary",
+                        formatter=_format_evaluation_aggregates,
+                    ),
+                ),
+            ),
             HumanSection("Error", (HumanField("error", "Error"),)),
         ),
     ),
@@ -702,7 +780,7 @@ _VIEWS: dict[str, HumanView] = {
             _NAME,
             _ID,
             HumanField("last_seen_at", "Last seen", 105),
-            HumanField("scope", "Kinds", 130, _format_scope),
+            HumanField("scope", "Scope", formatter=_format_scope),
             HumanField("runtime", "Runtime", 160, _format_runtime),
         ),
     ),
@@ -720,7 +798,7 @@ _VIEWS: dict[str, HumanView] = {
                 ),
             ),
             HumanSection(
-                "Scope", (HumanField("scope", "Task kinds", formatter=_format_scope),)
+                "Scope", (HumanField("scope", "Claims", formatter=_format_scope),)
             ),
             HumanSection("Runtime", (HumanField("runtime", "Runtime"),)),
             HumanSection("Metadata", (_METADATA,)),

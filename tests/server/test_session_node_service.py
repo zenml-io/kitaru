@@ -20,19 +20,6 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeBlobDataStore,
-    FakeBlobRepository,
-    FakeImportRepository,
-    FakeReplayRepository,
-    FakeSessionNodeRepository,
-    FakeSessionRepository,
-    FakeTaskRepository,
-    build_payload_store,
-    create_session,
-)
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.cache_keys import compute_tool_cache_key
@@ -56,6 +43,19 @@ from kitaru.server.domain.blob import BlobStorageBackend
 from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.session import SessionAccessDenied
 from kitaru.server.domain.task import AgentTask
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeBlobDataStore,
+    FakeBlobRepository,
+    FakeImportRepository,
+    FakeReplayRepository,
+    FakeSessionNodeRepository,
+    FakeSessionRepository,
+    FakeTaskRepository,
+    build_payload_store,
+    create_session,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -317,6 +317,75 @@ async def test_ingest_replace_updates_rollup_delta(
     assert session.llm_call_count == 1
 
 
+@pytest.mark.parametrize(
+    ("batch_costs", "expected_cost"),
+    [
+        (((None, None),), None),
+        ((("1.50", None),), None),
+        ((("1.50",), (None,)), None),
+        (((None,), ("1.50",)), None),
+        ((("0.00",),), Decimal("0.00")),
+    ],
+    ids=["all-unknown", "mixed", "known-then-unknown", "unknown-then-known", "zero"],
+)
+async def test_ingest_cost_requires_every_llm_call_to_be_priced(
+    service: SessionNodeService,
+    session_repository: FakeSessionRepository,
+    session_id: uuid.UUID,
+    batch_costs: tuple[tuple[str | None, ...], ...],
+    expected_cost: Decimal | None,
+) -> None:
+    """Keep unknown costs through separate batches and identical retries."""
+    for batch_index, costs in enumerate(batch_costs):
+        batch = [
+            _llm_node(
+                f"n{batch_index}-{index}",
+                cost=Decimal(cost) if cost is not None else None,
+            )
+            for index, cost in enumerate(costs)
+        ]
+        await service.ingest_nodes(session_id, batch, actor=ACTOR)
+        await service.ingest_nodes(session_id, batch, actor=ACTOR)
+
+    session = await session_repository.get(session_id, include_payloads=True)
+    assert session.cost == expected_cost
+
+
+async def test_ingest_cost_recovers_after_replacing_unpriced_calls(
+    service: SessionNodeService,
+    session_repository: FakeSessionRepository,
+    session_id: uuid.UUID,
+) -> None:
+    """Restore all known node costs when the last unpriced call is replaced."""
+    await service.ingest_nodes(
+        session_id,
+        [
+            _llm_node("known", cost=Decimal("2.00")),
+            _llm_node("first"),
+            _llm_node("last"),
+            _llm_node(
+                "priced-tool", node_type=NodeType.TOOL_CALL, cost=Decimal("0.25")
+            ),
+            _llm_node("unpriced-tool", node_type=NodeType.TOOL_CALL),
+            _llm_node("unpriced-span", node_type=NodeType.SPAN),
+        ],
+        actor=ACTOR,
+    )
+    for external_id, cost, expected_cost in [
+        ("first", Decimal("1.00"), None),
+        ("last", Decimal("4.00"), Decimal("7.25")),
+        ("first", None, None),
+        ("first", Decimal("0.00"), Decimal("6.25")),
+    ]:
+        batch = [_llm_node(external_id, cost=cost)]
+        await service.ingest_nodes(session_id, batch, actor=ACTOR)
+        session = await session_repository.get(session_id, include_payloads=True)
+        assert session.cost == expected_cost
+        await service.ingest_nodes(session_id, batch, actor=ACTOR)
+        retried = await session_repository.get(session_id, include_payloads=True)
+        assert retried.cost == expected_cost
+
+
 async def test_ingest_replace_changing_node_type_updates_call_counts(
     service: SessionNodeService,
     session_repository: FakeSessionRepository,
@@ -477,11 +546,15 @@ async def test_list_nodes_ordered_by_start_with_pagination(
 
 
 async def test_ingest_empty_batch_is_a_no_op(
-    service: SessionNodeService, session_id: uuid.UUID
+    service: SessionNodeService,
+    session_repository: FakeSessionRepository,
+    session_id: uuid.UUID,
 ) -> None:
     """Return an empty list for an empty batch without touching rollups."""
     stored = await service.ingest_nodes(session_id, [], actor=ACTOR)
     assert stored == []
+    session = await session_repository.get(session_id, include_payloads=True)
+    assert session.cost is None
 
 
 def _task_principal(

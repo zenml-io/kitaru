@@ -28,6 +28,7 @@ import {
   type AttachmentTokenCounts,
   readAttachmentTokenCounts,
 } from "./attachment-tokens.js";
+import { withoutProviderErrorMessages } from "./provider-errors.js";
 import {
   describeReplayFailure,
   getReplayReason,
@@ -311,56 +312,6 @@ function validateUrl(value: string): URL {
     "URL credentials are not replayable.",
   );
   return url;
-}
-
-const REDACTED_ERROR_MESSAGE = "[redacted]";
-
-/**
- * Replace the provider's message in the `error` parts of a stored message.
- *
- * Mastra saves a failed attempt's error name and message as an `error` part
- * on the assistant message. Providers echo request content and credentials in
- * that message, and Mastra drops `error` parts before it builds a model
- * prompt, so the replacement changes nothing a replayed model sees.
- */
-function withoutProviderErrorMessages(
-  message: Record<string, JsonValue>,
-): Record<string, JsonValue> {
-  const { content } = message;
-  if (
-    typeof message.role !== "string" ||
-    !isRecord(content) ||
-    content.format !== 2 ||
-    !Array.isArray(content.parts)
-  )
-    return message;
-  const parts: JsonValue[] = content.parts;
-  if (!parts.some(isProviderErrorPart)) return message;
-  return {
-    ...message,
-    content: {
-      ...content,
-      parts: parts.map((part) =>
-        isProviderErrorPart(part)
-          ? {
-              ...part,
-              error: { ...part.error, message: REDACTED_ERROR_MESSAGE },
-            }
-          : part,
-      ),
-    },
-  };
-}
-
-function isProviderErrorPart(
-  part: JsonValue,
-): part is { error: Record<string, JsonValue> } & Record<string, JsonValue> {
-  return (
-    isRecord(part) &&
-    part.type === "error" &&
-    isRecord(part.error) &&
-    typeof part.error.message === "string"
-  );
 }
 
 /**
@@ -825,6 +776,12 @@ export function validateMemorySnapshot(
       "Malformed or unsupported observational-memory record.",
     );
     recordIds.add(record.id);
+    requireStoredShape(
+      record.supersededBy === undefined ||
+        record.supersededBy === null ||
+        typeof record.supersededBy === "string",
+      "Malformed observational-memory generation successor.",
+    );
     for (const key of [
       "generationCount",
       "totalTokensObserved",

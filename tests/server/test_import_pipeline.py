@@ -19,20 +19,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from conftest import (
-    ReplayServices,
-    build_replay_services,
-    build_task_actor,
-    build_worker_actor,
-    create_agent,
-    create_blob,
-    create_import,
-    create_import_task,
-    create_job,
-    create_plugin,
-    create_session,
-    create_worker,
-)
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
@@ -60,6 +46,20 @@ from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import AnalysisTask, EvaluationTask, ImportTask, Task
 from kitaru.server.domain.worker import Worker
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    ReplayServices,
+    build_replay_services,
+    build_task_actor,
+    build_worker_actor,
+    create_agent,
+    create_blob,
+    create_import,
+    create_import_task,
+    create_job,
+    create_plugin,
+    create_session,
+    create_worker,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 STATS = {"created": 3, "skipped": 0, "failed": 0}

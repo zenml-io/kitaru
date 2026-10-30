@@ -1,5 +1,9 @@
 [tool.uv]
 exclude-newer = "3 days"
+# Exempt certifi from the cooldown so the eMudhra/emSign root removal in
+# certifi 2026.10.19 (GHSA-6q48-6c7w-9gw2) lands immediately. Remove this
+# entry once the locked certifi is older than the cooldown window.
+exclude-newer-package = { certifi = false }
 
 [tool.uv.workspace]
 members = ["packages/*"]
@@ -135,3 +139,4 @@ testpaths = ["tests"]
 pythonpath = [".", ".."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+xfail_strict = true

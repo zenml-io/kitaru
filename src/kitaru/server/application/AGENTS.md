@@ -2,8 +2,7 @@
 
 - Services take the repository Protocol in the constructor and call only the
   interface. Never import an adapter.
-- Auth context is an explicit `actor: AuthContext` parameter on every use-case
-  method, always last. Never a field on a request DTO or command.
+- Auth context is an explicit `actor: AuthContext` parameter, always last, on every use case a caller invokes. It is never a field on a request DTO or command. Background sweeps, login and device flows that run before a caller is authenticated, and helpers other services call take no actor.
 - Simple operations take raw values. Writes with roughly five or more fields
   take an application-owned command model defined in `models/`, never the API
   request DTO.
@@ -49,11 +48,8 @@
 - Uniqueness is enforced by database constraints, not by lookups. Do not
   pre-check before a write, the repository translates the constraint violation
   into the domain error.
-- Repository interfaces are Protocols in `interfaces/`, one module per
-  resource, written in domain terms. Only `query` takes a filter model. The
-  write and read methods are named `create`, `get`, `query`, `update`, and
-  `delete`. The domain mutator for a single field is `update_<field>`.
+- Repository interfaces are Protocols in `interfaces/`, one module per resource, written in domain terms. Only `query` takes a filter model. Basic persistence methods are named `create`, `get`, `query`, `update`, and `delete`; other operations use a verb for what they do, such as `claim_pending` or `stamp_heartbeats`. The domain mutator for a single field is `update_<field>`.
 - Lookups by a unique field are named `get_by_<field>`. A lookup whose miss
   reaches the caller raises the domain `NotFound` error. An internal existence
   probe returns `None` instead.
-- The application layer never imports API DTOs.
+- The application layer may share wire enums and value types from `api_models`, but never takes API request, response, or list params DTOs (`just python-standards-check`, KIT008).

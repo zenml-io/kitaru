@@ -15,12 +15,13 @@
 
 import uuid
 from collections.abc import Sequence
+from decimal import Decimal
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, case, func, select
 from sqlalchemy.orm import defer
 
 from kitaru.api_models.v1.session import SessionOrigin
-from kitaru.api_models.v1.session_node import NodeStatus
+from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.server.adapters.db.filtering import compile_filter_expression
 from kitaru.server.adapters.db.orm.cohort_version_session import (
     CohortVersionSessionORM,
@@ -53,6 +54,25 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
     """Session node repository backed by the application database."""
 
     orm_class = SessionNodeORM
+
+    async def get_cost(self, session_id: uuid.UUID) -> Decimal | None:
+        """Sum recorded node costs unless any LLM call is unpriced.
+
+        Args:
+            session_id: Id of the owning session.
+
+        Returns:
+            Total cost, or ``None`` when any LLM call is unpriced or no
+            node has a recorded cost.
+        """
+        unpriced_llm_calls = func.count().filter(
+            SessionNodeORM.node_type == NodeType.LLM_CALL.value,
+            SessionNodeORM.cost.is_(None),
+        )
+        statement = select(
+            case((unpriced_llm_calls > 0, None), else_=func.sum(SessionNodeORM.cost))
+        ).where(SessionNodeORM.session_id == session_id)
+        return await self._session.scalar(statement)
 
     async def get_by_external_ids(
         self,

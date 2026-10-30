@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Keep decision-candidate questions independent of recorded answers by deriving the bounded question set from every offered tool schema, including for recorded text replies and omitted optional arguments.
+- Compare best-mix candidates with the reference on common answered calls within each step and session split, and retain today's model when reference hold-out evidence is missing instead of crashing the report.
+- Treat empty or incomplete provider usage as unknown, and retain spend reservations for decision requests sent without measurable usage, including read timeouts.
+- Never name today's model (the reference) in **Best for**: Cheapest and Fastest pick only comparable candidates that are cheaper or faster than today's model, and a row without one says "No pick" and why (for example, no candidate within 10 points of today's model costs less, with the cheapest candidate outside that band). Picks show the two rates the band compares, on the calls both answered.
 - Send `tool_choice: required` when a Pydantic AI call was recorded with `allow_text_output: false` (and no image output) and offers tools, unless the recording names another `tool_choice`, as Pydantic AI did. Candidates no longer answer output-tool steps such as `final_result` in plain text. The flag is read from Langfuse metadata and from Logfire and Phoenix span attributes.
 - Count malformed candidate replies (a non-list `tool_calls`, or arguments that are not a JSON object in any tool-call format) as `tool_call_parse_error` instead of aborting the run or accepting them, and ask decision models about required nullable arguments recorded as `null`, with `null` as an option.
 - Rank only candidates that answered at least 80% of their calls in **Best for**, judge comparability on the calls both the candidate and today's model answered, show answered-of-attempted calls next to each pick, and list under-measured candidates as "Needs more measurement".

@@ -11,38 +11,37 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests for the UI experiment run evaluation aggregate route."""
+"""Parity tests for public and UI experiment run evaluation aggregates."""
 
 import uuid
 from collections.abc import AsyncGenerator
 
 import httpx
 import pytest
+from experiment_run_aggregate_fixtures import (
+    ACCOUNT,
+    add_replay_with_result_session,
+    build_app,
+    build_evaluation_service,
+    create_evaluator_version,
+    create_run,
+    open_client,
+    reassign_baseline_session,
+    store_evaluation,
+    store_linked_evaluation,
+    store_standalone_evaluation,
+)
+from fastapi import FastAPI
 
-from conftest import (
+from kitaru.api_models.v1.evaluation import EvaluationDataType
+from kitaru.server.application.services.experiment_run_evaluation_service import (
+    ExperimentRunEvaluationService,
+)
+from kitaru.server.domain.plugin import PackagePluginSource, Plugin, PluginKind
+from kitaru_test_support import (
     ReplayServices,
     build_replay_services,
-    create_experiment_run,
-    create_job,
-    create_replay,
 )
-from kitaru.api_models.v1.evaluation import EvaluationDataType
-from kitaru.server.adapters.rest.dependencies import (
-    authorize,
-    get_evaluation_service,
-    get_experiment_run_service,
-    get_replay_service,
-)
-from kitaru.server.api.app import create_app
-from kitaru.server.api.config import APISettings
-from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.services.evaluation_service import EvaluationService
-from kitaru.server.domain.account import Account
-from kitaru.server.domain.evaluation import Evaluation
-from kitaru.server.domain.plugin import PackagePluginSource, Plugin, PluginKind
-from kitaru.server.domain.replay_config import ReplayConfig, default_tool_policy
-
-ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
 
 @pytest.fixture
@@ -52,188 +51,41 @@ def services() -> ReplayServices:
 
 
 @pytest.fixture
-async def client(services: ReplayServices) -> AsyncGenerator[httpx.AsyncClient, None]:
-    """Provide an HTTP client for the app with fake-backed UI aggregate services."""
-    app = create_app(
-        APISettings(
-            DB_HOST="localhost",
-            SECRET_ENCRYPTION_KEY="test-encryption-key",
-            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
-        )
-    )
-    evaluation_service = EvaluationService(
-        repository=services.evaluations, session_repository=services.sessions
-    )
-    app.dependency_overrides[get_experiment_run_service] = lambda: (
-        services.experiment_run_service
-    )
-    app.dependency_overrides[get_replay_service] = lambda: services.replay_service
-    app.dependency_overrides[get_evaluation_service] = lambda: evaluation_service
-    app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+def evaluation_service(services: ReplayServices) -> ExperimentRunEvaluationService:
+    """Provide a fake-backed experiment run evaluation service."""
+    return build_evaluation_service(services)
+
+
+@pytest.fixture
+def app(evaluation_service: ExperimentRunEvaluationService) -> FastAPI:
+    """Provide the app with fake-backed aggregation and authentication services."""
+    return build_app(evaluation_service)
+
+
+@pytest.fixture(params=["/api/v1/ui", "/api/v1"], ids=["ui", "public"])
+async def client(
+    app: FastAPI, request: pytest.FixtureRequest
+) -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Exercise the same aggregate contract through both API routes."""
+    async with open_client(app, request.param) as client:
         yield client
-
-
-async def _create_run(services: ReplayServices) -> uuid.UUID:
-    """Store an experiment run with no replays and return its id."""
-    run = await create_experiment_run(
-        services.experiment_runs,
-        ACCOUNT.id,
-        experiment_id=uuid.uuid4(),
-        cohort_version_id=uuid.uuid4(),
-        agent_version_id=uuid.uuid4(),
-    )
-    return run.id
-
-
-async def _add_replay_with_result_session(
-    services: ReplayServices,
-    run_id: uuid.UUID,
-    baseline_session_id: uuid.UUID,
-    result_session_id: uuid.UUID,
-) -> uuid.UUID:
-    """Attach a replay with baseline and result sessions to a run and return its id."""
-    job = await create_job(services.jobs, ACCOUNT.id)
-    config = await services.experiments.create_replay_config(
-        ReplayConfig(
-            owner_id=ACCOUNT.id, tool_policy=default_tool_policy(), evaluators=[]
-        )
-    )
-    replay = await create_replay(
-        services.replays,
-        ACCOUNT.id,
-        job_id=job.id,
-        replay_config_id=config.id,
-        baseline_session_id=baseline_session_id,
-        experiment_run_id=run_id,
-    )
-    replay.link_result_session(result_session_id)
-    await services.replays.update(replay)
-    return replay.id
-
-
-async def _reassign_baseline_session(
-    services: ReplayServices, replay_id: uuid.UUID, baseline_session_id: uuid.UUID
-) -> None:
-    """Move a stored replay onto another baseline session."""
-    replay = await services.replays.get(replay_id)
-    await services.replays.update(
-        replay.model_copy(update={"baseline_session_id": baseline_session_id})
-    )
-
-
-async def _store_evaluation(
-    services: ReplayServices,
-    session_id: uuid.UUID,
-    name: str,
-    data_type: EvaluationDataType,
-    score: float | bool | None = None,
-    value: str | None = None,
-    passed: bool | None = None,
-    min_score: float | None = None,
-    max_score: float | None = None,
-    target_score: float | None = None,
-) -> None:
-    """Store an evaluation directly through the fake evaluation repository."""
-    evaluation = Evaluation(
-        owner_id=ACCOUNT.id,
-        session_id=session_id,
-        name=name,
-        data_type=data_type,
-        score=score,
-        value=value,
-        passed=passed,
-        min_score=min_score,
-        max_score=max_score,
-        target_score=target_score,
-    )
-    await services.evaluations.create_session_evaluations(session_id, [evaluation])
-
-
-async def _create_evaluator_version(
-    services: ReplayServices, name: str = "accuracy-scorer"
-) -> uuid.UUID:
-    """Create an evaluator plugin version through the fake plugin repository."""
-    plugin = await services.plugins.create(
-        Plugin(owner_id=ACCOUNT.id, kind=PluginKind.EVALUATOR, name=name)
-    )
-    version = await services.plugins.create_version(
-        plugin.id,
-        PackagePluginSource(requirement="kitaru-scorer==1.0.0", entrypoint="pkg:score"),
-        display_version="v1",
-    )
-    return version.id
-
-
-async def _store_linked_evaluation(
-    services: ReplayServices,
-    replay_id: uuid.UUID,
-    session_id: uuid.UUID,
-    name: str,
-    data_type: EvaluationDataType,
-    evaluator_version_id: uuid.UUID,
-    score: float | bool | None = None,
-    value: str | None = None,
-    passed: bool | None = None,
-    min_score: float | None = None,
-    max_score: float | None = None,
-    target_score: float | None = None,
-) -> None:
-    """Store an evaluator-produced evaluation and link it to a replay."""
-    evaluation = Evaluation(
-        owner_id=ACCOUNT.id,
-        evaluator_version_id=evaluator_version_id,
-        session_id=session_id,
-        name=name,
-        data_type=data_type,
-        score=score,
-        value=value,
-        passed=passed,
-        min_score=min_score,
-        max_score=max_score,
-        target_score=target_score,
-    )
-    await services.evaluations.create_task_evaluations(
-        [evaluation], replay_id=replay_id
-    )
-
-
-async def _store_standalone_evaluation(
-    services: ReplayServices,
-    session_id: uuid.UUID,
-    name: str,
-    data_type: EvaluationDataType,
-    evaluator_version_id: uuid.UUID,
-    score: float | bool | None = None,
-) -> None:
-    """Store an evaluator-produced evaluation that is not linked to a replay."""
-    evaluation = Evaluation(
-        owner_id=ACCOUNT.id,
-        evaluator_version_id=evaluator_version_id,
-        session_id=session_id,
-        name=name,
-        data_type=data_type,
-        score=score,
-    )
-    await services.evaluations.create_task_evaluations([evaluation], replay_id=None)
 
 
 async def test_aggregates_float_evaluations(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """Aggregate float evaluations of baseline and result sessions separately."""
-    run_id = await _create_run(services)
-    version_id = await _create_evaluator_version(services)
+    run_id = await create_run(services)
+    version_id = await create_evaluator_version(services)
     first_baseline, first_result = uuid.uuid4(), uuid.uuid4()
     second_baseline, second_result = uuid.uuid4(), uuid.uuid4()
-    first_replay_id = await _add_replay_with_result_session(
+    first_replay_id = await add_replay_with_result_session(
         services, run_id, first_baseline, first_result
     )
-    second_replay_id = await _add_replay_with_result_session(
+    second_replay_id = await add_replay_with_result_session(
         services, run_id, second_baseline, second_result
     )
-    await _store_linked_evaluation(
+    await store_linked_evaluation(
         services,
         first_replay_id,
         first_result,
@@ -242,7 +94,7 @@ async def test_aggregates_float_evaluations(
         version_id,
         score=0.5,
     )
-    await _store_linked_evaluation(
+    await store_linked_evaluation(
         services,
         second_replay_id,
         second_result,
@@ -251,7 +103,7 @@ async def test_aggregates_float_evaluations(
         version_id,
         score=1.0,
     )
-    await _store_linked_evaluation(
+    await store_linked_evaluation(
         services,
         first_replay_id,
         first_baseline,
@@ -261,9 +113,7 @@ async def test_aggregates_float_evaluations(
         score=0.1,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     assert response.json() == [
@@ -336,16 +186,16 @@ async def test_aggregates_score_bounds_when_uniform(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """Carry the score bound fields when every row in a group agrees on them."""
-    run_id = await _create_run(services)
-    version_id = await _create_evaluator_version(services)
+    run_id = await create_run(services)
+    version_id = await create_evaluator_version(services)
     first_result, second_result = uuid.uuid4(), uuid.uuid4()
-    first_replay_id = await _add_replay_with_result_session(
+    first_replay_id = await add_replay_with_result_session(
         services, run_id, uuid.uuid4(), first_result
     )
-    second_replay_id = await _add_replay_with_result_session(
+    second_replay_id = await add_replay_with_result_session(
         services, run_id, uuid.uuid4(), second_result
     )
-    await _store_linked_evaluation(
+    await store_linked_evaluation(
         services,
         first_replay_id,
         first_result,
@@ -357,7 +207,7 @@ async def test_aggregates_score_bounds_when_uniform(
         max_score=1.0,
         target_score=0.9,
     )
-    await _store_linked_evaluation(
+    await store_linked_evaluation(
         services,
         second_replay_id,
         second_result,
@@ -370,9 +220,7 @@ async def test_aggregates_score_bounds_when_uniform(
         target_score=0.9,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     result = response.json()[0]["result"]
@@ -392,16 +240,16 @@ async def test_aggregates_score_bounds_null_when_mixed(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """Null the score bound fields when rows in a group disagree on them."""
-    run_id = await _create_run(services)
-    version_id = await _create_evaluator_version(services)
+    run_id = await create_run(services)
+    version_id = await create_evaluator_version(services)
     first_result, second_result = uuid.uuid4(), uuid.uuid4()
-    first_replay_id = await _add_replay_with_result_session(
+    first_replay_id = await add_replay_with_result_session(
         services, run_id, uuid.uuid4(), first_result
     )
-    second_replay_id = await _add_replay_with_result_session(
+    second_replay_id = await add_replay_with_result_session(
         services, run_id, uuid.uuid4(), second_result
     )
-    await _store_linked_evaluation(
+    await store_linked_evaluation(
         services,
         first_replay_id,
         first_result,
@@ -413,7 +261,7 @@ async def test_aggregates_score_bounds_null_when_mixed(
         max_score=1.0,
         target_score=0.9,
     )
-    await _store_linked_evaluation(
+    await store_linked_evaluation(
         services,
         second_replay_id,
         second_result,
@@ -426,9 +274,7 @@ async def test_aggregates_score_bounds_null_when_mixed(
         target_score=0.9,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     result = response.json()[0]["result"]
@@ -444,16 +290,16 @@ async def test_aggregates_score_bounds_null_when_one_row_lacks_it(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """Null a score bound field when any row in the group has no value for it."""
-    run_id = await _create_run(services)
-    version_id = await _create_evaluator_version(services)
+    run_id = await create_run(services)
+    version_id = await create_evaluator_version(services)
     first_result, second_result = uuid.uuid4(), uuid.uuid4()
-    first_replay_id = await _add_replay_with_result_session(
+    first_replay_id = await add_replay_with_result_session(
         services, run_id, uuid.uuid4(), first_result
     )
-    second_replay_id = await _add_replay_with_result_session(
+    second_replay_id = await add_replay_with_result_session(
         services, run_id, uuid.uuid4(), second_result
     )
-    await _store_linked_evaluation(
+    await store_linked_evaluation(
         services,
         first_replay_id,
         first_result,
@@ -465,7 +311,7 @@ async def test_aggregates_score_bounds_null_when_one_row_lacks_it(
         max_score=1.0,
         target_score=0.9,
     )
-    await _store_linked_evaluation(
+    await store_linked_evaluation(
         services,
         second_replay_id,
         second_result,
@@ -475,9 +321,7 @@ async def test_aggregates_score_bounds_null_when_one_row_lacks_it(
         score=1.0,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     result = response.json()[0]["result"]
@@ -493,11 +337,11 @@ async def test_aggregates_bool_and_pass_rate(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """Aggregate bool evaluations of result sessions into a share and pass rate."""
-    run_id = await _create_run(services)
-    version_id = await _create_evaluator_version(services)
+    run_id = await create_run(services)
+    version_id = await create_evaluator_version(services)
     results = [uuid.uuid4() for _ in range(3)]
     replay_ids = [
-        await _add_replay_with_result_session(
+        await add_replay_with_result_session(
             services, run_id, uuid.uuid4(), result_session_id
         )
         for result_session_id in results
@@ -507,7 +351,7 @@ async def test_aggregates_bool_and_pass_rate(
     for result_session_id, replay_id, score, passed in zip(
         results, replay_ids, scores, passed_flags, strict=True
     ):
-        await _store_linked_evaluation(
+        await store_linked_evaluation(
             services,
             replay_id,
             result_session_id,
@@ -518,9 +362,7 @@ async def test_aggregates_bool_and_pass_rate(
             passed=passed,
         )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -551,11 +393,11 @@ async def test_aggregates_categorical_value_counts(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """Aggregate categorical evaluations of result sessions into per-value counts."""
-    run_id = await _create_run(services)
-    version_id = await _create_evaluator_version(services)
+    run_id = await create_run(services)
+    version_id = await create_evaluator_version(services)
     results = [uuid.uuid4() for _ in range(3)]
     replay_ids = [
-        await _add_replay_with_result_session(
+        await add_replay_with_result_session(
             services, run_id, uuid.uuid4(), result_session_id
         )
         for result_session_id in results
@@ -564,7 +406,7 @@ async def test_aggregates_categorical_value_counts(
     for result_session_id, replay_id, value in zip(
         results, replay_ids, values, strict=True
     ):
-        await _store_linked_evaluation(
+        await store_linked_evaluation(
             services,
             replay_id,
             result_session_id,
@@ -575,9 +417,7 @@ async def test_aggregates_categorical_value_counts(
             value=value,
         )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -616,18 +456,18 @@ async def test_aggregates_dedupes_shared_baseline_session(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """Aggregate baseline stats once for a session shared by two replays."""
-    run_id = await _create_run(services)
+    run_id = await create_run(services)
     baseline = uuid.uuid4()
     first_result, second_result = uuid.uuid4(), uuid.uuid4()
-    first_replay_id = await _add_replay_with_result_session(
+    first_replay_id = await add_replay_with_result_session(
         services, run_id, baseline, first_result
     )
-    second_replay_id = await _add_replay_with_result_session(
+    second_replay_id = await add_replay_with_result_session(
         services, run_id, uuid.uuid4(), second_result
     )
-    await _reassign_baseline_session(services, second_replay_id, baseline)
-    version_id = await _create_evaluator_version(services)
-    await _store_linked_evaluation(
+    await reassign_baseline_session(services, second_replay_id, baseline)
+    version_id = await create_evaluator_version(services)
+    await store_linked_evaluation(
         services,
         first_replay_id,
         baseline,
@@ -637,9 +477,7 @@ async def test_aggregates_dedupes_shared_baseline_session(
         score=0.42,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -673,16 +511,16 @@ async def test_aggregates_caps_replays_to_most_recent(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """Cap the replays array at the 50 most recent replays, oldest first."""
-    run_id = await _create_run(services)
-    version_id = await _create_evaluator_version(services)
+    run_id = await create_run(services)
+    version_id = await create_evaluator_version(services)
     replay_ids = []
     for index in range(55):
         result_session_id = uuid.uuid4()
-        replay_id = await _add_replay_with_result_session(
+        replay_id = await add_replay_with_result_session(
             services, run_id, uuid.uuid4(), result_session_id
         )
         replay_ids.append(replay_id)
-        await _store_linked_evaluation(
+        await store_linked_evaluation(
             services,
             replay_id,
             result_session_id,
@@ -692,30 +530,31 @@ async def test_aggregates_caps_replays_to_most_recent(
             score=index / 100,
         )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
     assert len(body) == 1
     aggregate = body[0]
     assert aggregate["result"]["count"] == 55
+    assert aggregate["result"]["mean"] == pytest.approx(0.27)
+    assert aggregate["result"]["min"] == 0.0
+    assert aggregate["result"]["max"] == 0.54
     assert len(aggregate["replays"]) == 50
-    assert aggregate["replays"][0]["replay_id"] == str(replay_ids[5])
+    assert [entry["replay_id"] for entry in aggregate["replays"]] == [
+        str(replay_id) for replay_id in replay_ids[5:]
+    ]
 
 
 async def test_aggregates_include_baseline_only_names(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """Include an evaluation name that only exists on a baseline session."""
-    run_id = await _create_run(services)
-    version_id = await _create_evaluator_version(services)
+    run_id = await create_run(services)
+    version_id = await create_evaluator_version(services)
     baseline, result = uuid.uuid4(), uuid.uuid4()
-    replay_id = await _add_replay_with_result_session(
-        services, run_id, baseline, result
-    )
-    await _store_linked_evaluation(
+    replay_id = await add_replay_with_result_session(services, run_id, baseline, result)
+    await store_linked_evaluation(
         services,
         replay_id,
         baseline,
@@ -725,9 +564,7 @@ async def test_aggregates_include_baseline_only_names(
         score=0.3,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -762,17 +599,17 @@ async def test_aggregates_link_scoped_math(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """Aggregate only the evaluations linked to the run's replays."""
-    run_id = await _create_run(services)
-    version_id = await _create_evaluator_version(services)
+    run_id = await create_run(services)
+    version_id = await create_evaluator_version(services)
     first_baseline, first_result = uuid.uuid4(), uuid.uuid4()
     second_baseline, second_result = uuid.uuid4(), uuid.uuid4()
-    first_replay_id = await _add_replay_with_result_session(
+    first_replay_id = await add_replay_with_result_session(
         services, run_id, first_baseline, first_result
     )
-    second_replay_id = await _add_replay_with_result_session(
+    second_replay_id = await add_replay_with_result_session(
         services, run_id, second_baseline, second_result
     )
-    await _store_linked_evaluation(
+    await store_linked_evaluation(
         services,
         first_replay_id,
         first_baseline,
@@ -781,7 +618,7 @@ async def test_aggregates_link_scoped_math(
         version_id,
         score=0.1,
     )
-    await _store_linked_evaluation(
+    await store_linked_evaluation(
         services,
         first_replay_id,
         first_result,
@@ -790,7 +627,7 @@ async def test_aggregates_link_scoped_math(
         version_id,
         score=0.5,
     )
-    await _store_linked_evaluation(
+    await store_linked_evaluation(
         services,
         second_replay_id,
         second_baseline,
@@ -799,7 +636,7 @@ async def test_aggregates_link_scoped_math(
         version_id,
         score=0.3,
     )
-    await _store_linked_evaluation(
+    await store_linked_evaluation(
         services,
         second_replay_id,
         second_result,
@@ -811,7 +648,7 @@ async def test_aggregates_link_scoped_math(
     # A standalone evaluation job scored the same baseline session under the
     # same evaluator, but was never linked to a replay, so it must not move
     # the aggregate.
-    await _store_standalone_evaluation(
+    await store_standalone_evaluation(
         services,
         first_baseline,
         "accuracy",
@@ -820,9 +657,7 @@ async def test_aggregates_link_scoped_math(
         999.0,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -899,14 +734,12 @@ async def test_aggregates_groups_by_evaluator_version(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """Two evaluator versions of the same name produce two separate groups."""
-    run_id = await _create_run(services)
-    first_version_id = await _create_evaluator_version(services, name="accuracy-v1")
-    second_version_id = await _create_evaluator_version(services, name="accuracy-v2")
+    run_id = await create_run(services)
+    first_version_id = await create_evaluator_version(services, name="accuracy-v1")
+    second_version_id = await create_evaluator_version(services, name="accuracy-v2")
     baseline, result = uuid.uuid4(), uuid.uuid4()
-    replay_id = await _add_replay_with_result_session(
-        services, run_id, baseline, result
-    )
-    await _store_linked_evaluation(
+    replay_id = await add_replay_with_result_session(services, run_id, baseline, result)
+    await store_linked_evaluation(
         services,
         replay_id,
         baseline,
@@ -915,7 +748,7 @@ async def test_aggregates_groups_by_evaluator_version(
         first_version_id,
         score=0.2,
     )
-    await _store_linked_evaluation(
+    await store_linked_evaluation(
         services,
         replay_id,
         baseline,
@@ -925,9 +758,7 @@ async def test_aggregates_groups_by_evaluator_version(
         score=0.4,
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -948,13 +779,11 @@ async def test_aggregates_manual_rows_invisible(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """A manual evaluation of a run's session does not enter the aggregate."""
-    run_id = await _create_run(services)
-    version_id = await _create_evaluator_version(services)
+    run_id = await create_run(services)
+    version_id = await create_evaluator_version(services)
     baseline, result = uuid.uuid4(), uuid.uuid4()
-    replay_id = await _add_replay_with_result_session(
-        services, run_id, baseline, result
-    )
-    await _store_linked_evaluation(
+    replay_id = await add_replay_with_result_session(services, run_id, baseline, result)
+    await store_linked_evaluation(
         services,
         replay_id,
         baseline,
@@ -963,13 +792,11 @@ async def test_aggregates_manual_rows_invisible(
         version_id,
         score=0.2,
     )
-    await _store_evaluation(
+    await store_evaluation(
         services, baseline, "human_quality", EvaluationDataType.FLOAT, score=0.9
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -982,7 +809,7 @@ async def test_aggregates_dangling_evaluator_version(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """A linked row survives its evaluator's deletion, grouped under a null name."""
-    run_id = await _create_run(services)
+    run_id = await create_run(services)
     plugin = await services.plugins.create(
         Plugin(owner_id=ACCOUNT.id, kind=PluginKind.EVALUATOR, name="doomed")
     )
@@ -992,10 +819,8 @@ async def test_aggregates_dangling_evaluator_version(
         display_version="v1",
     )
     baseline, result = uuid.uuid4(), uuid.uuid4()
-    replay_id = await _add_replay_with_result_session(
-        services, run_id, baseline, result
-    )
-    await _store_linked_evaluation(
+    replay_id = await add_replay_with_result_session(services, run_id, baseline, result)
+    await store_linked_evaluation(
         services,
         replay_id,
         baseline,
@@ -1007,9 +832,7 @@ async def test_aggregates_dangling_evaluator_version(
 
     await services.plugins.delete(plugin.id)
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -1026,13 +849,11 @@ async def test_aggregates_adoption_pinning_ignores_newer_evaluation(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """A later same-identity evaluation not linked to the run leaves it unaffected."""
-    run_id = await _create_run(services)
-    version_id = await _create_evaluator_version(services)
+    run_id = await create_run(services)
+    version_id = await create_evaluator_version(services)
     baseline, result = uuid.uuid4(), uuid.uuid4()
-    replay_id = await _add_replay_with_result_session(
-        services, run_id, baseline, result
-    )
-    await _store_linked_evaluation(
+    replay_id = await add_replay_with_result_session(services, run_id, baseline, result)
+    await store_linked_evaluation(
         services,
         replay_id,
         baseline,
@@ -1044,13 +865,11 @@ async def test_aggregates_adoption_pinning_ignores_newer_evaluation(
 
     # A later run re-evaluates the same baseline session with the same
     # evaluator, producing a new row that is never linked to this run.
-    await _store_standalone_evaluation(
+    await store_standalone_evaluation(
         services, baseline, "accuracy", EvaluationDataType.FLOAT, version_id, 0.9
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     body = response.json()
@@ -1064,17 +883,15 @@ async def test_aggregates_standalone_unlinked_rows_invisible(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """A standalone evaluation job's rows never appear in run aggregates."""
-    run_id = await _create_run(services)
-    version_id = await _create_evaluator_version(services)
+    run_id = await create_run(services)
+    version_id = await create_evaluator_version(services)
     baseline, result = uuid.uuid4(), uuid.uuid4()
-    await _add_replay_with_result_session(services, run_id, baseline, result)
-    await _store_standalone_evaluation(
+    await add_replay_with_result_session(services, run_id, baseline, result)
+    await store_standalone_evaluation(
         services, baseline, "orphan", EvaluationDataType.FLOAT, version_id, 0.5
     )
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     assert response.json() == []
@@ -1084,11 +901,9 @@ async def test_aggregates_empty_run(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
     """Return an empty list for a run with no replays."""
-    run_id = await _create_run(services)
+    run_id = await create_run(services)
 
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{run_id}/evaluation-aggregates")
 
     assert response.status_code == 200
     assert response.json() == []
@@ -1096,7 +911,5 @@ async def test_aggregates_empty_run(
 
 async def test_aggregates_run_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown experiment run id."""
-    response = await client.get(
-        f"/api/v1/ui/experiment-runs/{uuid.uuid4()}/evaluation-aggregates"
-    )
+    response = await client.get(f"experiment-runs/{uuid.uuid4()}/evaluation-aggregates")
     assert response.status_code == 404

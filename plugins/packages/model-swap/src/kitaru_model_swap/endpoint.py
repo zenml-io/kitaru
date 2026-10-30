@@ -15,6 +15,7 @@
 
 import asyncio
 import json
+import math
 import os
 import re
 import time
@@ -557,6 +558,10 @@ def read_usage(usage: Any) -> Usage:
     if not isinstance(usage, dict):
         return Usage(reported=False)
     if "input_tokens" in usage or "output_tokens" in usage:
+        if not all(
+            _is_token_count(usage.get(key)) for key in ("input_tokens", "output_tokens")
+        ):
+            return Usage(reported=False)
         input_details = _as_dict(usage.get("input_tokens_details"))
         output_details = _as_dict(usage.get("output_tokens_details"))
         return Usage(
@@ -565,6 +570,11 @@ def read_usage(usage: Any) -> Usage:
             output_tokens=_count(usage.get("output_tokens")),
             reasoning_tokens=_count(output_details.get("reasoning_tokens")),
         )
+    if not all(
+        _is_token_count(usage.get(key))
+        for key in ("prompt_tokens", "completion_tokens")
+    ):
+        return Usage(reported=False)
     prompt_details = _as_dict(usage.get("prompt_tokens_details"))
     completion_details = _as_dict(usage.get("completion_tokens_details"))
     return Usage(
@@ -575,8 +585,22 @@ def read_usage(usage: Any) -> Usage:
     )
 
 
+def _is_token_count(value: Any) -> bool:
+    """Return whether a provider supplied a usable nonnegative token count."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value >= 0
+    return (
+        isinstance(value, float)
+        and math.isfinite(value)
+        and value >= 0
+        and value.is_integer()
+    )
+
+
 def _count(value: Any) -> int:
     """Read a token count; the endpoint's value must not lower the spend."""
-    if isinstance(value, bool) or not isinstance(value, int | float):
+    if not _is_token_count(value):
         return 0
-    return max(int(value), 0)
+    return int(value)

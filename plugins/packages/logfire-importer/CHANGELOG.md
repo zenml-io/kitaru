@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Preserve function `strict` flags and retain unsupported offered tool definitions so replay can reject an incomplete request instead of silently loosening its constraints.
 - Keep model-call tool definitions under the `kitaru.tool_definitions` node metadata key, normalized to the OpenAI chat-completions form, from PydanticAI `model_request_parameters` function and output tools or `gen_ai.tool.definitions`.
 - Stop importing PydanticAI `model_request_parameters` as `model_params`; `gen_ai.request.parameters`, `model_parameters`, and `model_settings` still populate them.
 

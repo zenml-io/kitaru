@@ -25,6 +25,10 @@ A replay, import, or evaluation that sits in `pending` almost always means **no 
 - Can this worker claim this task? A worker started with `--claim` or `--selector` skips tasks outside its scope; a bare `kitaru worker start` claims anything except an API import or analyzer that needs provider credentials from the worker's environment, which only a worker started with `--selector kitaru/requires-credentials=<provider>` claims.
 - Watch the job directly: `kitaru job watch <job-id>` shows tasks moving through `pending → claimed → running`.
 
+For example, a worker started with `--claim importer --claim analyzer --claim evaluator` cannot run a replay. Start a worker with `--claim agent` in your agent's environment, or `--claim agent=<AGENT_VERSION_ID>` for the replay's exact agent version. Conversely, an agent-only worker cannot finish evaluations; those need a worker with an `evaluator` claim.
+
+A worker marked `live` has a recent heartbeat; that does not guarantee it can claim your task. If its scope matches but the task stays pending, check the worker's logs for claim failures.
+
 ## A replay fails
 
 `kitaru job get <job-id>` carries the failing task's error and a tail of the subprocess's stderr. The usual suspects:

@@ -144,8 +144,10 @@ def test_required_nullable_decision_offers_null_when_recorded_true() -> None:
     assert result.expected[result.questions[1].key] == "true"
 
 
-def test_optional_null_argument_is_left_out() -> None:
+def test_optional_null_argument_is_left_out_of_grading() -> None:
     result = plan(None, required=False)
 
     assert result.shape == "decision"
-    assert len(result.questions) == 1
+    assert result.expected == {"tool": "refund"}
+    assert result.arguments == {}
+    assert result.questions == plan(True, required=False).questions

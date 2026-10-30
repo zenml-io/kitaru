@@ -22,9 +22,10 @@ from uuid import UUID
 from kitaru_model_swap.calls import Collection, RecordedCall
 from kitaru_model_swap.endpoint import CandidateReply, Usage
 from kitaru_model_swap.html import render_section
+from kitaru_model_swap.mix import is_learning_session
 from kitaru_model_swap.normalize import RecordedOutcome, ReplayRequest, ToolCall
 from kitaru_model_swap.params import Candidate, ModelSwapParams
-from kitaru_model_swap.report import _is_learning_session, build_report
+from kitaru_model_swap.report import build_report
 from kitaru_model_swap.runner import CallResult
 
 
@@ -73,6 +74,7 @@ def report(
     calls: list[RecordedCall],
     results: list[CallResult],
     weights: Counter[tuple[str, str | None]] | None = None,
+    candidates: list[Candidate] | None = None,
     **params: Any,
 ) -> dict[str, Any]:
     weights = weights or Counter((c.node_name, c.model) for c in calls)
@@ -86,7 +88,8 @@ def report(
     )
     return build_report(
         ModelSwapParams(
-            candidates=[candidate("reference", reference=True), candidate("cheap")],
+            candidates=candidates
+            or [candidate("reference", reference=True), candidate("cheap")],
             sessions_per_month=1000,
             **params,
         ),
@@ -162,7 +165,7 @@ def test_route_with_frequent_failures_is_not_moved() -> None:
 def test_held_out_failures_drop_a_pick() -> None:
     calls = [call(i) for i in range(400)]
     results = [reply(c, "reference", "1") for c in calls]
-    held_out = [c for c in calls if not _is_learning_session(c)]
+    held_out = [c for c in calls if not is_learning_session(c)]
     # 60 failures, all on held-out sessions: about 30% there, 15% overall.
     failing = {c.node_id for c in held_out[:60]}
     for c in calls:

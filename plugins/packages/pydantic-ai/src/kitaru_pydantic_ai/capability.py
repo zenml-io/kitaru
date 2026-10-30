@@ -516,6 +516,7 @@ class _KitaruCapability(AbstractCapability[Any]):
     batch_size: int
     cost_calculator: CostCalculator | None
     estimate_costs: bool
+    use_task_inputs_as_prompt: bool
     _state: _RunState | None = field(default=None, repr=False)
 
     @classmethod
@@ -546,7 +547,12 @@ class _KitaruCapability(AbstractCapability[Any]):
                 effective_input = spec.details.inputs
             else:
                 effective_input = ctx.prompt
-            prompt_input, message_history = _project_conversation_input(effective_input)
+            if self.use_task_inputs_as_prompt:
+                prompt_input, message_history = _project_conversation_input(
+                    effective_input
+                )
+            else:
+                prompt_input, message_history = ctx.prompt, []
             override = replay.override if replay is not None else None
             if override is not None and override.prompt is not None:
                 prompt_input = override.prompt

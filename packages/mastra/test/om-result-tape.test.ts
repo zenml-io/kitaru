@@ -2,10 +2,10 @@ import { Agent } from "@mastra/core/agent";
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { expect, it, vi } from "vitest";
 import { decodeMemoryValue } from "../src/memory-snapshot.js";
+import { getOMInputFingerprint } from "../src/om-fingerprint.js";
 import {
   createOMResultTape,
   getNativeOMModel,
-  getOMInputFingerprint,
   MastraOMDivergenceError,
   MastraOMRecordedFailureError,
   MastraOMSkippedCallError,
@@ -228,7 +228,7 @@ async function text(output: { stream: ReadableStream<unknown> }) {
 }
 
 async function recordCalls(
-  calls: Array<{ phase: "observer" | "reflector"; prompt: string }>,
+  calls: Array<{ phase: "observer" | "reflector"; prompt: unknown }>,
 ): Promise<OMResultEntry[]> {
   const tape = createOMResultTape(undefined, () => {
     throw new Error("unexpected incomplete result");
@@ -354,17 +354,27 @@ it("holds a buffered result until the actor reaches production's step", async ()
   expect(await text(await result)).toBe("observed message 1");
 });
 
-it("releases a held buffered result once production's call duration has passed", async () => {
+it("releases a held buffered result once Mastra waits on its round, however slow the replay", async () => {
   const [entry] = await recordCalls([
     { phase: "observer", prompt: "message 1" },
   ]);
   if (!entry) throw new Error("Missing recorded entry");
+  let waitOnRound: (() => void) | undefined;
   vi.useFakeTimers();
   try {
     const replay = createOMResultTape(
       [{ ...entry, actorStepsAtResult: 5, durationMs: 300 }],
       () => {},
-      { isBuffered: () => true },
+      {
+        isBuffered: () => true,
+        onBufferWait: (phase, listener) => {
+          expect(phase).toBe("observer");
+          waitOnRound = listener;
+          return () => {
+            waitOnRound = undefined;
+          };
+        },
+      },
     );
     const observer = replay.instrument(
       answering(() => "live"),
@@ -374,16 +384,42 @@ it("releases a held buffered result once production's call duration has passed",
     const result = observer.doStream({ prompt: "message 1" }).finally(() => {
       settled = true;
     });
-    await vi.advanceTimersByTimeAsync(299);
+    // A replay that stalls far longer than production's observer took has
+    // not diverged, so the round keeps its result until the actor catches up.
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(settled).toBe(false);
-    // A replay that diverged never reaches the step, and Mastra may be
-    // waiting on this round.
-    await vi.advanceTimersByTimeAsync(1);
+    // A replay that diverged never reaches the step, and Mastra now waits on
+    // this round.
+    waitOnRound?.();
+    await vi.advanceTimersByTimeAsync(0);
     expect(settled).toBe(true);
+    expect(waitOnRound).toBeUndefined();
     expect(await text(await result)).toBe("observed message 1");
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("releases a held buffered result once the replayed actor has ended", async () => {
+  const [entry] = await recordCalls([
+    { phase: "observer", prompt: "message 1" },
+  ]);
+  if (!entry) throw new Error("Missing recorded entry");
+  const replay = createOMResultTape(
+    [{ ...entry, actorStepsAtResult: 5, durationMs: 300 }],
+    () => {},
+    { isBuffered: () => true },
+  );
+  const observer = replay.instrument(
+    answering(() => "live"),
+    "observer",
+  );
+  replay.beginActorStep();
+  const result = observer.doStream({ prompt: "message 1" });
+  // Memory settling joins the round, so it must not wait for a step the
+  // finished turn never started.
+  replay.endActorSteps();
+  expect(await text(await result)).toBe("observed message 1");
 });
 
 it("fails a blocking call closed once its phase's recorded results are used", async () => {
@@ -713,6 +749,50 @@ it("ignores wall-clock values and generated ids in the OM input fingerprint", ()
   expect(getOMInputFingerprint({ ...replay, temperature: 0.7 })).not.toBe(
     getOMInputFingerprint(baseline),
   );
+});
+
+function observerHistory(text: string) {
+  return { prompt: [{ role: "user", content: [{ type: "text", text }] }] };
+}
+
+// Mastra writes a date header or time label only where the day or minute
+// changed since the line before.
+const CROSSED_CLOCK_HISTORY = observerHistory(
+  "Oct 26 2026:\nUser (11:59 PM): remember green\nOct 27 2026:\nTool Call evidence (12:00 AM): read\n(12:01 AM): a pause",
+);
+
+it("ignores where Mastra's date headers and time labels fall in the OM input fingerprint", () => {
+  const replay = observerHistory(
+    "Oct 28 2026:\nUser (9:15 AM): remember green\nTool Call evidence: read\na pause",
+  );
+  expect(getOMInputFingerprint(replay)).toBe(
+    getOMInputFingerprint(CROSSED_CLOCK_HISTORY),
+  );
+  expect(
+    getOMInputFingerprint(observerHistory("User: remember blue")),
+  ).not.toBe(getOMInputFingerprint(observerHistory("User: remember green")));
+});
+
+it("matches a tape whose fingerprints kept Mastra's date headers and time labels", async () => {
+  const legacy = getOMInputFingerprint(
+    CROSSED_CLOCK_HISTORY,
+    undefined,
+    undefined,
+    undefined,
+    "legacy",
+  );
+  expect(legacy).not.toBe(getOMInputFingerprint(CROSSED_CLOCK_HISTORY));
+  const entries = (
+    await recordCalls([
+      { phase: "observer", prompt: CROSSED_CLOCK_HISTORY.prompt },
+    ])
+  ).map((entry) => ({ ...entry, inputFingerprint: legacy }));
+  const tape = createOMResultTape(entries, () => {});
+  await collect(
+    (await tape.instrument(model(), "observer").doStream(CROSSED_CLOCK_HISTORY))
+      .stream,
+  );
+  expect((await tape.finish()).divergence.inputMismatches).toBe(0);
 });
 
 it("fingerprints an attachment as the reference replay history holds", () => {
