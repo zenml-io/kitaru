@@ -36,7 +36,7 @@ class InsightFilter(ListFilter):
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
         "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "agent_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
-        "import_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
+        "import_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS | NULLABLE_OPS),
         "task_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS),
         "name": FilterField(value_type=str, ops=EQUALITY_OPS),
         "type": FilterField(value_type=str, ops=EQUALITY_OPS),
