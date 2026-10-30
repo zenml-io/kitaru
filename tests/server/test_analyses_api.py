@@ -182,6 +182,30 @@ async def test_create_analyses_combines_scope_fields(
     assert task.import_id == import_id
 
 
+async def test_create_analyses_accepts_more_ids_than_one_filter_condition_holds(
+    client: httpx.AsyncClient,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+) -> None:
+    """Select an explicit list longer than the filter's per-condition limit."""
+    session_ids = {await _create_session(session_repository) for _ in range(150)}
+    await _create_session(session_repository)
+
+    response = await client.post(
+        "/api/v1/analyses",
+        json={
+            "agent_id": str(AGENT_ID),
+            "analyzers": [{"analyzer": "trends"}],
+            "session_ids": [str(session_id) for session_id in session_ids],
+        },
+    )
+
+    assert response.status_code == 201
+    (task,) = await _get_analysis_tasks(task_repository, response.json()["id"])
+    assert task.session_ids is not None
+    assert set(task.session_ids) == session_ids
+
+
 async def test_create_analyses_skips_below_the_session_minimum(
     client: httpx.AsyncClient,
     session_repository: FakeSessionRepository,

@@ -24,7 +24,8 @@ from kitaru.server.filtering import FilterCondition, FilterExpression
 def analysis_create_to_command(body: AnalysisCreateRequest) -> AnalysisCreate:
     """Convert an analysis create request to its command.
 
-    Each scope field that is set becomes one session filter condition.
+    Each scope field other than the session list becomes one session filter
+    condition.
 
     Args:
         body: Analysis create request.
@@ -33,10 +34,6 @@ def analysis_create_to_command(body: AnalysisCreateRequest) -> AnalysisCreate:
         Analysis create command.
     """
     conditions: list[FilterExpression] = []
-    if body.session_ids is not None:
-        conditions.append(
-            FilterCondition(field="id", op=FilterOp.IN, value=body.session_ids)
-        )
     for field, op, value in (
         ("tag", FilterOp.EQ, body.tag),
         ("cohort_version_id", FilterOp.EQ, body.cohort_version_id),
@@ -50,6 +47,7 @@ def analysis_create_to_command(body: AnalysisCreateRequest) -> AnalysisCreate:
         conditions.append(filter_to_expression(body.filter))
     return AnalysisCreate(
         agent_id=body.agent_id,
+        session_ids=body.session_ids,
         scope=tuple(conditions),
         import_id=body.import_id,
         analyzers=[analyzer_config_input(config) for config in body.analyzers],
