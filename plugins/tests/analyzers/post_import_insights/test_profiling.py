@@ -2237,7 +2237,7 @@ def test_distribution_evidence_uses_each_metrics_own_maximum() -> None:
         )
     config = ProfilingConfig(max_contributing_sessions=1)
     result = profile_sessions(sessions, config=config)
-    assert result.analysis_version == "2026-10-22.1"
+    assert result.analysis_version == "2026-10-30.1"
     assert profile_sessions(reversed(sessions), config=config) == result
     for candidate_id, number in [
         ("tool-call-distribution", 1),
