@@ -392,6 +392,13 @@ def _tokens(record: dict[str, Any]) -> TokenUsage | None:
             )
         ),
         _parse_token_count(_attribute(record, "gen_ai.usage.details.reasoning_tokens")),
+        _parse_token_count(
+            _attribute(
+                record,
+                "gen_ai.usage.details.cache_write_tokens",
+                "gen_ai.usage.cache_creation.input_tokens",
+            )
+        ),
     )
     if all(value is None for value in values):
         return None
@@ -400,6 +407,7 @@ def _tokens(record: dict[str, Any]) -> TokenUsage | None:
         output_tokens=values[1],
         cached_input_tokens=values[2],
         reasoning_tokens=values[3],
+        cache_write_input_tokens=values[4],
     )
 
 

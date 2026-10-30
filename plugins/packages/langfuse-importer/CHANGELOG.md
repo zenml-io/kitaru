@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Import prompt-cache writes from `input_cache_write_tokens`, `cache_write_tokens`, or `cache_creation_input_tokens` usage details, or from the sum of `input_cache_creation`, `input_ephemeral_5m_input_tokens`, and `input_ephemeral_1h_input_tokens`, as `cache_write_input_tokens`.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.3+dev` with the selected compatible published core version before releasing.
+
 ## 0.5.0 - 2026-10-30
 
 - Use Langfuse Python SDK 5 and the observations API for direct imports and the importer-backed adapter. API access requires Langfuse Cloud or self-hosted Langfuse 4.59.0 or later; file-only parsing does not require the SDK.

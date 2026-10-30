@@ -193,6 +193,39 @@ describe("recorded model identity", () => {
   });
 });
 
+describe("recorded token usage", () => {
+  it("records prompt-cache reads and writes", async () => {
+    const client = new FakeClient();
+    const model = new MockLanguageModelV4({
+      doGenerate: {
+        ...textResponse(),
+        usage: {
+          inputTokens: {
+            cacheRead: 800,
+            cacheWrite: 300,
+            noCache: 100,
+            total: 1200,
+          },
+          outputTokens: { reasoning: undefined, text: 2, total: 2 },
+        },
+      },
+    });
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: {},
+    });
+
+    await generate({ model, prompt: "go" });
+
+    expect(llmNode(client)?.tokens).toMatchObject({
+      cache_write_input_tokens: 300,
+      cached_input_tokens: 800,
+      input_tokens: 1200,
+    });
+  });
+});
+
 describe("recorded cost", () => {
   it("records a calculated cost and marks it estimated", async () => {
     const client = new FakeClient();

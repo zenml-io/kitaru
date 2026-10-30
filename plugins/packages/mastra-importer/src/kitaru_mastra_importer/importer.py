@@ -76,6 +76,7 @@ def _get_tokens(attributes: dict[str, Any]) -> TokenUsage | None:
         "input_tokens": usage.get("inputTokens"),
         "output_tokens": usage.get("outputTokens"),
         "cached_input_tokens": details["inputDetails"].get("cacheRead"),
+        "cache_write_input_tokens": details["inputDetails"].get("cacheWrite"),
         "reasoning_tokens": details["outputDetails"].get("reasoning"),
     }
     for count in counts.values():

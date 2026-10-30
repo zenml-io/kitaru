@@ -23,6 +23,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from kitaru.api_models.v1.session import TokenUsage
+
 _SECRET_KEY = re.compile(
     r"(?:^|[_-])(?:api[_-]?keys?|access[_-]?tokens?|refresh[_-]?tokens?|tokens?|"
     r"passwords?|secrets?)$|^(?:authorization|credentials?|device[_-]?codes?|"
@@ -31,9 +33,7 @@ _SECRET_KEY = re.compile(
 )
 _SECRET_VALUE = re.compile(r"(?i)(bearer\s+|KITKEY_|ZENPROKEY_)[^\s,;\]\}\"']+")
 
-_TOKEN_USAGE_KEYS = frozenset(
-    {"input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens"}
-)
+_TOKEN_USAGE_KEYS = frozenset(TokenUsage.model_fields)
 _MAX_DEPTH = 64
 
 

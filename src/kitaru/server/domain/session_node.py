@@ -72,14 +72,13 @@ def node_rollup_contribution(node: SessionNode | None) -> SessionRollups:
     """
     if node is None:
         return SessionRollups()
-    tokens = node.tokens
+    tokens = node.tokens or TokenUsage()
     return SessionRollups(
-        input_tokens=(tokens.input_tokens or 0) if tokens is not None else 0,
-        output_tokens=(tokens.output_tokens or 0) if tokens is not None else 0,
-        cached_input_tokens=(tokens.cached_input_tokens or 0)
-        if tokens is not None
-        else 0,
-        reasoning_tokens=(tokens.reasoning_tokens or 0) if tokens is not None else 0,
+        input_tokens=tokens.input_tokens or 0,
+        output_tokens=tokens.output_tokens or 0,
+        cached_input_tokens=tokens.cached_input_tokens or 0,
+        cache_write_input_tokens=tokens.cache_write_input_tokens or 0,
+        reasoning_tokens=tokens.reasoning_tokens or 0,
         llm_call_count=1 if node.node_type == NodeType.LLM_CALL else 0,
         tool_call_count=1 if node.node_type == NodeType.TOOL_CALL else 0,
     )

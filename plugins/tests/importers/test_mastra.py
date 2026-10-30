@@ -460,6 +460,23 @@ def test_preserves_explicit_reasoning_and_partial_usage(
     )
 
 
+def test_maps_cache_reads_and_writes(traces: list[dict[str, Any]]) -> None:
+    generation = next(
+        span for span in traces[0]["spans"] if span["spanType"] == "model_generation"
+    )
+    generation["attributes"]["usage"]["inputDetails"].update(
+        {"cacheRead": 20, "cacheWrite": 15}
+    )
+    session = _get_sessions(traces[0])[0]
+    node = next(
+        node for node in session.nodes if node.external_id == generation["spanId"]
+    )
+    assert node.tokens is not None
+    assert node.tokens.input_tokens == 41
+    assert node.tokens.cached_input_tokens == 20
+    assert node.tokens.cache_write_input_tokens == 15
+
+
 def test_utf16_is_not_silently_accepted_as_utf8() -> None:
     with pytest.raises(InvalidImport, match="UTF-8"):
         list(parse("{}".encode("utf-16"), {}))
