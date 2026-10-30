@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 - 2026-10-30
 
 - Use Langfuse Python SDK 5 and the observations API for direct imports and the importer-backed adapter. API access requires Langfuse Cloud or self-hosted Langfuse 4.59.0 or later; file-only parsing does not require the SDK.
 

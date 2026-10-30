@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.27.3] - 2026-10-30
+
+### Added
+
+- Added public experiment-run evaluation aggregates through the REST API, `client.experiment_runs.get_evaluation_aggregates(...)`, and `kitaru experiment run get RUN --aggregate`.
+- Added a PydanticAI adapter option to keep the caller's prompt and history while recording task inputs, with guidance for attaching benchmark grades after completion.
+
+### Changed
+
+- Update the Langfuse integration and quickstart trace generation to Python SDK 5 and the observations API. API access requires Langfuse Cloud or self-hosted Langfuse 4.59.0 or later; existing file exports remain supported.
+- Support `@mastra/core` 1.72 through 1.76 in the Mastra adapter, including recorded and replayed `Agent.stream()` calls, and accept the tested release sets core 1.72.0 with memory 1.33.0, core 1.73.0 with memory 1.34.0, core 1.74.0 with memory 1.35.0, core 1.75.0 with memory 1.36.0, and core 1.76.0 with memory 1.37.0 in the isolated memory replay factory.
+- Support `@mastra/core` 1.77 through 1.79 in the Mastra adapter, including recorded and replayed `Agent.stream()` calls, and accept the tested release sets core 1.77.0 with memory 1.37.1, core 1.78.0 with memory 1.38.0, and core 1.79.0 with memory 1.39.0 in the isolated memory replay factory.
+- Capture conflict-aware observational-memory writes and preserve generation retirement, write receipts, cursors, and database record semantics during isolated replay.
+- Close recordings promptly when an earlier turn left memory work running, while keeping the source Memory's background-work join available through its finalization deadline.
+- `kitaru-openai-agents` now supports the OpenAI Agents SDK 0.23 and 0.24 minor lines in addition to 0.19.3+.
+- `kitaru-pydantic-ai` now supports the PydanticAI 2.52 through 2.61 minor lines in addition to 2.14.1+.
+
+### Fixed
+
+- Corrected worker scope display and added live workers' scopes to `kitaru status`, with troubleshooting guidance for replays waiting on agent or evaluator workers.
+- `kitaru worker start --help` and the CLI schema now list `analyzer` as a valid `--claim` value.
+- Insights can now be filtered by `task_id`, so the `kitaru insight list --filter` command that `kitaru import analyze` suggests no longer fails with HTTP 422.
+- Corrected import documentation to describe deduplication per destination agent across agent versions, including the global-key behavior in Kitaru 0.23.0.
+- Mastra memory replay now matches a recorded observational-memory call even when the original turn crossed a minute or day boundary that the replay did not. Mastra only adds a date header or time label to the observer prompt when the day or minute changes, so these replays used to miss the recorded result and give the agent different memory than it had in the original run.
+- Mastra replays with buffered observational memory no longer diverge when the replay runs slower than production, for example under CI load. A recorded buffered observer or reflector result now stays held until the actor reaches the step where production received it, or until Mastra waits on the buffer round or the turn ends. Before, the result was released once production's call duration had passed.
+- The default post-import insights analyzers now count embedded tool requests when sessions have no separate tool nodes, distinguish literal correction markers from user corrections, and label model identifiers as recorded.
+- CLI JSON output and MCP tool results no longer mask averaged token counts (such as `input_tokens: 120.5` under a model-swap insight's `tokens_per_call`) as `"***"`. Credential fields are still masked.
+- Keep session cost unknown when any model call is unpriced, including across batches and node replacements, and repair previously stored incomplete totals during database upgrades.
+
+### Security
+
+- Updated locked OpenTelemetry API, SDK, and instrumentation packages to patch CVE-2026-114603.
+
 ## [0.27.2] - 2026-10-08
 
 ### Added

@@ -178,8 +178,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Generate deterministic insights from imported sessions.",
         provider=None,
         entrypoint="kitaru_post_import_insights.analyzer:analyze_post_import_sessions",
-        requirement="kitaru-post-import-insights==0.1.2",
-        display_version="0.1.2",
+        requirement="kitaru-post-import-insights==0.2.0",
+        display_version="0.2.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.ANALYZER,
@@ -189,8 +189,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         ),
         provider="openai",
         entrypoint="kitaru_post_import_insights.analyzer:analyze_openai_post_import_sessions",
-        requirement="kitaru-post-import-insights[openai]==0.1.2",
-        display_version="0.1.2",
+        requirement="kitaru-post-import-insights[openai]==0.2.0",
+        display_version="0.2.0",
         connection_schema=OpenAIConnection,
     ),
     DefaultPluginDefinition(
@@ -218,8 +218,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import Langfuse JSON and JSONL trace exports.",
         provider="langfuse",
         entrypoint="kitaru_langfuse_importer.importer:importer",
-        requirement="kitaru-langfuse-importer==0.4.1",
-        display_version="0.4.1",
+        requirement="kitaru-langfuse-importer==0.5.0",
+        display_version="0.5.0",
         connection_schema=LangfuseConnection,
     ),
     DefaultPluginDefinition(

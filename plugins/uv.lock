@@ -1345,7 +1345,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.27.2+dev"
+version = "0.27.3"
 source = { editable = "../" }
 dependencies = [
     { name = "httpx" },
@@ -1507,7 +1507,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-langfuse-importer"
-version = "0.4.1"
+version = "0.5.0"
 source = { editable = "packages/langfuse-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1652,7 +1652,7 @@ provides-extras = ["api"]
 
 [[package]]
 name = "kitaru-openai-agents"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/openai-agents" }
 dependencies = [
     { name = "genai-prices" },
@@ -1703,7 +1703,7 @@ provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-post-import-insights"
-version = "0.1.2"
+version = "0.2.0"
 source = { editable = "packages/post-import-insights" }
 dependencies = [
     { name = "kitaru" },
@@ -1723,7 +1723,7 @@ provides-extras = ["openai"]
 
 [[package]]
 name = "kitaru-pydantic-ai"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "packages/pydantic-ai" }
 dependencies = [
     { name = "genai-prices" },

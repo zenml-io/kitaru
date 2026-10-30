@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 - 2026-10-30
 
 - Add `use_task_inputs_as_prompt=False` to preserve caller prompts and message history while recording task inputs. Explicit replay prompt overrides still apply.
 - Document manual benchmark grades after session completion and registered evaluator metrics for experiments.
