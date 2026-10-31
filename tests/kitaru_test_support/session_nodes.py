@@ -19,11 +19,12 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from kitaru.api_models.v1.session import SessionOrigin
+from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.base import ListFilter
+from kitaru.server.domain.session import SessionUsage
 from kitaru.server.domain.session_node import SessionNode
 from kitaru_test_support.common import (
     ListItemT,
@@ -182,23 +183,36 @@ class FakeSessionNodeRepository:
         self._sessions = sessions
         self._cohort_versions = cohort_versions
 
-    async def get_cost(self, session_id: uuid.UUID) -> Decimal | None:
-        """Sum recorded node costs unless any LLM call is unpriced.
+    async def get_usage(self, session_id: uuid.UUID) -> SessionUsage:
+        """Sum recorded usage, preserving incomplete LLM measurements.
 
         Args:
             session_id: Id of the owning session.
 
         Returns:
-            Total cost, or ``None`` when any LLM call is unpriced or no
-            node has a recorded cost.
+            Cost and per-field token totals, with incomplete measurements unknown.
         """
         nodes = [node for node in self._nodes.values() if node.session_id == session_id]
-        if any(
+        unpriced = any(
             node.node_type == NodeType.LLM_CALL and node.cost is None for node in nodes
-        ):
-            return None
+        )
         costs = [node.cost for node in nodes if node.cost is not None]
-        return sum(costs, Decimal(0)) if costs else None
+        totals: dict[str, int | None] = {}
+        for field in TokenUsage.model_fields:
+            values = [
+                (node.node_type, getattr(node.tokens, field) if node.tokens else None)
+                for node in nodes
+            ]
+            measured = [value for _, value in values if value is not None]
+            incomplete = any(
+                node_type == NodeType.LLM_CALL and value is None
+                for node_type, value in values
+            )
+            totals[field] = sum(measured) if measured and not incomplete else None
+        return SessionUsage(
+            cost=sum(costs, Decimal(0)) if costs and not unpriced else None,
+            tokens=TokenUsage(**totals),
+        )
 
     async def get_by_external_ids(
         self,

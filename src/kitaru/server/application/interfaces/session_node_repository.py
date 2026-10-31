@@ -15,26 +15,26 @@
 
 import uuid
 from collections.abc import Sequence
-from decimal import Decimal
 from typing import Protocol
 
 from kitaru.server.application.models.session_node import SessionNodeFilter
+from kitaru.server.domain.session import SessionUsage
 from kitaru.server.domain.session_node import SessionNode
 
 
 class SessionNodeRepository(Protocol):
     """Session node persistence operations."""
 
-    async def get_cost(self, session_id: uuid.UUID) -> Decimal | None:
-        """Sum recorded node costs unless any LLM call is unpriced.
+    async def get_usage(self, session_id: uuid.UUID) -> SessionUsage:
+        """Sum recorded usage, preserving incomplete LLM measurements.
 
         Args:
             session_id: Id of the owning session.
 
         Returns:
-            Total cost, or ``None`` when an LLM call is unpriced or no
-            node has a recorded cost. Unpriced tool calls and spans do
-            not make the total unknown.
+            Cost and per-field token totals. A total is unknown when any LLM
+            call lacks that measurement or no node reports it. Missing tool
+            and span measurements do not make LLM totals incomplete.
         """
         ...
 
