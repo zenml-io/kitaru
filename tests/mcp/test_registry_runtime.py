@@ -22,6 +22,7 @@ EXPECTED = {
     CapabilityMode.READ_ONLY: [
         "kitaru_registry_read",
         "kitaru_activity_read",
+        "kitaru_session_read",
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
@@ -31,6 +32,7 @@ EXPECTED = {
     CapabilityMode.STANDARD: [
         "kitaru_registry_read",
         "kitaru_activity_read",
+        "kitaru_session_read",
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
@@ -48,6 +50,7 @@ EXPECTED = {
     CapabilityMode.DESTRUCTIVE: [
         "kitaru_registry_read",
         "kitaru_activity_read",
+        "kitaru_session_read",
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
@@ -83,6 +86,7 @@ async def test_exact_capability_filtered_inventories_and_annotations() -> None:
                 in {
                     "kitaru_registry_read",
                     "kitaru_activity_read",
+                    "kitaru_session_read",
                     "kitaru_review_read",
                     "kitaru_connection_read",
                     "kitaru_docs_search",
@@ -105,8 +109,8 @@ async def test_actual_sdk_discovery_schemas_fit_budgets() -> None:
             tool["outputSchema"]
         )
         assert combined < 45 * 1024
-    assert _compact_size({"tools": dumped}) < 232 * 1024
-    assert len(tools) <= 17
+    assert _compact_size({"tools": dumped}) < 236 * 1024
+    assert len(tools) <= 18
 
 
 async def test_activity_child_schema_exposes_only_kind_specific_fields() -> None:

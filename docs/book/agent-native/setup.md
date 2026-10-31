@@ -58,6 +58,7 @@ Tools are gated by a **capability mode**, either `read-only` (the default), `sta
 | --- | --- | --- |
 | `kitaru_registry_read` | read-only | Read agents, cohorts, experiments, importers, evaluators, and their versions; list and filter tags; list workers or get one by exact UUID |
 | `kitaru_activity_read` | read-only | Read sessions, replays, evaluations, runs, jobs, and their children |
+| `kitaru_session_read` | read-only | Read up to ten whole sessions as compact transcripts, one line per node, with every shortened field marked |
 | `kitaru_review_read` | read-only | Read [investigations and annotations](../concepts/investigations.md) |
 | `kitaru_connection_read` | read-only | Read [provider connections](../guides/provider-connections.md) without their secret values |
 | `kitaru_docs_search` | read-only | Search bundled Kitaru guides and return short excerpts with links to the published pages |

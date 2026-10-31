@@ -1,0 +1,1 @@
+- Added `kitaru session read` and the read-only `kitaru_session_read` MCP tool, which show whole sessions as compact transcripts (one line per step, each model call's new text only, errors kept whole, every cut marked with its size) so an agent can read many sessions without paging through raw node JSON.
