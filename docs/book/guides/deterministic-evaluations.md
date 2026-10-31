@@ -48,7 +48,7 @@ The other five bundles produce pass or fail verdicts only for rules you supply:
 | `kitaru/output-contract@1` | `expected` for exact non-null JSON equality; `required_paths` for RFC 6901 JSON Pointer presence; `type_requirements` mapping pointers to `null`, `boolean`, `number`, `integer`, `string`, `array`, or `object`. Supply at least one rule. |
 | `kitaru/resource-budget@1` | One or more inclusive non-negative ceilings: `max_duration_seconds`, `max_cost`, `max_total_tokens`, `max_nodes`, `max_llm_calls`, or `max_tool_calls`. Node and call-count ceilings must be integers. |
 | `kitaru/tool-policy@1` | One or more of `required_tools`, `forbidden_tools`, or `max_calls_per_tool`. Tool names are exact and case-sensitive. |
-| `kitaru/model-policy@1` | One or more of `allowed_models`, `allowed_providers`, or `require_requested_model_match`. Recorded names are exact and case-sensitive. |
+| `kitaru/model-policy@1` | One or more of `allowed_models`, `allowed_providers`, or `require_requested_model_match`. Allowlists are exact and case-sensitive; requested/served comparisons also recognize explicitly supported provider-specific aliases. |
 | `kitaru/workflow-conformance@1` | Required `expected_tools` plus `mode`: `exact_order`, `in_order`, `contains_all`, or `exact_set`. |
 
 For example, apply recorded resource ceilings and a tool policy:
@@ -68,6 +68,8 @@ Configured rules use conservative evidence semantics:
 - A rule passes only when the session is terminal and all evidence required by that rule is present and consistent.
 - Insufficient evidence leaves `passed` unset. This is a HOLD, not a pass.
 - Invalid configuration fails that evaluator task. Sibling evaluator tasks continue under the existing evaluation Job behavior.
+
+Requested/served model comparisons preserve the original identifiers. Identical names match without provider metadata. The explicitly supported alias pair is `gemini-3-flash-preview` and `models/gemini-3-flash-preview`, in either direction, when the recorded provider is exactly `google`. Other differences, including different version suffixes or aliases without the required provider, remain unresolved recorded-name differences. Both `llm-call-signals` and `model-policy` count those differences and include bounded identifier evidence in the explanation; a difference alone does not prove that the wrong model executed. `require_requested_model_match` returns HOLD for unresolved differences or missing identifiers, and passes only for a terminal session with complete matching evidence. Use an exact `allowed_models` rule when you need to reject an unallowed served version. HOLD results are excluded from aggregate pass rates.
 
 ## Understand result evidence
 

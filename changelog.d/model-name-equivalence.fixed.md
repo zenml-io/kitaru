@@ -1,0 +1,1 @@
+- Recognize an explicitly supported Google model-name alias pair in LLM signals and requested-model policies, preserve evidence for unresolved name differences, and leave their model-match verdict inconclusive instead of reporting a model failure.
