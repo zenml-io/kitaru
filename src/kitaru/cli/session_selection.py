@@ -21,6 +21,7 @@ from kitaru.api_models.v1.cohort import CohortResponse
 from kitaru.api_models.v1.cohort_version import CohortVersionResponse
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.session import SessionListParams
+from kitaru.cli.input_files import read_utf8_file
 from kitaru.cli.output import CLIError
 from kitaru.cli.registration import (
     list_params,
@@ -31,26 +32,7 @@ from kitaru.cli.registration import (
 
 def read_session_file(path: Path) -> list[tuple[int, str]]:
     """Read UTF-8 session UUID lines without accepting stdin or comments."""
-    if str(path) == "-":
-        raise CLIError(
-            "invalid_arguments", "--sessions-file does not accept stdin ('-')."
-        )
-    if not path.is_file():
-        raise CLIError(
-            "invalid_arguments",
-            "--sessions-file must be an existing regular UTF-8 text file.",
-        )
-    try:
-        content = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        raise CLIError(
-            "invalid_arguments", "--sessions-file must contain valid UTF-8 text."
-        ) from None
-    except OSError as error:
-        reason = error.strerror or type(error).__name__
-        raise CLIError(
-            "invalid_arguments", f"--sessions-file could not be read: {reason}."
-        ) from None
+    content = read_utf8_file(path, "--sessions-file")
     return [
         (line_number, line.strip())
         for line_number, line in enumerate(content.splitlines(), start=1)
