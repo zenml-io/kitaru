@@ -47,6 +47,7 @@ from kitaru.cli.output import (
     CommandResult,
     OutputContext,
     OutputMode,
+    describe_validation_error,
     emit_error,
     emit_result,
     reset_output_context,
@@ -413,11 +414,8 @@ def _convert_error(
     if isinstance(exception, CLIError):
         return exception
     if isinstance(exception, PydanticValidationError):
-        issue = exception.errors(include_url=False)[0]
-        location = ".".join(str(part) for part in issue["loc"])
-        message = str(issue["msg"]).removeprefix("Value error, ")
-        prefix = f"Invalid {location}: " if location else "Invalid value: "
-        return CLIError("invalid_arguments", f"{prefix}{message}.")
+        location, message = describe_validation_error(exception)
+        return CLIError("invalid_arguments", f"Invalid {location}: {message}.")
     if isinstance(exception, CycloptsError):
         return CLIError("invalid_arguments", str(exception))
     if isinstance(exception, (DeviceLoginError, ControlPlaneLoginError)):

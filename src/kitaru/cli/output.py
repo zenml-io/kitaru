@@ -21,6 +21,7 @@ from dataclasses import dataclass, field, replace
 from types import TracebackType
 from typing import Any, Literal, TextIO
 
+from pydantic import ValidationError
 from rich.console import Console
 from rich.rule import Rule
 from rich.table import Table
@@ -88,6 +89,21 @@ class CLIError(Exception):
         Exception.__init__(self, self.message)
         if self.exit_code is None:
             self.exit_code = ERROR_EXIT_CODES.get(self.kind, 1)
+
+
+def describe_validation_error(error: ValidationError) -> tuple[str, str]:
+    """Return the dotted location and message of a validation error's first issue.
+
+    Args:
+        error: Pydantic validation error.
+
+    Returns:
+        The location, or ``value`` when the issue has none, and the message
+        without Pydantic's ``Value error,`` prefix.
+    """
+    issue = error.errors(include_url=False)[0]
+    location = ".".join(str(part) for part in issue["loc"]) or "value"
+    return location, issue["msg"].removeprefix("Value error, ")
 
 
 @dataclass(slots=True)

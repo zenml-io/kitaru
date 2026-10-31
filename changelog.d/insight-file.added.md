@@ -1,0 +1,1 @@
+- Added `kitaru insight create --insight-file PATH`, which reads one insight JSON object or an array of them from a UTF-8 file, so a whole batch can be created without passing each insight as a shell argument.
