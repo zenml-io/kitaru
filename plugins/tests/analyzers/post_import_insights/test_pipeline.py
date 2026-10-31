@@ -304,7 +304,7 @@ async def test_message_only_traces_generate_honest_activity_and_identifier_cards
                     "outputs": [
                         {
                             "role": "assistant",
-                            "parts": [{"type": "tool_call", "id": "lookup"}],
+                            "parts": [{"type": "tool_call"}] * session.session.number,
                         }
                     ],
                 }
@@ -315,7 +315,7 @@ async def test_message_only_traces_generate_honest_activity_and_identifier_cards
     cards = {card.name: card for card in result.insights}
 
     assert cards["tool-call-distribution"].title == (
-        "All recorded observations have 1 request"
+        "Tool requests per session have a measurable spread"
     )
     assert isinstance(cards["tool-call-distribution"].data, BinnedInsightData)
     assert cards["tool-call-distribution"].data.unit == "requests"
@@ -514,7 +514,7 @@ async def test_rejects_result_that_exceeds_serialized_bound() -> None:
             _session(2, status=SessionStatus.COMPLETED),
         ],
         context=_context(),
-        config=InsightGenerationConfig(max_result_bytes=1_000),
+        config=InsightGenerationConfig(max_result_bytes=1_500),
     )
 
     assert result.insights == []
