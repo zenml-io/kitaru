@@ -37,6 +37,7 @@ from kitaru.cli.registration import (
     resolve_asset,
 )
 from kitaru.cli.schema import ParameterSpec
+from kitaru.cli.task_diagnostics import get_task_diagnostics
 
 GET_PARAMETERS = (
     ParameterSpec("RUN", "UUID", "argument", True, "Experiment-run ID."),
@@ -136,19 +137,21 @@ async def poll_run(
         else initial_run.model_dump(mode="json", exclude={"updated"})
     )
 
+    previous_diagnostics: dict[str, Any] | None = None
+    latest_diagnostics: dict[str, Any] | None = None
     while True:
         if deadline is None:
             run: ExperimentRunResponse = await client.experiment_runs.get(run_id)
         else:
             remaining = deadline - clock()
             if remaining <= 0:
-                raise _get_poll_timeout(run_id, previous)
+                raise _get_poll_timeout(run_id, previous, latest_diagnostics)
             try:
                 run = await asyncio.wait_for(
                     client.experiment_runs.get(run_id), timeout=remaining
                 )
             except TimeoutError as error:
-                raise _get_poll_timeout(run_id, previous) from error
+                raise _get_poll_timeout(run_id, previous, latest_diagnostics) from error
 
         item = run.model_dump(mode="json")
         fingerprint = dict(item)
@@ -160,18 +163,42 @@ async def poll_run(
         if run.status in _TERMINAL_STATUSES:
             return run
 
+        diagnostics, warnings = await get_task_diagnostics(
+            client,
+            experiment_run_id=run_id,
+            timeout=5.0 if deadline is None else deadline - clock(),
+        )
+        diagnostic_item = {
+            "experiment_run_id": str(run_id),
+            "task_diagnostics": diagnostics.model_dump(mode="json")
+            if diagnostics
+            else None,
+            "warnings": warnings,
+        }
+        latest_diagnostics = {
+            "task_diagnostics": diagnostic_item["task_diagnostics"],
+            "warnings": warnings,
+        }
+        if diagnostic_item != previous_diagnostics and (
+            warnings or previous_diagnostics is not None
+        ):
+            emit_event("diagnostics", diagnostic_item)
+        previous_diagnostics = (
+            diagnostic_item if warnings or previous_diagnostics is not None else None
+        )
+
         if deadline is None:
             await sleep(interval)
         else:
             remaining = deadline - clock()
             if remaining <= 0:
-                raise _get_poll_timeout(run_id, previous)
+                raise _get_poll_timeout(run_id, previous, latest_diagnostics)
             try:
                 await asyncio.wait_for(
                     sleep(min(interval, remaining)), timeout=remaining
                 )
             except TimeoutError as error:
-                raise _get_poll_timeout(run_id, previous) from error
+                raise _get_poll_timeout(run_id, previous, latest_diagnostics) from error
 
 
 async def start_run(
@@ -220,7 +247,14 @@ async def start_run(
         f"kitaru experiment run cancel {run.id}",
     ]
     if wait_settings is None:
+        diagnostics, warnings = await get_task_diagnostics(
+            client, experiment_run_id=run.id
+        )
+        receipt["task_diagnostics"] = (
+            diagnostics.model_dump(mode="json") if diagnostics else None
+        )
         return CommandResult(
+            warnings=warnings,
             item=receipt,
             event="created",
             next_actions=next_actions,
@@ -387,12 +421,17 @@ def _terminal_result(
     )
 
 
-def _get_poll_timeout(run_id: uuid.UUID, previous: dict[str, Any] | None) -> CLIError:
+def _get_poll_timeout(
+    run_id: uuid.UUID,
+    previous: dict[str, Any] | None,
+    diagnostics: dict[str, Any] | None = None,
+) -> CLIError:
     """Build the recoverable local run polling-timeout error."""
     return CLIError(
         "timeout",
         f"Timed out waiting for experiment run {run_id}; remote work continues.",
         details={
+            **(diagnostics or {}),
             "run_id": str(run_id),
             "last_status": previous["status"] if previous is not None else None,
             "remote_continues": True,

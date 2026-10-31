@@ -1,0 +1,1 @@
+- Explain pending imports, replays, and experiments when no compatible live worker claims their tasks, including analyzer tasks queued after import parsing. Show actionable worker-coverage warnings in CLI status and job waiting, and MCP job and experiment-run inspection.

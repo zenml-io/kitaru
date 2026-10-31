@@ -28,6 +28,8 @@ from kitaru.api_models.v1.task import (
     ScriptPluginSpec,
     TaskClaimResponse,
     TaskDetails,
+    TaskDiagnosticResponse,
+    TaskDiagnosticsResponse,
     TaskListParams,
     TaskResponse,
     TaskRunSpec,
@@ -73,6 +75,7 @@ from kitaru.server.domain.task import (
 from kitaru.server.domain.task import (
     TaskRunSpec as DomainTaskRunSpec,
 )
+from kitaru.server.domain.task_diagnostics import TaskDiagnostics
 
 
 def task_to_response(task: Task) -> TaskResponse:
@@ -286,3 +289,31 @@ def task_update_to_command(body: TaskUpdateRequest) -> TaskUpdate:
         Task update command carrying only the request's set fields.
     """
     return TaskUpdate(**body.model_dump(exclude_unset=True))
+
+
+def diagnostics_to_response(diagnostics: TaskDiagnostics) -> TaskDiagnosticsResponse:
+    """Convert pending-task coverage to its response DTO.
+
+    Args:
+        diagnostics: Current coverage snapshot.
+
+    Returns:
+        Task diagnostics response.
+    """
+    return TaskDiagnosticsResponse(
+        live_worker_count=diagnostics.live_worker_count,
+        pending_task_count=diagnostics.pending_task_count,
+        truncated=diagnostics.truncated,
+        groups=[
+            TaskDiagnosticResponse(
+                kind=group.kind,
+                agent_version_id=group.agent_version_id,
+                labels=group.labels,
+                reasons=group.reasons,
+                task_count=group.task_count,
+                task_ids=group.task_ids,
+                job_ids=group.job_ids,
+            )
+            for group in diagnostics.groups
+        ],
+    )
