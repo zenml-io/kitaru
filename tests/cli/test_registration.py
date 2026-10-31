@@ -8,7 +8,7 @@
 import json
 import uuid
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -35,6 +35,7 @@ from kitaru.cli.registration import (
     plugin_parent_request,
     prepare_plugin_source,
     register_agent,
+    register_agent_version,
     register_plugin,
     register_plugin_version,
     resolve_analyzer_configs,
@@ -80,6 +81,7 @@ class StubResource:
         self.version_idempotency_keys: list[str | None] = []
         self.create_error: Exception | None = None
         self.version_error: Exception | None = None
+        self.refresh_error: Exception | None = None
         self.parent = StubModel("created")
         self.version = StubModel("version", version=2)
         self.deleted: list[uuid.UUID] = []
@@ -97,6 +99,8 @@ class StubResource:
 
     async def get(self, item_id: uuid.UUID) -> StubModel:
         """Return one exact configured UUID."""
+        if self.version_requests and self.refresh_error:
+            raise self.refresh_error
         for item in self.items:
             if item.id == item_id:
                 return item
@@ -141,6 +145,17 @@ class StubResource:
         self.version_idempotency_keys.append(idempotency_key)
         if self.version_error:
             raise self.version_error
+        parent = next(
+            (item for item in self.items if item.id == parent_id), self.parent
+        )
+        self.items = [item for item in self.items if item.id != parent_id]
+        self.items.append(
+            replace(
+                parent,
+                latest_version=max(parent.latest_version, self.version.version),
+                values={"updated": "after version creation"},
+            )
+        )
         return self.version
 
 
@@ -168,7 +183,78 @@ class StubClient:
         self.agents = StubResource()
         self.importers = StubResource()
         self.evaluators = StubResource()
+        self.analyzers = StubResource()
         self.blobs = StubBlobs()
+
+
+@pytest.mark.parametrize("kind", ["agent", "importer", "evaluator", "analyzer"])
+@pytest.mark.parametrize(
+    ("new_parent", "previous_version"), [(True, 0), (False, 1), (False, 5)]
+)
+@pytest.mark.parametrize("refresh_fails", [False, True])
+async def test_registration_receipt_returns_fresh_parent(
+    kind: str, new_parent: bool, previous_version: int, refresh_fails: bool
+) -> None:
+    """Receipts refresh state and preserve successful writes if the read fails."""
+    client = StubClient()
+    resource = getattr(client, f"{kind}s")
+    resource.parent.latest_version = previous_version
+    resource.parent.values = {"updated": "before version creation"}
+    resource.items = [resource.parent]
+    if refresh_fails:
+        resource.refresh_error = RuntimeError("read unavailable")
+    version_request = AgentVersionCreateRequest(run_spec=RunSpec(command="run"))
+    if kind == "agent":
+        result = (
+            await register_agent(
+                client, AgentCreateRequest(name="demo"), version_request
+            )
+            if new_parent
+            else await register_agent_version(
+                client, "created", version_request, idempotency_key="retry-key"
+            )
+        )
+    else:
+        options: dict[str, Any] = {
+            "kind": kind,
+            "source": PackageSource("demo==1.0", "demo:run"),
+            "display_version": None,
+        }
+        result = (
+            await register_plugin(
+                client,
+                parent_request=plugin_parent_request(
+                    kind,
+                    "demo",
+                    description=None,
+                    provider=None,
+                    metadata=None,
+                    agent_id=None,
+                ),
+                **options,
+            )
+            if new_parent
+            else await register_plugin_version(
+                client, reference="created", idempotency_key="retry-key", **options
+            )
+        )
+
+    assert result.item[kind]["latest_version"] == max(previous_version, 2)
+    assert result.item[kind]["updated"] == (
+        "before version creation" if refresh_fails else "after version creation"
+    )
+    assert result.item["version"]["version"] == 2
+    assert result.item["phases"]["version"]["completed"] is True
+    assert result.exit_code == 0
+    assert len(resource.created_requests) == int(new_parent)
+    assert len(resource.version_requests) == 1
+    assert resource.parent.latest_version == previous_version
+    if refresh_fails:
+        assert len(result.warnings) == 1
+        assert "Registration succeeded" in result.warnings[0]
+        assert "Do not retry registration" in result.warnings[0]
+    else:
+        assert result.warnings == []
 
 
 def test_agent_source_normalization_accepts_only_explicit_commands() -> None:

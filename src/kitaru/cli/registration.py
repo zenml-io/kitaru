@@ -69,6 +69,7 @@ from kitaru.cli.references import (
     ReferenceResolutionError,
     resolve_parent_resource,
 )
+from kitaru.cli.registration_receipts import build_registration_result
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.credential_store import CredentialStore
 
@@ -694,7 +695,7 @@ async def register_agent(
                 f"{shlex.quote(str(parent.id))} ...`."
             ),
         ) from error
-    return _registration_result("agent", parent, version)
+    return await build_registration_result("agent", client.agents, parent, version)
 
 
 async def register_agent_version(
@@ -708,7 +709,7 @@ async def register_agent_version(
     version = await client.agents.create_version(
         parent.id, request, idempotency_key=idempotency_key
     )
-    return _registration_result("agent", parent, version)
+    return await build_registration_result("agent", client.agents, parent, version)
 
 
 async def register_plugin(
@@ -743,7 +744,7 @@ async def register_plugin(
                 f"{shlex.quote(str(parent.id))} ...`."
             ),
         ) from error
-    return _registration_result(kind, parent, version, blob=blob)
+    return await build_registration_result(kind, resource, parent, version, blob=blob)
 
 
 async def register_plugin_version(
@@ -776,7 +777,7 @@ async def register_plugin_version(
             blob=blob,
             hint="The blob is stored and may be reused; no version was created.",
         ) from error
-    return _registration_result(kind, parent, version, blob=blob)
+    return await build_registration_result(kind, resource, parent, version, blob=blob)
 
 
 def plugin_parent_request(
@@ -982,29 +983,6 @@ def _plugin_version_request_type(
     if kind == "analyzer":
         return AnalyzerVersionCreateRequest
     raise ValueError(f"Unsupported plugin kind {kind!r}")
-
-
-def _registration_result(
-    kind: str, parent: Any, version: Any, *, blob: Any | None = None
-) -> CommandResult:
-    """Build a structured multi-phase registration receipt."""
-    phases: dict[str, Any] = {
-        "parent": {"completed": True, "id": str(parent.id)},
-        "version": {
-            "completed": True,
-            "id": str(version.id),
-            "version": version.version,
-        },
-    }
-    if blob is not None:
-        phases["blob"] = {"completed": True, "id": str(blob.id)}
-    return CommandResult(
-        item={
-            kind: parent.model_dump(mode="json"),
-            "version": version.model_dump(mode="json"),
-            "phases": phases,
-        }
-    )
 
 
 def _partial_failure(
