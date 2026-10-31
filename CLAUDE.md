@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Kitaru?
 
-Kitaru is a runtime for **recording, replaying, and improving AI agents in production**. Positioning surfaces (README, docs leads, PyPI, marketing) lead with record → replay → improve (diagnose failures, test model/prompt swaps via replay overrides, compare cost and quality, ship updates with confidence).
+Kitaru turns an AI agent's traces into **insights, checks, and tested fixes**. Positioning surfaces (README, docs leads, PyPI, marketing) lead with insights and follow the four steps the Kitaru product page on zenml.io uses: bring your traces (import or record), get insights across every session, turn findings into checks (evaluators, with cohorts, investigations, and experiments behind them), and replay a fix before it ships. Replay is how a fix gets tested, not the headline. The hosted AI engineer that does the reading is the paid layer on top of open-source Kitaru; open-source surfaces mention it once, never as the lead.
 
 ## Project layout
 

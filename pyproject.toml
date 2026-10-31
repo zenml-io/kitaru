@@ -1,7 +1,7 @@
 [project]
 name = "kitaru"
 version = "0.27.3+dev"
-description = "Record, replay, and improve AI agents in production."
+description = "Insights, checks, and tested fixes from your AI agent's traces."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
