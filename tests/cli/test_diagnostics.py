@@ -113,6 +113,49 @@ async def test_status_reports_provenance_and_live_worker_scopes(
     assert client.closed is True
 
 
+@pytest.mark.parametrize(
+    ("dashboard_url", "ui_version", "server_url", "expected"),
+    [
+        (
+            "https://dashboard.example.com/",
+            "1.0.0",
+            None,
+            "https://dashboard.example.com",
+        ),
+        (None, "1.0.0", None, "https://api.example.com"),
+        (None, "1.0.0", "https://public.example.com/", "https://public.example.com"),
+        (None, None, None, None),
+    ],
+)
+async def test_status_resolves_the_reachable_dashboard(
+    tmp_path, monkeypatch, dashboard_url, ui_version, server_url, expected
+) -> None:
+    """Status resolves configured and bundled dashboards like review links."""
+    client = FakeClient()
+    server_info = ServerInfoResponse(
+        version="0.21.0",
+        auth_scheme=AuthScheme.NONE,
+        dashboard_url=dashboard_url,
+        ui_version=ui_version,
+        server_url=server_url,
+    )
+
+    async def get_info() -> ServerInfoResponse:
+        return server_info
+
+    client.info = SimpleNamespace(get=get_info)
+    monkeypatch.setattr(diagnostics, "build_api_client", lambda *args: client)
+
+    result = await diagnostics.status(
+        target=ResolvedTarget("https://api.example.com", "explicit"),
+        credential_store=CredentialStore(tmp_path / "credentials.json"),
+        timeout=30,
+    )
+
+    assert result.item["dashboard_url"] == expected
+    assert result.item["server"]["dashboard_url"] == dashboard_url
+
+
 @pytest.mark.parametrize("liveness", [(), (False,)])
 async def test_status_distinguishes_no_live_workers_from_unavailable(
     tmp_path, monkeypatch, liveness: tuple[bool, ...]

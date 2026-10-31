@@ -1,0 +1,3 @@
+- Registration receipts refresh the parent after creating an agent or plugin version, and preserve a successful result with a warning if that refresh fails.
+- `kitaru status` resolves bundled dashboard URLs consistently with investigation review links.
+- Plain-text root help summarizes installed skills instead of dumping local discovery paths, and investigation create/update help explains the allowed name syntax.

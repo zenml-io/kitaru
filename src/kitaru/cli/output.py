@@ -356,7 +356,11 @@ def _emit_text(context: OutputContext, result: CommandResult) -> None:
         for warning in result.warnings:
             Console(file=context.stderr).print(Text(f"Warning: {warning}"))
         return
-    if isinstance(value, dict):
+    if context.command == "kitaru" and isinstance(value, dict):
+        summary = _get_root_summary(value)
+        if summary is not None:
+            print(summary.plain, file=context.stdout)
+    elif isinstance(value, dict):
         for key, item in value.items():
             print(f"{key}: {_display_value(item)}", file=context.stdout)
     elif isinstance(value, list):
@@ -466,9 +470,16 @@ def _emit_human_detail(
 
 def _emit_root(console: Console, value: dict[str, Any]) -> None:
     """Render concise agent-skill onboarding after root help."""
+    summary = _get_root_summary(value)
+    if summary is not None:
+        console.print(summary)
+
+
+def _get_root_summary(value: dict[str, Any]) -> Text | None:
+    """Build concise agent-skill onboarding for text output."""
     skills = value.get("skills")
     if not isinstance(skills, dict):
-        return
+        return None
     names = skills.get("skills")
     if skills.get("installed") and isinstance(names, list):
         visible_names, remainder = select_visible_skill_names(
@@ -478,9 +489,8 @@ def _emit_root(console: Console, value: dict[str, Any]) -> None:
         escaped_names = (_escape_terminal_controls(name) for name in visible_names)
         line = Text("Kitaru agent skills detected", style="green")
         line.append(f": {', '.join(escaped_names)}{suffix}.")
-        console.print(line)
-        return
-    console.print(
+        return line
+    return Text(
         "Install the Kitaru agent skills for guided setup and investigation workflows."
     )
 
