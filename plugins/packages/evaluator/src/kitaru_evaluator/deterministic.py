@@ -32,6 +32,10 @@ from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType, SessionNodeResponse
 from kitaru.task.evaluator import SessionView
+from kitaru_evaluator.model_names import (
+    describe_model_name_differences,
+    find_model_name_differences,
+)
 
 _EVIDENCE_LIMIT = 20
 _RESULT_VALUE_MAX_BYTES = 64_000
@@ -1280,17 +1284,7 @@ def llm_call_signals(session: SessionView) -> list[EvaluationResult]:
                 {"indexes": [positions[previous[0].id], positions[call.id]]}
             )
         previous = call, normalized, complete and call.inputs is not None
-    mismatches = [
-        {
-            "index": positions[node.id],
-            "requested": node.requested_model,
-            "served": node.model,
-        }
-        for node in calls
-        if node.requested_model is not None
-        and node.model is not None
-        and node.requested_model != node.model
-    ]
+    mismatches = find_model_name_differences(calls, positions)
     results: list[EvaluationResult] = []
     results.extend(
         [
@@ -1312,10 +1306,10 @@ def llm_call_signals(session: SessionView) -> list[EvaluationResult]:
                 "Adjacent LLM calls with exact canonical inputs.",
                 max_score=max(len(calls) - 1, 0),
             ),
-            _finding_result(
+            _float_result(
                 "requested_model_mismatches",
-                mismatches,
-                "Calls whose requested and served model names differ.",
+                len(mismatches),
+                describe_model_name_differences(mismatches),
                 max_score=len(calls),
             ),
             _float_result(
@@ -1343,7 +1337,7 @@ def model_policy(
     allowed_providers: list[str] | None = None,
     require_requested_model_match: bool = False,
 ) -> list[EvaluationResult]:
-    """Apply exact model and provider policies to recorded LLM calls."""
+    """Apply exact allowlists and verified requested/served model equivalence."""
     models = _validate_string_list(allowed_models, "allowed_models")
     providers = _validate_string_list(allowed_providers, "allowed_providers")
     if not isinstance(require_requested_model_match, bool):
@@ -1388,17 +1382,7 @@ def model_policy(
             )
         )
     if require_requested_model_match:
-        mismatches = [
-            {
-                "index": positions[node.id],
-                "requested": node.requested_model,
-                "served": node.model,
-            }
-            for node in calls
-            if node.requested_model is not None
-            and node.model is not None
-            and node.requested_model != node.model
-        ]
+        mismatches = find_model_name_differences(calls, positions)
         complete = can_pass and all(
             node.requested_model is not None and node.model is not None
             for node in calls
@@ -1407,9 +1391,9 @@ def model_policy(
             _float_result(
                 "requested_model_match",
                 len(mismatches),
-                "Calls whose requested and served model names differ.",
+                describe_model_name_differences(mismatches),
                 max_score=len(calls),
-                passed=False if mismatches else True if complete else None,
+                passed=True if complete and not mismatches else None,
             )
         )
     return results
