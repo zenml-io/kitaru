@@ -123,6 +123,7 @@ describe("secondary structured-output model recording", () => {
       tokens: { input_tokens: 11, output_tokens: 4 },
     });
     expect(JSON.stringify(child?.inputs)).toContain("The answer is yes.");
+    expect(child?.output_text_selector).toBe("/text");
     expect(JSON.stringify(child?.outputs)).toContain("yes");
     expect(api.nodeBatches().at(-1)?.[0]).toMatchObject({
       outputs: { object: { answer: "yes" } },

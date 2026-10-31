@@ -1,0 +1,1 @@
+- `@zenml-io/kitaru-mastra` now sets `output_text_selector` on agent step and structured-output model-call nodes, and on processor classifier calls whose reply is a single text part.
