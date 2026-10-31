@@ -1,0 +1,1 @@
+- `@zenml-io/kitaru-vercel-ai` now sets `output_text_selector` on model-call nodes to the step's joined reply text. Adapter authors can set the same field through `NormalizedModelStep.outputTextSelector` and the new `replyTextSelector()` helper in `@zenml-io/kitaru/adapter`.

@@ -1,0 +1,1 @@
+- The bundled sample sessions now select every thinking part of a model output as reasoning, instead of only the last one.

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Set `output_text_selector` on model-call nodes to the generation's joined reply text when the call returned exactly one generation with text.
+
 ## 0.3.0 - 2026-10-08
 
 - Serialize baseline history lookups per cache key so identical tool calls dispatched in parallel replay successive recorded occurrences instead of all replaying the first one.

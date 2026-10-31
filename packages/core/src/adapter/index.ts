@@ -56,6 +56,7 @@ export type {
 export {
   flushFailedPolicyOutcomes,
   recordNormalizedStep,
+  replyTextSelector,
   serializedSettings,
 } from "./step.js";
 export type {

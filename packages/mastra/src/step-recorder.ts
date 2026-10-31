@@ -10,6 +10,7 @@ import {
   type RecordedConversion,
   type RecordingLimits,
   recordNormalizedStep,
+  replyTextSelector,
   resolveCost,
   type SecretKeyClassifier,
 } from "@zenml-io/kitaru/adapter";
@@ -266,6 +267,7 @@ export async function normalizeStep(
     requestedModelId: state.requestedModelId,
     tokens,
   });
+  const outputs = stepOutputs(step, tools, sanitizeEvidence, isSecretKey);
 
   return {
     attributes: {
@@ -286,7 +288,9 @@ export async function normalizeStep(
     model: servedModelId,
     modelSettings: requestEvidence?.modelSettings,
     startedAt: requestEvidence?.startedAt,
-    outputs: stepOutputs(step, tools, sanitizeEvidence, isSecretKey),
+    outputs,
+    // Mastra joins every text part of the step into `text`.
+    outputTextSelector: replyTextSelector(outputs),
     provider,
     tokens,
     tools,

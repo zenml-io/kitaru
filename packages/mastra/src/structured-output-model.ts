@@ -8,6 +8,7 @@ import {
   projectRecordedMetadata,
   providerFamily,
   ROOT_NODE_EXTERNAL_ID,
+  replyTextSelector,
   resolveCost,
 } from "@zenml-io/kitaru/adapter";
 
@@ -139,6 +140,10 @@ export async function prepareStructuredOutputModel(
             requestedModelId,
             tokens,
           });
+          const outputs = boundedRecorderJson(
+            { text, finish_reason: finishReason },
+            "structured output result",
+          );
           const node: SessionNodeCreateRequest = {
             name: "structured_output",
             node_type: "llm_call",
@@ -160,10 +165,8 @@ export async function prepareStructuredOutputModel(
               parameters.prompt,
               "structured output prompt",
             ),
-            outputs: boundedRecorderJson(
-              { text, finish_reason: finishReason },
-              "structured output result",
-            ),
+            outputs,
+            output_text_selector: replyTextSelector(outputs) ?? null,
             attributes: {
               structured_output: true,
               provider_id: model.provider,

@@ -321,7 +321,9 @@ class RunRecorder:
             cost, cost_attributes = estimate_cost(
                 tokens, model.model, model.provider, model_started_at[identity]
             )
-            outputs, reasoning_selectors = _capture_model_response(response)
+            outputs, output_text_selector, reasoning_selectors = (
+                _capture_model_response(response)
+            )
             await self._append_node(
                 node_type=NodeType.LLM_CALL,
                 name="model",
@@ -338,6 +340,7 @@ class RunRecorder:
                     else None
                 ),
                 outputs=outputs,
+                output_text_selector=output_text_selector,
                 reasoning_selectors=reasoning_selectors,
                 requested_model=model.requested_model,
                 model=model.model,
@@ -568,6 +571,7 @@ class RunRecorder:
         ended_at: datetime | None,
         inputs: Any,
         outputs: Any,
+        output_text_selector: str | None = None,
         reasoning_selectors: list[str] | None = None,
         requested_model: str | None = None,
         model: str | None = None,
@@ -590,6 +594,7 @@ class RunRecorder:
                     ended_at=ended_at,
                     inputs=inputs,
                     outputs=outputs,
+                    output_text_selector=output_text_selector,
                     reasoning_selectors=reasoning_selectors or [],
                     requested_model=requested_model,
                     model=model,
@@ -809,9 +814,22 @@ def _capture_error(error: BaseException) -> str:
     return captured["value"]
 
 
-def _capture_model_response(response: ModelResponse) -> tuple[Any, list[str]]:
-    """Capture model output items and pointers to their visible reasoning."""
+def _get_text_pointer(pointer: str, captured: Any) -> str:
+    """Point at a captured string, inside its truncation wrapper when it has one."""
+    return f"{pointer}/value" if isinstance(captured, dict) else pointer
+
+
+def _capture_model_response(
+    response: ModelResponse,
+) -> tuple[Any, str | None, list[str]]:
+    """Capture model output items and pointers to their reply and reasoning text.
+
+    One pointer selects one string, so a response whose reply is spread over
+    several text or refusal parts gets no reply pointer rather than a pointer
+    to only part of it.
+    """
     output: list[Any] = []
+    text_selectors: list[str] = []
     reasoning_selectors: list[str] = []
     for item in response.output[:MAX_COLLECTION_ITEMS]:
         if isinstance(item, ResponseReasoningItem):
@@ -820,9 +838,9 @@ def _capture_model_response(response: ModelResponse) -> tuple[Any, list[str]]:
             content = [_capture(part.text) for part in item.content or []]
             index = len(output)
             reasoning_selectors.extend(
-                f"/{index}/{key}/{position}"
+                _get_text_pointer(f"/{index}/{key}/{position}", text)
                 for key, texts in (("summary", summary), ("content", content))
-                for position in range(len(texts))
+                for position, text in enumerate(texts)
             )
             output.append(
                 {
@@ -839,11 +857,15 @@ def _capture_model_response(response: ModelResponse) -> tuple[Any, list[str]]:
         content: list[Any] = []
         for part in item.content[:MAX_COLLECTION_ITEMS]:
             if isinstance(part, ResponseOutputText):
-                content.append({"type": "output_text", "text": _capture(part.text)})
+                key, text = "text", _capture(part.text)
             elif isinstance(part, ResponseOutputRefusal):
-                content.append({"type": "refusal", "refusal": _capture(part.refusal)})
+                key, text = "refusal", _capture(part.refusal)
             else:
                 content.append({"type": type(part).__name__})
+                continue
+            pointer = f"/{len(output)}/content/{len(content)}/{key}"
+            text_selectors.append(_get_text_pointer(pointer, text))
+            content.append({"type": part.type, key: text})
         output.append(
             {
                 "id": item.id,
@@ -871,7 +893,8 @@ def _capture_model_response(response: ModelResponse) -> tuple[Any, list[str]]:
                 }
             }
         )
-    return output, reasoning_selectors
+    text_selector = text_selectors[0] if len(text_selectors) == 1 else None
+    return output, text_selector, reasoning_selectors
 
 
 def _capture_usage(response: ModelResponse) -> TokenUsage:

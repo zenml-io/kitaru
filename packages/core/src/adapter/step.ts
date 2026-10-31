@@ -1,5 +1,6 @@
 import { toRecorderJson } from "../json.js";
 import type { JsonValue, SessionNodeCreateRequest } from "../types.js";
+import { isRecord } from "../validation.js";
 import { providerFamily } from "./provider.js";
 import type { AdapterRunState } from "./run-state.js";
 import { ROOT_NODE_EXTERNAL_ID } from "./run-state.js";
@@ -34,6 +35,7 @@ export interface NormalizedModelStep {
   model?: string;
   modelSettings?: Record<string, JsonValue>;
   outputs: JsonValue;
+  outputTextSelector?: string;
   provider?: string;
   reasoningSelectors?: string[];
   startedAt?: string;
@@ -116,6 +118,20 @@ function toolNode(
   };
 }
 
+/**
+ * Point at the reply text of recorded model outputs that keep it under `text`.
+ *
+ * Size bounding can replace the whole outputs object, so the pointer is only
+ * returned when it resolves to a non-empty string in what is actually stored.
+ */
+export function replyTextSelector(outputs: JsonValue): string | undefined {
+  return isRecord(outputs) &&
+    typeof outputs.text === "string" &&
+    outputs.text.length > 0
+    ? "/text"
+    : undefined;
+}
+
 export async function recordNormalizedStep(
   state: AdapterRunState,
   step: NormalizedModelStep,
@@ -142,6 +158,7 @@ export async function recordNormalizedStep(
       name: "model_request",
       node_type: "llm_call",
       outputs: step.outputs,
+      output_text_selector: step.outputTextSelector ?? null,
       parent_external_id: ROOT_NODE_EXTERNAL_ID,
       model_provider:
         provider === undefined ? undefined : providerFamily(provider),
