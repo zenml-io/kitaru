@@ -102,6 +102,8 @@ class CommandResult:
     next_actions: list[str] = field(default_factory=list)
     event: str | None = None
     exit_code: int = 0
+    text: str | None = None
+    """Prerendered text that text mode prints in place of the item or items."""
 
 
 @dataclass(slots=True)
@@ -331,14 +333,15 @@ def _emit_text(context: OutputContext, result: CommandResult) -> None:
     # Sanitize before field selection loses the containing credential key.
     result = replace(
         result,
-        item=redact_data(result.item),
-        items=redact_data(result.items),
         page=redact_data(result.page),
         warnings=redact_data(result.warnings),
         links=redact_data(result.links),
         next_actions=redact_data(result.next_actions),
     )
-    value = result.items if result.items is not None else result.item
+    if result.text is not None:
+        value: Any = redact(result.text)
+    else:
+        value = redact_data(result.items if result.items is not None else result.item)
     if context.rich:
         console = _get_console(context, context.stdout)
         view = get_human_view(context.command)

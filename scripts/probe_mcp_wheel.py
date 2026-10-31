@@ -26,6 +26,7 @@ EXPECTED_TOOLS = {
     "read-only": [
         "kitaru_registry_read",
         "kitaru_activity_read",
+        "kitaru_session_read",
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
@@ -35,6 +36,7 @@ EXPECTED_TOOLS = {
     "standard": [
         "kitaru_registry_read",
         "kitaru_activity_read",
+        "kitaru_session_read",
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
@@ -52,6 +54,7 @@ EXPECTED_TOOLS = {
     "destructive": [
         "kitaru_registry_read",
         "kitaru_activity_read",
+        "kitaru_session_read",
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
