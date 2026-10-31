@@ -4,10 +4,10 @@
   </a>
 </p>
 
-<h3 align="center">Traces you can run, not just read.</h3>
+<h3 align="center">Insights from your agent's traces.</h3>
 
 <p align="center">
-  Kitaru (来る, "to arrive") gives you replay-based evals for AI agents. Record or import production runs as sessions, replay them against your next model, prompt, or code change, and see what improved and what broke before you ship. Open source, self-hosted, Python and TypeScript. From the team behind <a href="https://zenml.io">ZenML</a>.
+  Kitaru (来る, "to arrive") reads your agent's traces and shows you the patterns across every session. Import the traces you already collect, or record new runs with an adapter. Turn what you find into checks, then replay a fix against the sessions that failed before it ships. Open source, on your machine, with your keys. Python and TypeScript. From the team behind <a href="https://zenml.io">ZenML</a>.
 </p>
 
 <p align="center">
@@ -34,13 +34,16 @@
 
 ## 🎯 Why
 
-Your agent has already been tested thousands of times in production. Most of that evidence is sitting in a trace store as something you can read but not run. Then you change a prompt, swap a model, or refactor a tool, and the first strong signal comes from a user who found the regression.
+Your tracing tool shows you one session at a time. Your evals score each session against the failures you thought of in advance. Neither tells you what is going wrong across ten thousand sessions, or which of your evals pass replies they should fail. Then you change a prompt or swap a model, and the first strong signal comes from a user who found the regression.
 
-Kitaru turns that history into something you can test:
+Kitaru goes from traces to a tested fix in four steps:
 
-- **Every run becomes a session.** Wrap your agent once, or import the traces you already collect from Langfuse, LangSmith, Braintrust, Logfire, Arize Phoenix, or MLflow. Your trace store stays your system of record.
-- **Replay re-executes your code.** Your real agent runs again, with tool calls answered from the recording, so no card gets refunded twice. An unchanged replay gives you the faithful baseline; a forked replay shows the effect of one change.
-- **Evaluation starts with human judgment.** Your coding assistant reviews the sessions that matter, interviews you against the evidence, and pins your answers to exact trace locations. Those judgments calibrate evaluators, cohorts freeze the population, and experiments replay the cohort against your change before it ships.
+- **Bring your traces.** Import the traces you already collect from Langfuse, LangSmith, Braintrust, Logfire, Arize Phoenix, or MLflow, or wrap your agent once with an adapter. Every run becomes a session, and your trace store stays your system of record.
+- **Get insights.** Analyzers read every session at once and surface the patterns: failed tool calls, repeated calls, how outcomes split. Each insight links to the sessions behind it, and the built-in analyzer needs no model or API key.
+- **Turn findings into checks.** Your coding assistant reads the sessions behind an insight, interviews you against the evidence, and pins your answers to exact trace locations. Those answers become evaluators that check every session, next to the evals you already run. Cohorts freeze the sessions you care about so the same set gets checked every time.
+- **Replay a fix.** Change the model, prompt, or code, and your real agent runs again on the sessions that failed, with tool calls answered from the recording, so no card gets refunded twice. Experiments compare the replay with the original and show what improved and what regressed before you ship.
+
+Rather not do the reading yourself? [Our hosted AI engineer](https://www.zenml.io/pricing) runs on Kitaru: it reads every new trace next to your evals, shows you what they miss, and asks you only when a session needs your call.
 
 ## ⚡ Get started
 
@@ -135,6 +138,7 @@ One server runs on your infrastructure, with Docker image and Helm chart include
 | [Set up your coding agent](https://docs.zenml.io/kitaru/getting-started/setup) | Install the MCP server and the agent skills |
 | [PydanticAI returns agent](https://github.com/zenml-io/kitaru/tree/main/examples/python/pydantic_ai_ticket_resolver) | A ready agent and checked-in traces to try the method on |
 | [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) | Langfuse, LangSmith, Braintrust, Logfire, Arize Phoenix, MLflow, or any format |
+| [Post-import insights](https://docs.zenml.io/kitaru/guides/post-import-insights) | Find patterns across every imported session |
 | [Build a regression suite](https://docs.zenml.io/kitaru/guides/regression-suite) | Replay production traffic against a change and gate it in CI |
 | [Deploy Kitaru](https://docs.zenml.io/kitaru/getting-started/deploy) | Self-host for your team |
 
