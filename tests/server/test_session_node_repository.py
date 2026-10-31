@@ -299,7 +299,7 @@ async def _walk_pages(
         ),
     ],
 )
-async def test_get_cost_requires_complete_llm_pricing(
+async def test_get_usage_requires_complete_llm_pricing(
     setup: Setup,
     entries: list[tuple[NodeType, Decimal | None]],
     expected: Decimal | None,
@@ -316,7 +316,7 @@ async def test_get_cost_requires_complete_llm_pricing(
     other_id = await make_session_id()
     await repository.upsert_batch(other_id, [_node(0, session_id=other_id, cost=None)])
 
-    assert await repository.get_cost(session_id) == expected
+    assert (await repository.get_usage(session_id)).cost == expected
 
 
 async def test_get_by_external_ids_empty_when_none_stored(setup: Setup) -> None:

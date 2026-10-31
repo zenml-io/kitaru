@@ -97,8 +97,8 @@ class SessionNodeService:
         An external id already stored is replaced whole, keeping the node
         id. ``parent_external_id`` and ``links`` are stored as sent and
         resolved by the reader, so a parent may land after its children.
-        Session cost is recomputed from stored nodes so unknown LLM prices
-        stay unknown. Tokens and call counts roll up by one atomic delta-based
+        Session usage is recomputed from stored nodes so incomplete LLM
+        measurements stay unknown. Call counts roll up by one atomic delta-based
         update covering the whole batch. A task principal ingests only into
         a session it owns.
 
@@ -192,8 +192,8 @@ class SessionNodeService:
             _get_node_payloads(resolved), session.owner_id
         )
         stored = await self._repository.upsert_batch(session_id, resolved)
-        cost = await self._repository.get_cost(session_id)
-        await self._sessions.apply_rollups(session_id, combine_rollups(deltas), cost)
+        usage = await self._repository.get_usage(session_id)
+        await self._sessions.apply_rollups(session_id, combine_rollups(deltas), usage)
         return stored
 
     async def list_nodes(

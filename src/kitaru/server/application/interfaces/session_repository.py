@@ -15,11 +15,10 @@
 
 import uuid
 from collections.abc import Sequence
-from decimal import Decimal
 from typing import Protocol
 
 from kitaru.server.application.models.session import SessionFilter
-from kitaru.server.domain.session import Session, SessionRollups
+from kitaru.server.domain.session import Session, SessionRollups, SessionUsage
 
 
 class SessionRepository(Protocol):
@@ -177,17 +176,17 @@ class SessionRepository(Protocol):
         ...
 
     async def apply_rollups(
-        self, session_id: uuid.UUID, deltas: SessionRollups, cost: Decimal | None
+        self, session_id: uuid.UUID, deltas: SessionRollups, usage: SessionUsage
     ) -> None:
-        """Set session cost and apply token and call-count deltas.
+        """Set measured session totals and apply call-count deltas.
 
-        The update is one atomic statement. Cost is an absolute total;
-        token and call-count deltas make identical retries idempotent.
+        The update is one atomic statement. Usage contains absolute totals;
+        call-count deltas make identical retries idempotent.
 
         Args:
             session_id: Id of the session.
             deltas: Rollup deltas to add.
-            cost: Total cost, or ``None`` when pricing is incomplete.
+            usage: Measured totals, with incomplete fields left unknown.
 
         Raises:
             SessionNotFound: No session has this id.

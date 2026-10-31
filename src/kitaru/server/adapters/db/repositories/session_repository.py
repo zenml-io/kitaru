@@ -16,9 +16,8 @@
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
-from decimal import Decimal
 
-from sqlalchemy import ColumnElement, CursorResult, func, select, update
+from sqlalchemy import ColumnElement, CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import defer
 
@@ -63,6 +62,7 @@ from kitaru.server.domain.session import (
     SessionInUse,
     SessionNotFound,
     SessionRollups,
+    SessionUsage,
 )
 from kitaru.server.filtering import FilterCondition
 
@@ -423,9 +423,9 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         )
 
     async def apply_rollups(
-        self, session_id: uuid.UUID, deltas: SessionRollups, cost: Decimal | None
+        self, session_id: uuid.UUID, deltas: SessionRollups, usage: SessionUsage
     ) -> None:
-        """Set session cost and apply token and call-count deltas.
+        """Set measured session totals and apply call-count deltas.
 
         This is a Core-level bulk statement rather than an ORM attribute
         mutation, so the ``updated`` timestamp needs to be stamped here
@@ -434,7 +434,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         Args:
             session_id: Id of the session.
             deltas: Rollup deltas to add.
-            cost: Total cost, or ``None`` when pricing is incomplete.
+            usage: Measured totals, with incomplete fields left unknown.
 
         Raises:
             SessionNotFound: No session has this id.
@@ -443,15 +443,11 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             update(SessionORM)
             .where(SessionORM.id == session_id)
             .values(
-                cost=cost,
-                input_tokens=func.coalesce(SessionORM.input_tokens, 0)
-                + deltas.input_tokens,
-                output_tokens=func.coalesce(SessionORM.output_tokens, 0)
-                + deltas.output_tokens,
-                cached_input_tokens=func.coalesce(SessionORM.cached_input_tokens, 0)
-                + deltas.cached_input_tokens,
-                reasoning_tokens=func.coalesce(SessionORM.reasoning_tokens, 0)
-                + deltas.reasoning_tokens,
+                cost=usage.cost,
+                input_tokens=usage.tokens.input_tokens,
+                output_tokens=usage.tokens.output_tokens,
+                cached_input_tokens=usage.tokens.cached_input_tokens,
+                reasoning_tokens=usage.tokens.reasoning_tokens,
                 llm_call_count=SessionORM.llm_call_count + deltas.llm_call_count,
                 tool_call_count=SessionORM.tool_call_count + deltas.tool_call_count,
                 updated=datetime.now(UTC),
