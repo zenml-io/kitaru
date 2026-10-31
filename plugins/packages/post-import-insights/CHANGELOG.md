@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Suppress uniform distribution and single-model inventory cards so analyses can return no findings instead of promoting an uninformative recommendation.
+- Exclude missing or unsupported assistant outputs from tool-request counts and retain incomplete tool-activity coverage even when no card is generated.
+
 ## 0.2.0 - 2026-10-30
 
 - Count explicit tool requests in LLM output messages when a session has no separate tool nodes, label the fallback as requests, and exclude incomplete request scans from the distribution.

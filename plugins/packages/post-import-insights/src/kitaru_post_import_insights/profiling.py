@@ -61,7 +61,7 @@ from kitaru_post_import_insights.profiling_state import (
     SessionReferences,
 )
 
-ANALYSIS_VERSION = "2026-10-22.1"
+ANALYSIS_VERSION = "2026-10-31.1"
 MAX_DISTRIBUTION_EXAMPLES = 5
 MAX_LABEL_LENGTH = 120
 MAX_ROLE_LENGTH = 32
@@ -209,7 +209,7 @@ class CandidateFinding(_ProfilingModel):
 class ProfilingResult(_ProfilingModel):
     """Stable candidate envelope produced without a model or evaluations."""
 
-    analysis_version: Literal["2026-10-22.1"] = ANALYSIS_VERSION
+    analysis_version: Literal["2026-10-31.1"] = ANALYSIS_VERSION
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     coverage: Coverage
     candidates: list[CandidateFinding]
@@ -877,28 +877,40 @@ def _find_cycles(
 def _count_output_tool_requests(
     nodes: Sequence[SessionNodeResponse], budget: _PayloadBudget
 ) -> int | None:
-    """Count explicit tool-call parts in assistant outputs within payload bounds."""
+    """Count requests in fully inspected assistant outputs, or return unknown."""
+    if not nodes:
+        return None
     count = 0
     for node in nodes:
         if not isinstance(node.outputs, (list, dict)):
-            continue
+            return None
+        assistant_seen = False
         stack: list[tuple[Any, int, bool]] = [(node.outputs, 0, False)]
         while stack:
             current, depth, in_parts = stack.pop()
             if not budget.consume(current, depth=depth):
                 return None
             if not isinstance(current, (list, dict)):
-                continue
+                return None
             if isinstance(current, list):
                 if not budget.can_enter(len(current)):
                     return None
                 stack.extend((item, depth + 1, in_parts) for item in current)
             elif in_parts:
+                if current.get("type") not in ("text", "tool_call", "tool_result"):
+                    return None
                 count += current.get("type") == "tool_call"
             elif current.get("role") == "assistant":
+                if not isinstance(current.get("parts"), list):
+                    return None
+                assistant_seen = True
                 stack.append((current.get("parts"), depth + 1, True))
             elif "role" not in current and "messages" in current:
                 stack.append((current["messages"], depth + 1, False))
+            elif "role" not in current:
+                return None
+        if not assistant_seen:
+            return None
     return count
 
 
@@ -1336,34 +1348,6 @@ def _build_outcome_briefing(
     )
 
 
-def _build_flat_distribution_briefing(
-    *, family: str, values: Histogram, unit: str, quantity: str
-) -> str:
-    """Build the briefing for a distribution whose observations share one value."""
-    observations = len(values)
-    minimum = f"{values.minimum:g}"
-    recorded = "a recorded duration" if family == "timing" else f"recorded {unit}"
-    return _format_briefing(
-        odd=(
-            f"All {observations} observations have exactly {minimum} {unit}; there "
-            "is no tail to compare against the middle."
-        ),
-        look_first=(
-            "Open a few of the sessions in contributing_session_ids to confirm the "
-            "value is real rather than a fixed instrumentation default."
-        ),
-        cohort=f"every session with {recorded} (the {observations} listed).",
-        hypothesis=(
-            "Treat this as a baseline: check that one intended agent change moves "
-            f"{quantity} away from {minimum} {unit} in the direction you expect."
-        ),
-        held=(
-            f"the replayed cohort's {quantity} differs from {minimum} {unit} in the "
-            "expected direction while the failed-session rate does not rise."
-        ),
-    )
-
-
 def _build_distribution_briefing(
     *,
     family: str,
@@ -1377,11 +1361,6 @@ def _build_distribution_briefing(
     observations = len(values)
     minimum = f"{values.minimum:g}"
     maximum = f"{values.maximum:g}"
-    if values.minimum == values.maximum:
-        return _build_flat_distribution_briefing(
-            family=family, values=values, unit=unit, quantity=quantity
-        )
-
     tail_index = values.get_highest_occupied_bin()
     assert tail_index is not None
     tail_count = values.bins[tail_index]
@@ -1492,28 +1471,16 @@ def _build_model_mix_briefing(
         f"sessions. The most frequent label accounts for "
         f"{_pluralize(leading_model_calls, 'call')} ({leading_share}%)."
     )
-    if models == 1:
-        look_first = (
-            "Open a few sessions from contributing_session_ids and read the model "
-            "label on their model-call nodes. With a single label there is no "
-            "in-import comparison; the comparison is one candidate replacement "
-            "model on replay."
-        )
-        cohort = (
-            f"sessions with a recorded model label (all {affected} listed), since "
-            "every recorded call uses the same label."
-        )
-    else:
-        look_first = (
-            "Open sessions from contributing_session_ids and group them by the model "
-            "label on their model-call nodes. Compare sessions with at least one "
-            "model-call node recording the chart's leading label against sessions "
-            "with none."
-        )
-        cohort = (
-            "sessions with at least one model-call node recording the chart's "
-            f"leading label ({leading_model_calls} of {model_calls} calls)."
-        )
+    look_first = (
+        "Open sessions from contributing_session_ids and group them by the model "
+        "label on their model-call nodes. Compare sessions with at least one "
+        "model-call node recording the chart's leading label against sessions "
+        "with none."
+    )
+    cohort = (
+        "sessions with at least one model-call node recording the chart's "
+        f"leading label ({leading_model_calls} of {model_calls} calls)."
+    )
     return _format_briefing(
         odd=odd,
         look_first=look_first,
@@ -1964,46 +1931,28 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
         ),
     )
     for spec in distribution_specs:
-        if len(spec.values) < 2:
+        if len(spec.values) < 2 or spec.values.minimum == spec.values.maximum:
             continue
-        uniform = spec.values.minimum == spec.values.maximum
         highest_bin = spec.values.get_highest_occupied_bin()
         assert highest_bin is not None
-        evidence = (
-            []
-            if uniform
-            else [
-                EvidenceLocator(
-                    session_id=session_id, signal=DISTRIBUTION_TOP_BIN_SIGNAL
-                )
-                for session_id, value in spec.highest_values.get_entries()
-                if spec.values.get_bin_index(value) == highest_bin
-            ]
-        )
+        evidence = [
+            EvidenceLocator(session_id=session_id, signal=DISTRIBUTION_TOP_BIN_SIGNAL)
+            for session_id, value in spec.highest_values.get_entries()
+            if spec.values.get_bin_index(value) == highest_bin
+        ]
         contributing = _get_contributions(
             state, spec.session_ids, reserved_ids=[item.session_id for item in evidence]
         )
         if not contributing:
             continue
-        unit = spec.unit.removesuffix("s") if spec.values.minimum == 1 else spec.unit
-        title = (
-            f"All recorded observations have {spec.values.minimum:g} {unit}"
-            if uniform
-            else spec.title
-        )
-        description = (
-            "This uniform baseline can anchor comparisons after an agent change."
-            if uniform
-            else spec.description
-        )
         candidates.append(
             CandidateFinding(
                 id=spec.candidate_id,
                 family=spec.family,
                 rank=spec.rank,
                 eyebrow=spec.eyebrow,
-                title=title,
-                fallback_description=description,
+                title=spec.title,
+                fallback_description=spec.description,
                 caveat=spec.caveat,
                 data=_build_binned(spec.values, unit=spec.unit),
                 facts=[
@@ -2031,7 +1980,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             )
         )
 
-    if state.models:
+    if len(state.models) > 1:
         model_sessions = state.model_sessions
         contributions = _get_contributions(state, model_sessions)
         candidates.append(
@@ -2041,8 +1990,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 rank=160,
                 eyebrow="MODEL MIX",
                 title=(
-                    f"{len(state.models)} recorded model identifier"
-                    f"{' appears' if len(state.models) == 1 else 's appear'} in "
+                    f"{len(state.models)} recorded model identifiers appear in "
                     "these sessions"
                 ),
                 fallback_description=(
@@ -2251,6 +2199,14 @@ def _finish_profile(state: _State, source_session_count: int | None) -> Profilin
     if state.timing_available < sessions_analyzed:
         caveats.append(
             "Timing coverage is incomplete because valid session bounds are missing."
+        )
+    unknown_tool_sessions = sessions_analyzed - len(state.tool_count_session_ids)
+    if unknown_tool_sessions:
+        caveats.append(
+            f"Tool activity coverage is incomplete for {unknown_tool_sessions} "
+            "sessions because tool nodes or fully inspected supported assistant "
+            "outputs were unavailable. These sessions were excluded from tool "
+            "counts; zero counts mean no recorded requests, not proof of no tool use."
         )
     if state.identity_available < state.tool_calls:
         caveats.append(

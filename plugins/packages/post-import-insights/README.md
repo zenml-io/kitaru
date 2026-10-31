@@ -17,9 +17,11 @@ Install `kitaru-post-import-insights` for deterministic analysis, or `kitaru-pos
 
 Language cards detect literal markers in selected text. A recorded `user` role does not prove that text came from a customer: some harnesses put agent policy in user-role messages. Importers that know the customer input should set `input_text_selector` on both the session and each relevant LLM node. For example, `/messages/1/content` selects the second message's content in a `messages` array. Choose selectors for the actual trace structure and preserve later customer turns; setting only the session selector leaves node input histories available to the profiler.
 
-Tool activity counts separate tool nodes when present in a session. Otherwise, it counts explicit `tool_call` parts in assistant output messages, accepting a message, a message list, or a `messages` container. When this fallback contributes requests, the distribution is labeled as requests and states that execution is unverified. Input histories are not counted, and incomplete request scans are excluded. Tool error, retry, and result analysis still requires separate tool nodes.
+Tool activity counts separate tool nodes when present in a session. Otherwise, it counts explicit `tool_call` parts in assistant output messages, accepting a message, a message list, or a `messages` container. When this fallback contributes requests, the distribution is labeled as requests and states that execution is unverified. Input histories are not counted, and missing, unsupported, or incompletely inspected request payloads are excluded with a coverage caveat. Zero counts mean no recorded requests, not proof of no tool use. Tool error, retry, and result analysis still requires separate tool nodes.
 
-The model-mix card counts recorded model identifiers. It prefers the served model field and falls back to the requested model field; different identifiers can refer to the same model.
+The model-mix card requires multiple recorded model identifiers. It prefers the served model field and falls back to the requested model field; different identifiers can refer to the same model.
+
+Uniform activity and duration distributions are not insight candidates by themselves. Concrete findings such as failures and retries remain eligible even when every session exhibits them. When no candidates qualify, either analyzer returns no cards.
 
 ## Release context
 
