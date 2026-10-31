@@ -22,6 +22,7 @@ from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.task import (
     TaskClaimRequest,
     TaskClaimResponse,
+    TaskDiagnosticsResponse,
     TaskListParams,
     TaskResponse,
     TaskSpecResponse,
@@ -39,6 +40,7 @@ from kitaru.server.adapters.rest.dependencies import (
 )
 from kitaru.server.adapters.rest.mapping.tasks import (
     claimed_tasks_to_response,
+    diagnostics_to_response,
     spec_to_response,
     task_list_params_to_filter,
     task_to_response,
@@ -122,6 +124,31 @@ async def claim_tasks(
         for item in claimed
     }
     return claimed_tasks_to_response(claimed, tokens)
+
+
+@router.get("/diagnostics", responses=error_responses(404))
+async def get_task_diagnostics(
+    service: Annotated[TaskService, Depends(get_task_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+    job_id: uuid.UUID | None = None,
+    experiment_run_id: uuid.UUID | None = None,
+) -> TaskDiagnosticsResponse:
+    """Read pending-task coverage.
+
+    Clients observe HTTP 200 on success, 404 for a missing job, and 422
+    when both scope filters are supplied.
+
+    Args:
+        service: Task service.
+        actor: Caller context.
+        job_id: Restrict to one job.
+        experiment_run_id: Restrict to one experiment run.
+
+    Returns:
+        Current heartbeat-based coverage snapshot.
+    """
+    diagnostics = await service.get_diagnostics(job_id, experiment_run_id, actor=actor)
+    return diagnostics_to_response(diagnostics)
 
 
 @router.get("/{task_id}", responses=error_responses(404))

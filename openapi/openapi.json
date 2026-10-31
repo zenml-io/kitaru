@@ -9891,6 +9891,113 @@
         "title": "TaskClaimResponse",
         "type": "object"
       },
+      "TaskDiagnosticResponse": {
+        "description": "Pending tasks sharing worker requirements and coverage.",
+        "properties": {
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required agent version.",
+            "title": "Agent Version Id"
+          },
+          "job_ids": {
+            "description": "Up to three example job ids.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Job Ids",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskKind",
+            "description": "Task kind."
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Required task labels.",
+            "title": "Labels",
+            "type": "object"
+          },
+          "reasons": {
+            "description": "Coverage mismatches; empty when a compatible worker exists.",
+            "items": {
+              "$ref": "#/components/schemas/TaskWaitReason"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "task_count": {
+            "description": "Pending tasks in this group.",
+            "title": "Task Count",
+            "type": "integer"
+          },
+          "task_ids": {
+            "description": "Up to three example task ids.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Task Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "labels",
+          "reasons",
+          "task_count",
+          "task_ids",
+          "job_ids"
+        ],
+        "title": "TaskDiagnosticResponse",
+        "type": "object"
+      },
+      "TaskDiagnosticsResponse": {
+        "description": "Heartbeat-based coverage snapshot of pending work.",
+        "properties": {
+          "groups": {
+            "description": "Up to 100 groups of pending work.",
+            "items": {
+              "$ref": "#/components/schemas/TaskDiagnosticResponse"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "live_worker_count": {
+            "description": "Workers with recent heartbeats.",
+            "title": "Live Worker Count",
+            "type": "integer"
+          },
+          "pending_task_count": {
+            "description": "Pending tasks examined.",
+            "title": "Pending Task Count",
+            "type": "integer"
+          },
+          "truncated": {
+            "description": "Whether additional groups were omitted.",
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "live_worker_count",
+          "pending_task_count",
+          "groups",
+          "truncated"
+        ],
+        "title": "TaskDiagnosticsResponse",
+        "type": "object"
+      },
       "TaskKind": {
         "description": "Kind of work a task runs.",
         "enum": [
@@ -10340,6 +10447,18 @@
         },
         "title": "TaskUpdateRequest",
         "type": "object"
+      },
+      "TaskWaitReason": {
+        "description": "Why no live worker covers a pending task.",
+        "enum": [
+          "no_live_workers",
+          "claim_mismatch",
+          "job_mismatch",
+          "selector_mismatch",
+          "credential_mismatch"
+        ],
+        "title": "TaskWaitReason",
+        "type": "string"
       },
       "TaskWithSpec": {
         "description": "Task with spec.",
@@ -26326,6 +26445,114 @@
           }
         },
         "summary": "Claim Tasks",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/diagnostics": {
+      "get": {
+        "description": "Read pending-task coverage.\n\nClients observe HTTP 200 on success, 404 for a missing job, and 422\nwhen both scope filters are supplied.\n\nArgs:\n    service: Task service.\n    actor: Caller context.\n    job_id: Restrict to one job.\n    experiment_run_id: Restrict to one experiment run.\n\nReturns:\n    Current heartbeat-based coverage snapshot.",
+        "operationId": "get_task_diagnostics_api_v1_tasks_diagnostics_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "experiment_run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experiment Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskDiagnosticsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get Task Diagnostics",
         "tags": [
           "tasks"
         ]

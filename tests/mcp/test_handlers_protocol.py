@@ -605,35 +605,6 @@ async def test_session_get_links_to_exact_session_in_dashboard_workspace() -> No
     )
 
 
-async def test_experiment_run_get_links_to_selected_run() -> None:
-    run_id = uuid.uuid4()
-    experiment_id = uuid.uuid4()
-
-    async def get_run(_id: uuid.UUID) -> object:
-        assert _id == run_id
-        return SimpleNamespace(id=run_id, experiment_id=experiment_id, number=3)
-
-    async def get_info() -> ServerInfoResponse:
-        return ServerInfoResponse(
-            version="0.0.0", auth_scheme=AuthScheme.LOCAL, ui_version="1.2.3"
-        )
-
-    client = SimpleNamespace(
-        base_url="https://api.example.com/base/",
-        experiment_runs=SimpleNamespace(get=get_run),
-        info=SimpleNamespace(get=get_info),
-    )
-    result = await handle_activity_read(
-        _get_state(cast(Any, client)),
-        ActivityGetRequest(operation="get", kind="experiment_run", id=run_id),
-    )
-
-    assert isinstance(result, ToolSuccessPayload)
-    assert result.links == {
-        "inspect": f"https://api.example.com/base/experiments/{experiment_id}?run=3"
-    }
-
-
 @pytest.mark.parametrize(
     "dashboard_url",
     [

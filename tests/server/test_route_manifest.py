@@ -112,6 +112,7 @@ def test_route_manifest_is_registered() -> None:
         "/api/v1/tags/{tag_id}/links/{resource_type}/{resource_id}",
         "/api/v1/tasks",
         "/api/v1/tasks/claim",
+        "/api/v1/tasks/diagnostics",
         "/api/v1/tasks/{task_id}",
         "/api/v1/tasks/{task_id}/spec",
         "/api/v1/ui/experiment-runs/{experiment_run_id}/evaluation-aggregates",

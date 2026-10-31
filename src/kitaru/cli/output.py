@@ -250,6 +250,13 @@ def emit_event(event: str, item: Any = None) -> None:
             },
         )
         return
+    if event == "diagnostics" and isinstance(item, dict):
+        warnings = item.get("warnings", [])
+        for warning in warnings:
+            print(f"Warning: {redact(warning)}", file=context.stdout, flush=True)
+        if not warnings:
+            print("Worker coverage restored.", file=context.stdout, flush=True)
+        return
     suffix = "" if item is None else f": {_display_value(redact_data(item))}"
     print(f"{event}{suffix}", file=context.stdout, flush=True)
 

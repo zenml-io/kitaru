@@ -45,6 +45,7 @@ from kitaru.cli.skill_discovery import (
     get_kitaru_skill_status,
     select_visible_skill_names,
 )
+from kitaru.cli.task_diagnostics import get_task_diagnostics
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.config import (
     DIRECTORY_MODE,
@@ -157,6 +158,12 @@ async def status(
             warnings.append(
                 "The server requires authentication but no credential is available."
             )
+        task_diagnostics = None
+        if live_workers is not None:
+            task_diagnostics, task_warnings = await get_task_diagnostics(
+                client, timeout=timeout
+            )
+            warnings.extend(task_warnings)
         compatibility = _compatibility(info.version)
         compatibility_warning = _compatibility_warning(compatibility)
         if compatibility_warning is not None:
@@ -173,6 +180,9 @@ async def status(
             if live_workers is not None
             else None,
             "live_workers": live_workers,
+            "task_diagnostics": task_diagnostics.model_dump(mode="json")
+            if task_diagnostics
+            else None,
         }
         return CommandResult(item=item, warnings=warnings)
     finally:
