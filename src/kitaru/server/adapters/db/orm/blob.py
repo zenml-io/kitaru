@@ -66,6 +66,25 @@ class BlobORM(UUIDPrimaryKeyMixin, Base):
     stored_in: Mapped[str] = mapped_column(String(16))
 
     @classmethod
+    def column_values(cls, blob: Blob) -> dict[str, object]:
+        """Map a domain blob to its column values, id included.
+
+        Args:
+            blob: Blob to store.
+
+        Returns:
+            Column values keyed by column name, the timestamp left unset.
+        """
+        return {
+            "id": blob.id,
+            "owner_id": blob.owner_id,
+            "sha256": blob.sha256,
+            "size": blob.size,
+            "media_type": blob.media_type,
+            "stored_in": blob.stored_in.value,
+        }
+
+    @classmethod
     def from_domain(cls, blob: Blob) -> "BlobORM":
         """Build a row from a domain blob.
 
@@ -75,14 +94,7 @@ class BlobORM(UUIDPrimaryKeyMixin, Base):
         Returns:
             Row without its timestamp set.
         """
-        return cls(
-            id=blob.id,
-            owner_id=blob.owner_id,
-            sha256=blob.sha256,
-            size=blob.size,
-            media_type=blob.media_type,
-            stored_in=blob.stored_in.value,
-        )
+        return cls(**cls.column_values(blob))
 
     def to_domain(self) -> Blob:
         """Build a domain blob from this row.

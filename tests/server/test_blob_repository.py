@@ -144,6 +144,46 @@ async def test_create_same_content_different_media_type_creates_second_row(
     assert first.media_type == "text/plain"
 
 
+async def test_create_many_stores_new_blobs_by_hash_and_media_type(
+    setup: Setup,
+) -> None:
+    """Store every new blob, returning each keyed by (sha256, media_type)."""
+    repository, owner_id = setup
+    text_blob = _blob(owner_id, b"same")
+    json_blob = _blob(owner_id, b"same").model_copy(
+        update={"id": uuid.uuid4(), "media_type": "application/json"}
+    )
+    other_blob = _blob(None, b"other")
+
+    stored = await repository.create_many([text_blob, json_blob, other_blob])
+
+    assert set(stored) == {
+        (blob.sha256, blob.media_type) for blob in (text_blob, json_blob, other_blob)
+    }
+    for blob in (text_blob, json_blob, other_blob):
+        created = stored[(blob.sha256, blob.media_type)]
+        assert created.created is not None
+        assert created.model_copy(update={"created": None}) == blob
+        assert await repository.get(blob.id) == created
+
+
+async def test_create_many_returns_the_stored_row_for_a_known_key(
+    setup: Setup,
+) -> None:
+    """Return the stored row unchanged in place of a duplicate's new row."""
+    repository, owner_id = setup
+    existing, _ = await repository.create(_blob(owner_id, b"same"))
+    duplicate = _blob(None, b"same")
+    fresh = _blob(None, b"fresh")
+
+    stored = await repository.create_many([duplicate, fresh])
+
+    assert stored[(existing.sha256, existing.media_type)] == existing
+    assert stored[(fresh.sha256, fresh.media_type)].id == fresh.id
+    with pytest.raises(BlobNotFound):
+        await repository.get(duplicate.id)
+
+
 async def test_get(setup: Setup) -> None:
     """Load a stored blob by id."""
     repository, owner_id = setup

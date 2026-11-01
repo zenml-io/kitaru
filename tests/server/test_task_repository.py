@@ -234,6 +234,24 @@ async def test_create_many_empty(setup: Setup) -> None:
     assert await setup.tasks.create_many([]) == []
 
 
+async def test_create_many_rejects_a_repeated_evaluator_pair(setup: Setup) -> None:
+    """The (job_id, input_session_id, plugin_version_id) key backstops a batch."""
+    tasks: list[Task] = [
+        EvaluationTask(
+            job_id=setup.job_id,
+            plugin_version_id=setup.plugin_version_id,
+            input_session_id=setup.session_id,
+        )
+        for _ in range(2)
+    ]
+    with pytest.raises(
+        DuplicateEvaluationTask,
+        match=f"session {setup.session_id} and evaluator version "
+        f"{setup.plugin_version_id}",
+    ):
+        await setup.tasks.create_many(tasks)
+
+
 async def test_get_not_found(setup: Setup) -> None:
     """Raise for an unknown task id."""
     missing_id = uuid.uuid4()
