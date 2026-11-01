@@ -65,6 +65,26 @@ def resolve_indexed_nodes(nodes: Any) -> list[dict[str, Any]]:
     return resolved
 
 
+def parse_record(value: dict[str, Any]) -> ImportedSession:
+    """Validate one decoded JSONL record as a session with flat indexed nodes.
+
+    Args:
+        value: Decoded JSONL record.
+
+    Raises:
+        ValueError: The record or its nodes are invalid.
+        SessionImportError: The node tree is invalid.
+
+    Returns:
+        Imported session.
+    """
+    if "nodes" in value:
+        value = {**value, "nodes": resolve_indexed_nodes(value["nodes"])}
+    session = ImportedSession.model_validate(value)
+    flatten_nodes(session.nodes)
+    return session
+
+
 def parse(
     content: bytes, params: dict[str, Any]
 ) -> Iterator[ImportedSession | ImportFailure]:
@@ -95,10 +115,7 @@ def parse(
                 raise ValueError("record must be a JSON object")
             raw_external_id = value.get("external_id")
             external_id = str(raw_external_id) if raw_external_id is not None else None
-            if "nodes" in value:
-                value = {**value, "nodes": resolve_indexed_nodes(value["nodes"])}
-            session = ImportedSession.model_validate(value)
-            flatten_nodes(session.nodes)
+            session = parse_record(value)
             if _rate_hit(session.external_id, "import-fail", fail_line_rate):
                 yield ImportFailure(
                     line=line_number,

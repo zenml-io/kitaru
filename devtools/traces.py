@@ -8,7 +8,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from importer import resolve_indexed_nodes
+from importer import parse_record
 from simulation import (
     BASE_STARTED_AT,
     FRAMEWORK,
@@ -19,7 +19,6 @@ from simulation import (
 )
 
 from kitaru.api_models.v1.session_node import SessionNodeCreateRequest
-from kitaru.task.importer import ImportedSession
 
 MALFORMED_LINES = (
     '{"external_id": "trace-bad-json", "inputs": {"question": ',
@@ -39,7 +38,7 @@ def to_indexed_nodes(nodes: list[SessionNodeCreateRequest]) -> list[dict[str, An
     indexes = {node.external_id: index for index, node in enumerate(nodes)}
     return [
         {
-            "index": indexes[node.external_id],
+            "index": index,
             "parent_index": (
                 None
                 if node.parent_external_id is None
@@ -47,7 +46,7 @@ def to_indexed_nodes(nodes: list[SessionNodeCreateRequest]) -> list[dict[str, An
             ),
             **node.model_dump(mode="json", exclude={"parent_external_id"}),
         }
-        for node in nodes
+        for index, node in enumerate(nodes)
     ]
 
 
@@ -73,9 +72,7 @@ async def build_trace(config: SimulationConfig, index: int) -> dict[str, Any]:
         "nodes": to_indexed_nodes(simulated.nodes),
     }
     # Reject schema drift at generation time instead of at import time.
-    ImportedSession.model_validate(
-        {**record, "nodes": resolve_indexed_nodes(record["nodes"])}
-    )
+    parse_record(record)
     return record
 
 
