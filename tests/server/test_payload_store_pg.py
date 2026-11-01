@@ -159,10 +159,12 @@ async def test_offload_registers_new_blobs_in_one_statement(
     with capture_statements(engine) as statements:
         await store.offload(payloads, owner.id)
 
-    # One registry read, one content write, one registry write.
+    # One registry read, one content write, one registry write in a savepoint.
     assert Counter(statement.split()[0] for statement in statements) == {
         "SELECT": 1,
         "INSERT": 2,
+        "SAVEPOINT": 1,
+        "RELEASE": 1,
     }
     blob_count = (await session.execute(text("SELECT count(*) FROM blob"))).scalar()
     assert blob_count == 50

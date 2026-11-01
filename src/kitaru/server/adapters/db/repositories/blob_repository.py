@@ -102,14 +102,17 @@ class SQLBlobRepository(BaseSQLRepository[BlobORM]):
             .on_conflict_do_nothing(constraint=BLOB_SHA256_MEDIA_TYPE_UNIQUE_CONSTRAINT)
             .returning(BlobORM)
         )
-        # Passing the rows as parameters rather than through values() lets
-        # SQLAlchemy reuse one cached single-row compile and send the rows
-        # as a multi-row insert, instead of compiling a new statement per call.
-        rows = (
-            await self._session.scalars(
-                statement, [BlobORM.column_values(blob) for blob in ordered]
-            )
-        ).all()
+        # ON CONFLICT covers only the content key, so a savepoint keeps the
+        # surrounding transaction usable when another constraint, such as the
+        # owner foreign key, rejects the batch. Passing the rows as parameters
+        # rather than through values() lets SQLAlchemy reuse one cached
+        # single-row compile and send the rows as one multi-row insert.
+        async with self._session.begin_nested():
+            rows = (
+                await self._session.scalars(
+                    statement, [BlobORM.column_values(blob) for blob in ordered]
+                )
+            ).all()
         stored = {(row.sha256, row.media_type): row.to_domain() for row in rows}
         conflicted = [
             (blob.sha256, blob.media_type)

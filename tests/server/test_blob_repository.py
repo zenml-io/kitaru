@@ -18,6 +18,7 @@ import uuid
 from collections.abc import AsyncGenerator
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from conftest import pg_session, pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.job import JobKind, JobStatus
@@ -182,6 +183,23 @@ async def test_create_many_returns_the_stored_row_for_a_known_key(
     assert stored[(fresh.sha256, fresh.media_type)].id == fresh.id
     with pytest.raises(BlobNotFound):
         await repository.get(duplicate.id)
+
+
+async def test_create_many_keeps_the_transaction_usable_after_a_rejected_batch() -> (
+    None
+):
+    """Leave the transaction usable when a constraint besides the key rejects."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        repository = SQLBlobRepository(session)
+        with pytest.raises(IntegrityError):
+            await repository.create_many([_blob(uuid.uuid4(), b"orphan")])
+
+        kept = _blob(owner.id, b"kept")
+        stored = await repository.create_many([kept])
+        assert stored[(kept.sha256, kept.media_type)].id == kept.id
 
 
 async def test_get(setup: Setup) -> None:
