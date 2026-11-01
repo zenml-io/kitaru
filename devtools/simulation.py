@@ -12,6 +12,7 @@ from typing import Any, Protocol
 
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import (
+    NodeLink,
     NodeStatus,
     NodeType,
     SessionNodeCreateRequest,
@@ -22,6 +23,7 @@ MODEL_PROVIDER = "kitaru-dummy"
 FRAMEWORK = "kitaru-dummy"
 SYSTEM_PROMPT = "You are a research assistant. Answer using the available tools."
 SUBAGENT_ID = "dummy-researcher"
+SOURCE_PARENT_LINK_KIND = "source_parent"
 
 BASE_STARTED_AT = datetime(2026, 8, 1, tzinfo=UTC)
 
@@ -170,6 +172,11 @@ def _duration_ms(trace_id: str, node_index: int) -> int:
     return 40 + _digest_int([trace_id, node_index, "ms"], 860)
 
 
+def _format_node_id(trace_id: str, node_index: int) -> str:
+    """Format the external id of a node from its simulation index."""
+    return f"{trace_id}-node-{node_index}"
+
+
 def build_session_inputs(config: SimulationConfig, index: int) -> dict[str, Any]:
     """Build deterministic session inputs for one generated session."""
     rng = random.Random(f"{config.seed}:{index}")
@@ -274,10 +281,17 @@ def _llm_node(
     """Build one dummy LLM call node."""
     failed = error is not None
     return SessionNodeCreateRequest(
-        index=index,
-        parent_index=parent_index,
-        secondary_parent_indexes=secondary_parent_indexes or [],
-        external_id=f"{trace_id}-node-{index}",
+        external_id=_format_node_id(trace_id, index),
+        parent_external_id=(
+            None if parent_index is None else _format_node_id(trace_id, parent_index)
+        ),
+        links=[
+            NodeLink(
+                external_id=_format_node_id(trace_id, source),
+                kind=SOURCE_PARENT_LINK_KIND,
+            )
+            for source in secondary_parent_indexes or []
+        ],
         trace_id=trace_id,
         node_type=NodeType.LLM_CALL,
         name=name,
@@ -367,9 +381,8 @@ async def simulate_session(
         """Build one dummy tool call node."""
         failed = error is not None or (outcome is not None and outcome.failed)
         return SessionNodeCreateRequest(
-            index=index,
-            parent_index=parent_index,
-            external_id=f"{trace_id}-node-{index}",
+            external_id=_format_node_id(trace_id, index),
+            parent_external_id=_format_node_id(trace_id, parent_index),
             trace_id=trace_id,
             node_type=NodeType.TOOL_CALL,
             name=tool_name,
@@ -476,9 +489,8 @@ async def simulate_session(
         if span_index is not None and span_started is not None:
             nodes.append(
                 SessionNodeCreateRequest(
-                    index=span_index,
-                    parent_index=plan_index,
-                    external_id=f"{trace_id}-node-{span_index}",
+                    external_id=_format_node_id(trace_id, span_index),
+                    parent_external_id=_format_node_id(trace_id, plan_index),
                     trace_id=trace_id,
                     node_type=NodeType.SPAN,
                     name="gather-context",
@@ -501,9 +513,8 @@ async def simulate_session(
             objective = f"Deep dive into {topic} anomalies."
             nodes.append(
                 SessionNodeCreateRequest(
-                    index=subagent_index,
-                    parent_index=plan_index,
-                    external_id=f"{trace_id}-node-{subagent_index}",
+                    external_id=_format_node_id(trace_id, subagent_index),
+                    parent_external_id=_format_node_id(trace_id, plan_index),
                     trace_id=trace_id,
                     node_type=NodeType.SUBAGENT_CALL,
                     name="delegate-research",
@@ -566,7 +577,8 @@ async def simulate_session(
         previous_respond_index = respond_index
         answer = respond_llm.text
 
-    nodes.sort(key=lambda node: node.index)
+    positions = {_format_node_id(trace_id, i): i for i in range(node_counter)}
+    nodes.sort(key=lambda node: positions[node.external_id])
     failed = session_error is not None
     outputs = (
         None
