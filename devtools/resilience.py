@@ -23,7 +23,9 @@ from stack import (
 )
 
 from fixtures import register_agent
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.session import SessionListParams, SessionResponse
 from kitaru.api_models.v1.session_run import SessionRunCreateRequest
 from kitaru.api_models.v1.task import TaskResponse, TaskStatus
 from kitaru.client.api_client import KitaruAPIClient
@@ -165,6 +167,14 @@ class ScenarioContext:
             tasks.extend(page.items)
         return tasks
 
+    async def find_result_session(self, task: TaskResponse) -> SessionResponse | None:
+        """Fetch the session linked to a task as its result, if any."""
+        params = SessionListParams(
+            filter=FilterCondition(field="task_id", op=FilterOp.EQ, value=str(task.id))
+        )
+        page = await self.client.sessions.list(params)
+        return page.items[0] if page.items else None
+
     def worker_log_tail(self, lines: int = 10) -> str:
         """Render the last lines of every worker log."""
         parts: list[str] = []
@@ -228,9 +238,10 @@ async def scenario_worker_crash(ctx: ScenarioContext) -> None:
         "no task abandoned",
         all(task.status != TaskStatus.ABANDONED for task in tasks),
     )
+    sessions = [await ctx.find_result_session(task) for task in tasks]
     ctx.check(
         "every task has a result session",
-        all(task.result_session_id is not None for task in tasks),
+        all(session is not None for session in sessions),
     )
 
 
