@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Fetch up to three sessions ahead while the current one is profiled, so post-import analysis waits on the server far less. Sessions are still profiled in import order and the first failure in that order is still the one reported, but up to four full sessions are now held in memory at once instead of one.
+- Measure the JSON size of payload strings with the standard library encoder instead of a per-character loop, roughly halving profiling CPU without changing any result.
+- Require Kitaru 0.27.0 or later, which provides the ordered bounded fetching the analyzer now uses.
+
 ## 0.2.0 - 2026-10-30
 
 - Count explicit tool requests in LLM output messages when a session has no separate tool nodes, label the fallback as requests, and exclude incomplete request scans from the distribution.
