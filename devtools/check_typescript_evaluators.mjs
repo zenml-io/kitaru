@@ -23,9 +23,7 @@ await runEvaluator(
             ...view.session.inputs.messages,
             { role: "assistant", content: view.session.outputs.text },
           ],
-          tools: view.nodes
-            .filter((node) => node.node_type === "tool_call")
-            .sort((a, b) => a.index - b.index),
+          tools: view.nodes.filter((node) => node.node_type === "tool_call"),
         },
         output: view.session.outputs,
       };

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Set `output_text_selector` on model-call nodes to the response's output text or refusal part when it has exactly one, and point text and reasoning selectors inside the truncation wrapper of shortened strings so they still resolve to text.
+
 ## 0.4.1 - 2026-10-30
 
 - Support OpenAI Agents SDK 0.23 and 0.24.
