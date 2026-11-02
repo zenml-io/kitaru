@@ -3,9 +3,8 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Offline deterministic evaluators for materialized Kitaru sessions.
 
-This module is uploaded as one script-plugin source file. Keep every
-score-affecting helper in this file and limit imports to the standard library
-and Kitaru's evaluator contract models.
+Score-affecting helpers live here; bounded explanation formatting lives in
+the sibling finding_evidence module.
 """
 
 import hashlib
@@ -32,6 +31,7 @@ from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType, SessionNodeResponse
 from kitaru.task.evaluator import SessionView
+from kitaru_evaluator.finding_evidence import format_finding_evidence
 
 _EVIDENCE_LIMIT = 20
 _RESULT_VALUE_MAX_BYTES = 64_000
@@ -178,11 +178,11 @@ def _finding_result(
     *,
     max_score: int | None = None,
 ) -> EvaluationResult:
-    """Count localized findings against an optional opportunity total."""
+    """Count localized findings and retain a bounded sample of their details."""
     return _float_result(
         name,
         len(findings),
-        explanation,
+        format_finding_evidence(findings, explanation),
         max_score=max_score,
     )
 

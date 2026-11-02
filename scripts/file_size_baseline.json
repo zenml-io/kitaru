@@ -28,7 +28,7 @@
   "plugins/tests/importers/fuzz_strategies.py": 1008,
   "plugins/tests/importers/test_langfuse.py": 1473,
   "src/kitaru/cli/local_runtime.py": 1057,
-  "src/kitaru/cli/registration.py": 1032,
+  "src/kitaru/cli/registration.py": 1010,
   "tests/cli/test_auth.py": 1189,
   "tests/cli/test_local_runtime.py": 1187,
   "tests/cli/test_sessions.py": 1920,
