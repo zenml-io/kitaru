@@ -162,6 +162,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
             {
                 "SessionNodeCreateRequest",
                 "SessionNodeBatchRequest",
+                "SessionIngestRequest",
                 "SessionNodeListParams",
                 "SessionNodeResponse",
                 "SessionWithNodesResponse",

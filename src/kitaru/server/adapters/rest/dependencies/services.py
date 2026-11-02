@@ -132,6 +132,9 @@ from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.application.services.server_analytics import (
     ServerAnalytics,
 )
+from kitaru.server.application.services.session_ingestion_service import (
+    SessionIngestionService,
+)
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
 )
@@ -472,6 +475,22 @@ def get_session_node_service(
         task_repository=SQLTaskRepository(session),
         payload_store=payload_store,
     )
+
+
+def get_session_ingestion_service(
+    sessions: Annotated[SessionService, Depends(get_session_service)],
+    nodes: Annotated[SessionNodeService, Depends(get_session_node_service)],
+) -> SessionIngestionService:
+    """Return the atomic session ingestion service.
+
+    Args:
+        sessions: Session service for the current request.
+        nodes: Node service for the current request.
+
+    Returns:
+        Ingestion service sharing the request transaction.
+    """
+    return SessionIngestionService(sessions, nodes)
 
 
 def get_cohort_service(

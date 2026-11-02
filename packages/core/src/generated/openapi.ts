@@ -3197,6 +3197,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Session
+         * @description Create a session and all its initial nodes atomically.
+         *
+         *     Clients observe HTTP 201 on success, 409 for an existing source identity,
+         *     and 422 on invalid input. A node failure rolls back the session and all
+         *     initial nodes.
+         *
+         *     Args:
+         *         body: Session and complete initial nodes.
+         *         service: Session ingestion service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Created session with its node rollups.
+         */
+        post: operations["ingest_session_api_v1_sessions_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{session_id}": {
         parameters: {
             query?: never;
@@ -8923,6 +8955,19 @@ export interface components {
              * @description Evaluations to merge into the session.
              */
             evaluations: components["schemas"]["EvaluationResult"][];
+        };
+        /**
+         * SessionIngestRequest
+         * @description Session creation with all initial nodes in one transaction.
+         */
+        SessionIngestRequest: {
+            /**
+             * Nodes
+             * @description Complete initial nodes, in any order.
+             */
+            nodes: components["schemas"]["SessionNodeCreateRequest"][];
+            /** @description Session to create. */
+            session: components["schemas"]["SessionCreateRequest"];
         };
         /**
          * SessionNodeBatchRequest
@@ -19742,6 +19787,95 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["SessionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    ingest_session_api_v1_sessions_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionIngestRequest"];
             };
         };
         responses: {
