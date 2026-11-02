@@ -1,1 +1,0 @@
-- Avoid uninformative post-import insight recommendations for uniform activity and single-model inventories, and keep unknown tool activity distinct from recorded zero counts.
