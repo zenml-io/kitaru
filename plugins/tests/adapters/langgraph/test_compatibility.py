@@ -332,6 +332,10 @@ def test_real_langchain_factory_is_supported() -> None:
     assert main.supports(CapabilityOperation.OVERRIDE_MODEL)
 
 
+def _get_langgraph_version() -> tuple[int, ...]:
+    return tuple(int(part) for part in version("langgraph").split(".")[:3])
+
+
 @pytest.mark.parametrize("async_run", [False, True])
 def test_real_deep_agent_factory_runs_through_runner(
     fake_client: Any, async_run: bool
@@ -396,7 +400,15 @@ def test_real_deep_agent_factory_runs_through_runner(
         node for node in nodes if node.name == "PatchToolCallsMiddleware.before_agent"
     ]
     assert middleware_spans
-    assert all(node.inputs == {} for node in middleware_spans)
+    if _get_langgraph_version() >= (1, 2, 19):
+        # LangGraph 1.2.19 applies trace policies only to LangChain tracers, so
+        # Kitaru's callback receives the hook's real state.
+        assert all(
+            node.inputs["messages"][0]["content"] == "17 + 25?"
+            for node in middleware_spans
+        )
+    else:
+        assert all(node.inputs == {} for node in middleware_spans)
     assert all(
         node.inputs not in (None, {})
         for node in nodes
