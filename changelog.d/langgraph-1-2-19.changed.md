@@ -1,0 +1,1 @@
+- `kitaru-langgraph` supports LangGraph 1.2.19, where middleware span inputs reach Kitaru instead of being omitted by trace policies, so Deep Agents built-in middleware spans record their real inputs.

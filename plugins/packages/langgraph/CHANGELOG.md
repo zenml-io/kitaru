@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Support LangGraph 1.2.19, which passes middleware span inputs to Kitaru instead of omitting them through trace policies.
+
 ## 0.3.0 - 2026-10-08
 
 - Serialize baseline history lookups per cache key so identical tool calls dispatched in parallel replay successive recorded occurrences instead of all replaying the first one.
