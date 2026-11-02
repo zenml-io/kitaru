@@ -1,0 +1,1 @@
+- `kitaru-claude-agent-sdk` now sets `output_text_selector` on model-call nodes whose turn has exactly one text block, so `kitaru session read`, the dashboard, and evaluators read Claude's reply text instead of the raw output JSON.

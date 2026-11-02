@@ -195,8 +195,8 @@ def test_mixed_model_evidence_counts_only_unresolved_pairs() -> None:
         assert result.max_score == 3
         assert result.passed is None
         assert result.explanation is not None
-        assert '"index": 2' in result.explanation
-        assert '"requested": "requested"' in result.explanation
+        assert '"index":2' in result.explanation
+        assert '"requested":"requested"' in result.explanation
         assert _RESOURCE_MODEL not in result.explanation
 
 

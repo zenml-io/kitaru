@@ -71,5 +71,5 @@ def describe_model_name_differences(differences: list[dict[str, Any]]) -> str:
         "Unresolved recorded-name differences; model equivalence is unknown. "
         f"Evidence ({len(evidence)} of {len(differences)} calls; "
         "identifiers limited to 120 characters): "
-        + json.dumps(evidence, ensure_ascii=False)
+        + json.dumps(evidence, separators=(",", ":"), ensure_ascii=False)
     )

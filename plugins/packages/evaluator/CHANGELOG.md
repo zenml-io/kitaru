@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Recognize the Google `gemini-3-flash-preview` / `models/gemini-3-flash-preview` identifier pair in LLM signals and requested-model policies. Preserve unresolved name differences as numeric findings with bounded evidence and an inconclusive policy verdict; exact model and provider allowlists remain unchanged.
+- Include bounded node-specific evidence in diagnostic finding explanations while preserving numeric scores and scales.
 
 ## 0.2.1 - 2026-10-08
 

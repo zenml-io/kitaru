@@ -1,0 +1,1 @@
+- Preserve unknown or incomplete token usage in session totals instead of reporting zero, including historical sessions and replacements of recorded nodes.
