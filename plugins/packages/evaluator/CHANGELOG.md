@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Include bounded node-specific evidence in diagnostic finding explanations while preserving numeric scores and scales.
+- Add configured numeric rules to `tool-policy` for recorded tool inputs and outputs, with decimal comparisons, optional conditions on the same call, and inconclusive results when required evidence is unavailable.
 
 ## 0.2.1 - 2026-10-08
 
