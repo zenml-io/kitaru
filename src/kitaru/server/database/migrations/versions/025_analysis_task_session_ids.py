@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Store the session list of an analysis task.
 
-Revision ID: 024_analysis_task_session_ids
-Revises: 023_insight_task_id_index
+Revision ID: 025_analysis_task_session_ids
+Revises: 024_token_completeness
 Create Date: 2026-10-30 12:00:00.000000
 
 """
@@ -24,8 +24,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = "024_analysis_task_session_ids"
-down_revision = "023_insight_task_id_index"
+revision = "025_analysis_task_session_ids"
+down_revision = "024_token_completeness"
 branch_labels = None
 depends_on = None
 
