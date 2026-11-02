@@ -39,6 +39,8 @@ const canonicalPackages = [
   "kitaru-mastra-compat-1.77",
   "kitaru-mastra-compat-1.78",
   "kitaru-mastra-compat-1.79",
+  "kitaru-mastra-compat-1.80",
+  "kitaru-mastra-compat-1.81",
   "kitaru-vercel-ai",
   ...examples,
 ];
