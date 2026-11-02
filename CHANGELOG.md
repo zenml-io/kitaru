@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.27.4] - 2026-11-02
+
+### Added
+
+- Added `kitaru insight create --insight-file PATH`, which reads one insight JSON object or an array of them from a UTF-8 file, so a whole batch can be created without passing each insight as a shell argument.
+- Add configured numeric rules to the built-in `tool-policy` evaluator for recorded tool inputs and outputs, including decimal comparisons, optional conditions on the same call, and inconclusive results when required evidence is unavailable.
+- `kitaru-claude-agent-sdk` now sets `output_text_selector` on model-call nodes whose turn has exactly one text block, so the dashboard and evaluators read Claude's reply text instead of the raw output JSON.
+- `kitaru-langgraph` now sets `output_text_selector` on model-call nodes that returned exactly one generation with text, pointing at LangChain's joined reply text.
+- `@zenml-io/kitaru-mastra` now sets `output_text_selector` on agent step and structured-output model-call nodes, and on processor classifier calls whose reply is a single text part.
+- `kitaru-openai-agents` now sets `output_text_selector` on model-call nodes whose response has exactly one output text or refusal part. Reply and reasoning selectors on strings that were shortened for recording now point at the kept text inside the truncation wrapper.
+- `@zenml-io/kitaru-vercel-ai` now sets `output_text_selector` on model-call nodes to the step's joined reply text. Adapter authors can set the same field through `NormalizedModelStep.outputTextSelector` and the new `replyTextSelector()` helper in `@zenml-io/kitaru/adapter`.
+
+### Changed
+
+- Bundle Kitaru UI `0.5.2`, including the companion frontend changes for insights without an import and unknown token totals.
+- Update the default post-import insights analyzers to `0.3.0` and built-in evaluators to `0.3.0`. Post-import analysis uses ordered bounded session fetching and faster payload profiling while preserving analysis order.
+
+### Fixed
+
+- Registration receipts refresh the parent after creating an agent or plugin version, and preserve a successful result with a warning if that refresh fails.
+- `kitaru status` resolves bundled dashboard URLs consistently with investigation review links.
+- Plain-text root help summarizes installed skills instead of dumping local discovery paths, and investigation create/update help explains the allowed name syntax.
+- Avoid uninformative post-import insight recommendations for uniform activity and single-model inventories, and keep unknown tool activity distinct from recorded zero counts.
+- Recognize an explicitly supported Google model-name alias pair in LLM signals and requested-model policies, preserve evidence for unresolved name differences, and leave their model-match verdict inconclusive instead of reporting a model failure.
+- A request whose rejected input holds an infinite or NaN number, such as `filter=Infinity` on a list endpoint or `1e999` in a JSON body, now gets HTTP 422 instead of HTTP 500.
+- Fixed failed session imports blocking later retries by committing each imported session and its initial nodes atomically.
+- The bundled sample sessions now select every thinking part of a model output as reasoning, instead of only the last one.
+- Preserve unknown or incomplete token usage in session totals instead of reporting zero, including historical sessions and replacements of recorded nodes.
+
 ## [0.27.3] - 2026-10-30
 
 ### Added
