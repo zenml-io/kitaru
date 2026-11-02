@@ -2651,7 +2651,7 @@
       "openWorldHint": true,
       "readOnlyHint": true
     },
-    "description": "Read Kitaru sessions, runs, jobs, and bounded child pages.",
+    "description": "Read Kitaru sessions, runs, jobs, and bounded child pages.\n\nTo read whole sessions as text rather than node pages, use\n`kitaru_session_read`.",
     "inputSchema": {
       "$defs": {
         "ActivityGetRequest": {
@@ -6047,6 +6047,540 @@
         "ok"
       ],
       "title": "ActivityReadResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Read whole sessions as compact transcripts, one node per line.\n\nPrefer this over paging `kitaru_activity_read` session nodes with payloads.\n\nEach model call shows only its new text, tool calls show short arguments and\nresults, errors are never cut, and every cut ends in `[+N chars]`. Step\nnumbers are node positions; pass `node` with `full` to read one node whole.",
+    "inputSchema": {
+      "$defs": {
+        "SessionReadRequest": {
+          "additionalProperties": false,
+          "description": "Read up to ten sessions as compact transcripts.",
+          "properties": {
+            "full": {
+              "default": false,
+              "description": "Keep every field uncut.",
+              "title": "Full",
+              "type": "boolean"
+            },
+            "max_chars": {
+              "default": 300,
+              "description": "Longest text kept per field before it is cut.",
+              "minimum": 1,
+              "title": "Max Chars",
+              "type": "integer"
+            },
+            "node": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Show only the node at this zero-based position; needs one session.",
+              "title": "Node"
+            },
+            "reasoning": {
+              "default": false,
+              "description": "Include the visible reasoning of model calls.",
+              "title": "Reasoning",
+              "type": "boolean"
+            },
+            "session_ids": {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "maxItems": 10,
+              "minItems": 1,
+              "title": "Session Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "session_ids"
+          ],
+          "title": "SessionReadRequest",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/SessionReadRequest"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "session_read_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_session_read",
+    "outputSchema": {
+      "$defs": {
+        "NodeStatus": {
+          "description": "Session node status.",
+          "enum": [
+            "in_progress",
+            "completed",
+            "failed"
+          ],
+          "title": "NodeStatus",
+          "type": "string"
+        },
+        "NodeType": {
+          "description": "Kind of work a session node records.",
+          "enum": [
+            "llm_call",
+            "tool_call",
+            "subagent_call",
+            "span"
+          ],
+          "title": "NodeType",
+          "type": "string"
+        },
+        "SessionOrigin": {
+          "description": "How a session came to exist.",
+          "enum": [
+            "imported",
+            "recorded",
+            "replay"
+          ],
+          "title": "SessionOrigin",
+          "type": "string"
+        },
+        "SessionReadData": {
+          "additionalProperties": false,
+          "description": "Transcripts in request order.",
+          "properties": {
+            "transcripts": {
+              "items": {
+                "$ref": "#/$defs/SessionTranscript"
+              },
+              "title": "Transcripts",
+              "type": "array"
+            }
+          },
+          "required": [
+            "transcripts"
+          ],
+          "title": "SessionReadData",
+          "type": "object"
+        },
+        "SessionStatus": {
+          "description": "Session status.",
+          "enum": [
+            "in_progress",
+            "completed",
+            "failed"
+          ],
+          "title": "SessionStatus",
+          "type": "string"
+        },
+        "SessionTranscript": {
+          "additionalProperties": false,
+          "description": "Session header, shown steps, and whether any text was cut short.",
+          "properties": {
+            "cost": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cost"
+            },
+            "duration_seconds": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Duration Seconds"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            },
+            "final_output": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Final Output"
+            },
+            "framework": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Framework"
+            },
+            "imported_from": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Imported From"
+            },
+            "llm_call_count": {
+              "title": "Llm Call Count",
+              "type": "integer"
+            },
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            },
+            "node_count": {
+              "title": "Node Count",
+              "type": "integer"
+            },
+            "origin": {
+              "$ref": "#/$defs/SessionOrigin"
+            },
+            "request": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Request"
+            },
+            "session_id": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Started At"
+            },
+            "status": {
+              "$ref": "#/$defs/SessionStatus"
+            },
+            "steps": {
+              "items": {
+                "$ref": "#/$defs/TranscriptStep"
+              },
+              "title": "Steps",
+              "type": "array"
+            },
+            "system_prompt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System Prompt"
+            },
+            "tool_call_count": {
+              "title": "Tool Call Count",
+              "type": "integer"
+            },
+            "truncated": {
+              "title": "Truncated",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "session_id",
+            "name",
+            "status",
+            "origin",
+            "imported_from",
+            "framework",
+            "started_at",
+            "duration_seconds",
+            "cost",
+            "llm_call_count",
+            "tool_call_count",
+            "node_count",
+            "error",
+            "system_prompt",
+            "request",
+            "final_output",
+            "steps",
+            "truncated"
+          ],
+          "title": "SessionTranscript",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        },
+        "TranscriptStep": {
+          "additionalProperties": false,
+          "description": "One shown node of a session transcript.",
+          "properties": {
+            "duration_seconds": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Duration Seconds"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Error"
+            },
+            "index": {
+              "title": "Index",
+              "type": "integer"
+            },
+            "input": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Input"
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model"
+            },
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "node_id": {
+              "format": "uuid",
+              "title": "Node Id",
+              "type": "string"
+            },
+            "node_type": {
+              "$ref": "#/$defs/NodeType"
+            },
+            "output": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Output"
+            },
+            "reasoning": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reasoning"
+            },
+            "status": {
+              "$ref": "#/$defs/NodeStatus"
+            },
+            "system_prompt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "System Prompt"
+            }
+          },
+          "required": [
+            "index",
+            "node_id",
+            "node_type",
+            "name",
+            "status"
+          ],
+          "title": "TranscriptStep",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Typed session transcript result.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionReadData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "SessionReadResult",
       "type": "object"
     }
   },

@@ -57,6 +57,7 @@ from kitaru.mcp.models.failure_matrix import (
 from kitaru.mcp.models.management import CohortsManageRequest, ExperimentsManageRequest
 from kitaru.mcp.models.registry import RegistryReadRequest
 from kitaru.mcp.models.review import ReviewManageRequest, ReviewReadRequest
+from kitaru.mcp.models.sessions import SessionReadRequest, SessionReadResult
 from kitaru.mcp.models.workflows import (
     DeleteRequest,
     SessionImportRequest,
@@ -79,6 +80,7 @@ from kitaru.mcp.tools.experiments import handle_experiments_manage
 from kitaru.mcp.tools.failure_matrix import handle_failure_cell, handle_failure_matrix
 from kitaru.mcp.tools.registry import handle_registry_read
 from kitaru.mcp.tools.review import handle_review_manage, handle_review_read
+from kitaru.mcp.tools.sessions import handle_session_read
 from kitaru.mcp.tools.workflow_start import handle_workflow_start
 from kitaru.mcp.tools.workflows import handle_session_import
 
@@ -129,10 +131,31 @@ async def registry_read_tool(
 async def activity_read_tool(
     request: ActivityReadRequest, context: Context
 ) -> ActivityReadResult:
-    """Read Kitaru sessions, runs, jobs, and bounded child pages."""
+    """Read Kitaru sessions, runs, jobs, and bounded child pages.
+
+    To read whole sessions as text rather than node pages, use
+    `kitaru_session_read`.
+    """
     return cast(
         ActivityReadResult,
         await _invoke(context, request, ActivityReadResult, handle_activity_read),
+    )
+
+
+async def session_read_tool(
+    request: SessionReadRequest, context: Context
+) -> SessionReadResult:
+    """Read whole sessions as compact transcripts, one node per line.
+
+    Prefer this over paging `kitaru_activity_read` session nodes with payloads.
+
+    Each model call shows only its new text, tool calls show short arguments and
+    results, errors are never cut, and every cut ends in `[+N chars]`. Step
+    numbers are node positions; pass `node` with `full` to read one node whole.
+    """
+    return cast(
+        SessionReadResult,
+        await _invoke(context, request, SessionReadResult, handle_session_read),
     )
 
 
@@ -351,6 +374,13 @@ TOOL_SPECS = (
         _describe(activity_read_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         activity_read_tool,
+    ),
+    ToolSpec(
+        "kitaru_session_read",
+        CapabilityMode.READ_ONLY,
+        _describe(session_read_tool),
+        _annotations(read_only=True, destructive=False, idempotent=True),
+        session_read_tool,
     ),
     ToolSpec(
         "kitaru_review_read",
