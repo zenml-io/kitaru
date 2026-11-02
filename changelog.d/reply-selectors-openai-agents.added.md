@@ -1,0 +1,1 @@
+- `kitaru-openai-agents` now sets `output_text_selector` on model-call nodes whose response has exactly one output text or refusal part. Reply and reasoning selectors on strings that were shortened for recording now point at the kept text inside the truncation wrapper.
