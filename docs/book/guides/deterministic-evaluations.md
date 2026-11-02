@@ -47,7 +47,7 @@ The other five bundles produce pass or fail verdicts only for rules you supply:
 |---|---|
 | `kitaru/output-contract@1` | `expected` for exact non-null JSON equality; `required_paths` for RFC 6901 JSON Pointer presence; `type_requirements` mapping pointers to `null`, `boolean`, `number`, `integer`, `string`, `array`, or `object`. Supply at least one rule. |
 | `kitaru/resource-budget@1` | One or more inclusive non-negative ceilings: `max_duration_seconds`, `max_cost`, `max_total_tokens`, `max_nodes`, `max_llm_calls`, or `max_tool_calls`. Node and call-count ceilings must be integers. |
-| `kitaru/tool-policy@1` | One or more of `required_tools`, `forbidden_tools`, or `max_calls_per_tool`. Tool names are exact and case-sensitive. |
+| `kitaru/tool-policy@1` | One or more of `required_tools`, `forbidden_tools`, `max_calls_per_tool`, or `numeric_rules` over recorded tool inputs or outputs. Tool names are exact and case-sensitive. |
 | `kitaru/model-policy@1` | One or more of `allowed_models`, `allowed_providers`, or `require_requested_model_match`. Allowlists are exact and case-sensitive; requested/served comparisons also recognize explicitly supported provider-specific aliases. |
 | `kitaru/workflow-conformance@1` | Required `expected_tools` plus `mode`: `exact_order`, `in_order`, `contains_all`, or `exact_set`. |
 
@@ -71,9 +71,65 @@ Configured rules use conservative evidence semantics:
 
 Requested/served model comparisons preserve the original identifiers. Identical names match without provider metadata. The explicitly supported alias pair is `gemini-3-flash-preview` and `models/gemini-3-flash-preview`, in either direction, when the recorded provider is exactly `google`. Other differences, including different version suffixes or aliases without the required provider, remain unresolved recorded-name differences. Both `llm-call-signals` and `model-policy` count those differences and include bounded identifier evidence in the explanation; a difference alone does not prove that the wrong model executed. `require_requested_model_match` returns HOLD for unresolved differences or missing identifiers, and passes only for a terminal session with complete matching evidence. Use an exact `allowed_models` rule when you need to reject an unallowed served version. HOLD results are excluded from aggregate pass rates.
 
-## Understand result evidence
+## Check numeric values in recorded tool calls
 
-Every bundle emits `input_sha256` and `config_sha256`. The input hash covers the materialized session and node fields used across the deterministic catalog. The configuration hash covers normalized parameters for that evaluator. Use both values to tell whether two attempts analyzed the same fetched evidence with the same configuration.
+Add `numeric_rules` to `tool-policy` when a policy depends on a recorded amount or another numeric field. Each named rule selects an exact tool name, either `inputs` or `outputs`, an RFC 6901 JSON Pointer, a comparison operator, and a fixed numeric limit. Multiple rules run in one evaluator invocation and produce separate verdicts.
+
+For example, require every accepted refund to be at most 200:
+
+```bash
+kitaru session evaluate "$SESSION_ID" \
+  --evaluator kitaru/tool-policy@1 \
+  --evaluator-params 'kitaru/tool-policy@1={"numeric_rules":[{"name":"accepted_refund_ceiling","tool_name":"issue_refund","source":"outputs","path":"/amount","operator":"lte","limit":"200.00","when":{"source":"outputs","path":"/accepted","equals":true}}]}' \
+  --wait
+```
+
+The parameters in that command are:
+
+```json
+{
+  "numeric_rules": [
+    {
+      "name": "accepted_refund_ceiling",
+      "tool_name": "issue_refund",
+      "source": "outputs",
+      "path": "/amount",
+      "operator": "lte",
+      "limit": "200.00",
+      "when": {
+        "source": "outputs",
+        "path": "/accepted",
+        "equals": true
+      }
+    }
+  ]
+}
+```
+
+The optional `when` condition compares a Boolean at another pointer on the same call. Here, `accepted: true` selects the refund, and `accepted: false` excludes it. A completed tool execution alone does not prove that a business action was accepted. Reading a numeric value or a condition from `outputs` requires a completed tool call without a recorded error.
+
+To check attempted refunds instead, use `"source": "inputs"`, select the requested amount, and omit `when`. An input rule can identify an over-limit attempt even if the tool later fails or rejects the action.
+
+The operators have these boundaries:
+
+| Operator | Requirement |
+|---|---|
+| `lt` | Value is strictly less than the limit. |
+| `lte` | Value is less than or equal to the limit. |
+| `gt` | Value is strictly greater than the limit. |
+| `gte` | Value is greater than or equal to the limit. |
+
+Values and limits accept finite JSON numbers or ASCII decimal strings of at most 1,024 characters, including signed decimal and scientific notation. Strings cannot contain currency symbols, grouping commas, underscores, or surrounding whitespace. Comparisons use decimal arithmetic without rounding. Precision already lost when a producer recorded a floating-point number cannot be recovered. Comparisons do not convert currencies or units. Negative amounts are valid numbers, so add a separate `gt` rule with limit `"0"` when refunds must be positive.
+
+Each rule checks every matching call. One reliable violation fails the rule, even if a later call is within the limit, another call lacks evidence, or the session is unfinished. Otherwise, the rule passes only when the session is terminal and the required tool-name, condition, and numeric evidence is complete.
+
+Missing pointers, null values, Boolean amounts, malformed numbers, unavailable outputs, and missing or non-Boolean conditions produce HOLD. A tool call without a recorded name also prevents a pass because it might match the configured tool. A recorded opposite Boolean excludes a call without requiring its numeric value. If all matching calls are explicitly excluded, a terminal session with complete evidence can pass with zero checked calls. If no calls match the configured tool, the rule produces HOLD rather than inferring compliance from absent evidence.
+
+Pointers address the canonical payload directly, including an empty pointer for the whole payload and array indexes. The evaluator does not guess provider-specific envelopes or decode JSON stored inside strings. It does not sum repeated calls or compare fields from different calls. The fixed 200 limit in this example checks one declared ceiling. It does not enforce a category-specific refund policy whose threshold comes from another tool.
+
+Each rule emits a result named `numeric_rule.NAME`, where `NAME` is the configured rule name. Rule names must be unique, contain at most 64 ASCII letters, digits, underscores, or hyphens, and begin with a letter or underscore. Its structured `value` includes call counts and bounded evidence for violations and unavailable values. Exact observed amounts and limits remain decimal strings in the evidence. Invalid rule configuration fails the evaluator task instead of producing HOLD.
+
+## Understand result evidence
 
 Finding results use compact JSON in `value`:
 
@@ -89,7 +145,7 @@ Evidence uses node indexes or index windows. Most bundles retain at most 20 find
 
 If any structured result value would exceed 64,000 UTF-8 bytes, Kitaru retains its SHA-256 hash and original byte count instead of allowing the evaluator task to exceed the worker result limit. Verdicts are computed from the full evidence before this result encoding limit is applied.
 
-The exact-output rule retains SHA-256 hashes of the compared values instead of copying potentially large payloads into the evaluation result. The `passed` field still reflects exact canonical JSON equality.
+The exact-output result reports exact canonical JSON equality without copying the compared payloads into the evaluation result.
 
 The short-cycle detector examines tool-name cycles with periods from two through five and requires at least three repetitions. No cycle result means no cycle within those bounds, not that the trajectory contains no other repetition.
 
@@ -156,7 +212,7 @@ For larger sets, split the session IDs into chunks that satisfy the formula and 
 
 ## Current evidence limits
 
-The worker fetches the session and its nodes when an attempt runs. These reads are separate and the underlying records can change, so a retry can observe a later or internally mixed materialization. The hashes expose that difference, but they do not create an immutable snapshot. Repeatability also depends on a compatible Kitaru and Python worker runtime.
+The worker fetches the session and its nodes when an attempt runs. These reads are separate and the underlying records can change, so a retry can observe a later or internally mixed materialization. Evaluations do not create an immutable snapshot of the input evidence. Repeatability also depends on a compatible Kitaru and Python worker runtime.
 
 The current session view cannot distinguish an absent normalized output from an explicit JSON null. An observed null session output is therefore unavailable to `output-contract`, including when the expected value is null. A null tool result has the same ambiguity and is reported as a diagnostic rather than an integrity verdict.
 

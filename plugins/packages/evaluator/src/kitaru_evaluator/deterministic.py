@@ -1,20 +1,13 @@
 #  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
-"""Offline deterministic evaluators for materialized Kitaru sessions.
+"""Package-backed offline evaluators for materialized Kitaru sessions."""
 
-Score-affecting helpers live here, except model-name equivalence (model_names);
-bounded explanation formatting lives in the sibling finding_evidence module.
-"""
-
-import hashlib
 import heapq
-import json
-import math
 import uuid
 from collections import Counter
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import (
     MAX_EMAX,
     MIN_EMIN,
@@ -23,7 +16,6 @@ from decimal import (
     InvalidOperation,
     localcontext,
 )
-from enum import Enum
 from itertools import pairwise
 from typing import Any
 
@@ -31,90 +23,24 @@ from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType, SessionNodeResponse
 from kitaru.task.evaluator import SessionView
+from kitaru_evaluator.evidence import (
+    create_json_result,
+    format_decimal,
+    normalize_observed,
+    resolve_pointer,
+    serialize_json,
+)
 from kitaru_evaluator.finding_evidence import format_finding_evidence
 from kitaru_evaluator.model_names import (
     describe_model_name_differences,
     find_model_name_differences,
 )
+from kitaru_evaluator.numeric_rules import evaluate_numeric_rules
 
 _EVIDENCE_LIMIT = 20
-_RESULT_VALUE_MAX_BYTES = 64_000
-_UNAVAILABLE = {"$kitaru": "unavailable"}
 _UNSET = object()
 _JSON_TYPES = {"null", "boolean", "number", "integer", "string", "array", "object"}
 _WORKFLOW_MODES = {"exact_order", "in_order", "contains_all", "exact_set"}
-
-
-def _format_decimal(value: Decimal) -> str:
-    """Format a finite decimal without exponent or insignificant zeroes."""
-    if not value.is_finite():
-        raise ValueError("number must be finite")
-    formatted = format(value, "f")
-    if "." in formatted:
-        formatted = formatted.rstrip("0").rstrip(".")
-    if value == 0:
-        return "0"
-    return formatted
-
-
-def _format_datetime(value: datetime) -> str | dict[str, str]:
-    """Format an aware datetime in UTC, or mark a naive value unavailable."""
-    if value.tzinfo is None or value.utcoffset() is None:
-        return _UNAVAILABLE
-    return (
-        value.astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
-    )
-
-
-def _normalize_observed(value: Any) -> tuple[Any, bool]:
-    """Normalize observed evidence without failing on provider-specific values."""
-    if value is None or isinstance(value, (str, bool, int)):
-        return value, True
-    if isinstance(value, float):
-        if math.isfinite(value):
-            return value, True
-        return _UNAVAILABLE, False
-    if isinstance(value, Decimal):
-        if value.is_finite():
-            return _format_decimal(value), True
-        return _UNAVAILABLE, False
-    if isinstance(value, datetime):
-        normalized = _format_datetime(value)
-        return normalized, normalized is not _UNAVAILABLE
-    if isinstance(value, uuid.UUID):
-        return str(value), True
-    if isinstance(value, Enum):
-        return _normalize_observed(value.value)
-    if isinstance(value, (list, tuple)):
-        normalized_items: list[Any] = []
-        complete = True
-        for item in value:
-            normalized, available = _normalize_observed(item)
-            normalized_items.append(normalized)
-            complete = complete and available
-        return normalized_items, complete
-    if isinstance(value, dict):
-        if not all(isinstance(key, str) for key in value):
-            return _UNAVAILABLE, False
-        normalized_dict: dict[str, Any] = {}
-        complete = True
-        for key in sorted(value):
-            normalized, available = _normalize_observed(value[key])
-            normalized_dict[key] = normalized
-            complete = complete and available
-        return normalized_dict, complete
-    return _UNAVAILABLE, False
-
-
-def _canonical_json(value: Any) -> str:
-    """Serialize normalized JSON with the revision-1 encoding."""
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    )
 
 
 def _token_fields(tokens: Any) -> Any:
@@ -143,33 +69,6 @@ def _float_result(
         score=float(score),
         min_score=0.0,
         max_score=float(max_score) if max_score is not None else None,
-        explanation=explanation,
-        passed=passed,
-    )
-
-
-def _json_result(
-    name: str,
-    value: Any,
-    explanation: str,
-    *,
-    passed: bool | None = None,
-) -> EvaluationResult:
-    """Create a deterministic structured-string result."""
-    normalized, _ = _normalize_observed(value)
-    encoded = _canonical_json(normalized)
-    encoded_bytes = encoded.encode("utf-8")
-    if len(encoded_bytes) > _RESULT_VALUE_MAX_BYTES:
-        encoded = _canonical_json(
-            {
-                "$kitaru": "result_truncated",
-                "sha256": hashlib.sha256(encoded_bytes).hexdigest(),
-                "utf8_bytes": len(encoded_bytes),
-            }
-        )
-    return EvaluationResult(
-        name=name,
-        value=encoded,
         explanation=explanation,
         passed=passed,
     )
@@ -297,7 +196,7 @@ def _resource_value(value: Decimal | int | None) -> str:
         return "unavailable"
     if isinstance(value, int):
         return str(value)
-    return _format_decimal(value)
+    return format_decimal(value)
 
 
 def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
@@ -425,7 +324,7 @@ def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
                 "Nodes with both input and output payloads present.",
                 max_score=len(nodes),
             ),
-            _json_result(
+            create_json_result(
                 "recorded_counts",
                 {
                     "fetched_nodes": len(nodes),
@@ -469,56 +368,6 @@ def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
     return results
 
 
-def _decode_pointer_part(raw_part: str) -> str:
-    """Decode one RFC 6901 reference token and reject invalid escapes."""
-    decoded: list[str] = []
-    position = 0
-    while position < len(raw_part):
-        character = raw_part[position]
-        if character != "~":
-            decoded.append(character)
-            position += 1
-            continue
-        if position + 1 >= len(raw_part) or raw_part[position + 1] not in {"0", "1"}:
-            raise ValueError("JSON Pointer '~' escapes must be '~0' or '~1'")
-        decoded.append("~" if raw_part[position + 1] == "0" else "/")
-        position += 2
-    return "".join(decoded)
-
-
-def _decode_pointer_parts(pointer: str) -> list[str]:
-    """Validate and decode every token in an RFC 6901 JSON Pointer."""
-    if pointer == "":
-        return []
-    if not pointer.startswith("/"):
-        raise ValueError("JSON Pointer paths must be empty or start with '/'")
-    return [_decode_pointer_part(part) for part in pointer[1:].split("/")]
-
-
-def _resolve_pointer(document: Any, pointer: str) -> tuple[bool, Any]:
-    """Resolve an RFC 6901 JSON Pointer against normalized JSON evidence."""
-    current = document
-    for part in _decode_pointer_parts(pointer):
-        if isinstance(current, dict):
-            if part not in current:
-                return False, None
-            current = current[part]
-        elif isinstance(current, list):
-            if (
-                not part.isascii()
-                or not part.isdigit()
-                or (len(part) > 1 and part.startswith("0"))
-            ):
-                return False, None
-            index = int(part)
-            if index >= len(current):
-                return False, None
-            current = current[index]
-        else:
-            return False, None
-    return True, current
-
-
 def _validate_pointer_list(value: list[str] | None) -> list[str] | None:
     """Validate optional RFC 6901 pointers, including the empty root pointer."""
     if value is None:
@@ -532,7 +381,7 @@ def _validate_pointer_list(value: list[str] | None) -> list[str] | None:
     if len(set(value)) != len(value):
         raise ValueError("required_paths contains a duplicate value")
     for pointer in value:
-        _resolve_pointer({}, pointer)
+        resolve_pointer({}, pointer)
     return sorted(value)
 
 
@@ -574,12 +423,12 @@ def output_contract(
         ):
             raise ValueError("type_requirements contains an invalid JSON type")
         for path in type_requirements:
-            _resolve_pointer({}, path)
+            resolve_pointer({}, path)
 
-    normalized_output, output_complete = _normalize_observed(session.session.outputs)
+    normalized_output, output_complete = normalize_observed(session.session.outputs)
     normalized_expected: Any = None
     if expected is not _UNSET:
-        normalized_expected, expected_complete = _normalize_observed(expected)
+        normalized_expected, expected_complete = normalize_observed(expected)
         if not expected_complete:
             raise ValueError("expected must contain only finite JSON values")
     results: list[EvaluationResult] = []
@@ -597,7 +446,7 @@ def output_contract(
         matched = False
         passed = None
         if output_available:
-            matched = _canonical_json(normalized_output) == _canonical_json(
+            matched = serialize_json(normalized_output) == serialize_json(
                 normalized_expected
             )
             passed = matched
@@ -618,7 +467,7 @@ def output_contract(
             missing = [
                 path
                 for path in paths
-                if not _resolve_pointer(normalized_output, path)[0]
+                if not resolve_pointer(normalized_output, path)[0]
             ]
         results.append(
             _float_result(
@@ -635,7 +484,7 @@ def output_contract(
         mismatches: list[dict[str, str]] = []
         if output_available:
             for path, expected_type in sorted(type_requirements.items()):
-                found, value = _resolve_pointer(normalized_output, path)
+                found, value = resolve_pointer(normalized_output, path)
                 observed_type = _json_type(value) if found else "missing"
                 matches = observed_type == expected_type or (
                     expected_type == "number" and observed_type == "integer"
@@ -675,10 +524,10 @@ def _tool_identity(node: SessionNodeResponse) -> tuple[str, str] | None:
     """Return exact tool name and canonical input identity when available."""
     if node.tool_name is None or node.inputs is None:
         return None
-    normalized, complete = _normalize_observed(node.inputs)
+    normalized, complete = normalize_observed(node.inputs)
     if not complete:
         return None
-    return node.tool_name, _canonical_json(normalized)
+    return node.tool_name, serialize_json(normalized)
 
 
 def _cycle_findings(
@@ -777,7 +626,7 @@ def trajectory_signals(session: SessionView) -> list[EvaluationResult]:
                 _cycle_findings(calls, identities, positions),
                 "Repeated exact tool-call cycles.",
             ),
-            _json_result(
+            create_json_result(
                 "cycle_detector_bounds",
                 {"max_period": 5, "min_period": 2, "min_repetitions": 3},
                 "Revision-1 short-cycle detector bounds.",
@@ -887,7 +736,7 @@ def timing_profile(
             continue
         intervals.append((node.started_at, node.ended_at, node, duration))
     slowest = [
-        {"duration_seconds": _format_decimal(duration), "index": positions[node.id]}
+        {"duration_seconds": format_decimal(duration), "index": positions[node.id]}
         for _, _, node, duration in heapq.nsmallest(
             limit,
             intervals,
@@ -923,7 +772,7 @@ def timing_profile(
                 "Node records with both timing endpoints and a valid interval.",
                 max_score=len(nodes),
             ),
-            _json_result(
+            create_json_result(
                 "slowest_nodes",
                 {
                     "evidence": slowest,
@@ -1161,8 +1010,9 @@ def tool_policy(
     required_tools: list[str] | None = None,
     forbidden_tools: list[str] | None = None,
     max_calls_per_tool: dict[str, int] | None = None,
+    numeric_rules: list[dict[str, Any]] | None = None,
 ) -> list[EvaluationResult]:
-    """Apply exact case-sensitive rules to recorded tool names."""
+    """Apply exact tool-name, call-count, and numeric payload policies."""
     required = _validate_string_list(required_tools, "required_tools")
     forbidden = _validate_string_list(forbidden_tools, "forbidden_tools")
     if (
@@ -1185,7 +1035,12 @@ def tool_policy(
             max_calls_per_tool.get(name) == 0 for name in required
         ):
             raise ValueError("a required tool cannot have a maximum of zero calls")
-    if required is None and forbidden is None and max_calls_per_tool is None:
+    if (
+        required is None
+        and forbidden is None
+        and max_calls_per_tool is None
+        and numeric_rules is None
+    ):
         raise ValueError("at least one tool policy rule is required")
     maximums = dict(sorted((max_calls_per_tool or {}).items()))
     results: list[EvaluationResult] = []
@@ -1233,6 +1088,8 @@ def tool_policy(
                 passed=passed,
             )
         )
+    if numeric_rules is not None:
+        results.extend(evaluate_numeric_rules(session, numeric_rules))
     return results
 
 
@@ -1273,12 +1130,12 @@ def llm_call_signals(session: SessionView) -> list[EvaluationResult]:
     repeated: list[dict[str, Any]] = []
     previous: tuple[SessionNodeResponse, Any, bool] | None = None
     for call in calls:
-        normalized, complete = _normalize_observed(call.inputs)
+        normalized, complete = normalize_observed(call.inputs)
         if (
             previous is not None
             and previous[2]
             and complete
-            and _canonical_json(previous[1]) == _canonical_json(normalized)
+            and serialize_json(previous[1]) == serialize_json(normalized)
         ):
             repeated.append(
                 {"indexes": [positions[previous[0].id], positions[call.id]]}
