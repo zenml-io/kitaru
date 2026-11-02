@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Support PydanticAI 2.62 through 2.64 in addition to the existing 2.14 through 2.61 minor lines.
+
 ## 0.4.0 - 2026-10-30
 
 - Add `use_task_inputs_as_prompt=False` to preserve caller prompts and message history while recording task inputs. Explicit replay prompt overrides still apply.
