@@ -248,7 +248,13 @@ async def insight_delete(
         "Create an investigation with linked sessions.",
         parameters=(
             ParameterSpec(
-                "NAME", "string", "argument", True, "New investigation name."
+                "NAME",
+                "string",
+                "argument",
+                True,
+                "Name of 1-255 ASCII letters or digits with internal hyphens or "
+                "underscores, for example extraction-review. Start and end with a "
+                "letter or digit.",
             ),
             ParameterSpec(
                 "--agent",
@@ -365,7 +371,15 @@ async def investigation_get(investigation: uuid.UUID, /) -> CommandResult:
             ParameterSpec(
                 "INVESTIGATION", "UUID", "argument", True, "Investigation ID."
             ),
-            ParameterSpec("--name", "string", "option", False, "New name."),
+            ParameterSpec(
+                "--name",
+                "string",
+                "option",
+                False,
+                "New name of 1-255 ASCII letters or digits with internal hyphens or "
+                "underscores, for example extraction-review. Start and end with a "
+                "letter or digit.",
+            ),
             ParameterSpec(
                 "--description", "string", "option", False, "New curator rationale."
             ),

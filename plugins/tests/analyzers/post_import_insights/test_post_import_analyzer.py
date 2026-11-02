@@ -13,6 +13,7 @@
 #  limitations under the License.
 """Tests for the post-import analyzer entrypoint."""
 
+import asyncio
 import json
 import uuid
 import weakref
@@ -50,6 +51,7 @@ from kitaru.task import analyzer as task_analyzer
 from kitaru_post_import_insights import InsightGenerationResult
 from kitaru_post_import_insights import analyzer as analyzer_module
 from kitaru_post_import_insights.analyzer import (
+    SESSION_PREFETCH_WINDOW,
     analyze_openai_post_import_sessions,
     analyze_post_import_sessions,
 )
@@ -172,6 +174,22 @@ def client(monkeypatch: pytest.MonkeyPatch) -> StubClient:
     client = StubClient()
     monkeypatch.setattr(analyzer_module, "KitaruAPIClient", lambda: client)
     return client
+
+
+@pytest.fixture
+def consumed(monkeypatch: pytest.MonkeyPatch) -> list[uuid.UUID]:
+    """Record the id of every session the profiler consumes, in order."""
+    session_ids: list[uuid.UUID] = []
+    consume = SessionProfiler.consume
+
+    def record_consumption(
+        profiler: SessionProfiler, session: SessionWithNodesResponse
+    ) -> None:
+        consume(profiler, session)
+        session_ids.append(session.session.id)
+
+    monkeypatch.setattr(SessionProfiler, "consume", record_consumption)
+    return session_ids
 
 
 async def test_analyzer_returns_self_contained_insight_inputs(
@@ -697,6 +715,45 @@ async def test_analyzer_rejects_sessions_from_multiple_agents(
         )
 
 
+async def test_analyzer_fetches_ahead_but_profiles_in_input_order(
+    client: StubClient, consumed: list[uuid.UUID], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Overlap session reads up to the prefetch window without reordering."""
+    ids = client.add([_view(number) for number in range(1, 11)])
+    fetch = client.get_with_nodes
+    in_flight = 0
+    peak = 0
+
+    async def slow_fetch(session_id: uuid.UUID) -> SessionWithNodesResponse:
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0)
+        in_flight -= 1
+        return await fetch(session_id)
+
+    monkeypatch.setattr(client, "get_with_nodes", slow_fetch)
+
+    await analyze_post_import_sessions(ids)
+
+    assert peak == SESSION_PREFETCH_WINDOW
+    assert consumed == ids
+
+
+async def test_invalid_session_fails_before_a_later_prefetched_read(
+    client: StubClient,
+) -> None:
+    """Surface the first failure in input order, not the first one to happen."""
+    ids = client.add([_view(1), _view(2, agent_id=uuid.uuid4())])
+    missing_id = uuid.uuid4()
+
+    with pytest.raises(ValueError, match="context agent"):
+        await analyze_post_import_sessions([*ids, missing_id])
+
+    assert client.fetched == [*ids, missing_id]
+    assert client.closed
+
+
 def _record_live(view: SessionWithNodesResponse) -> None:
     view.session = view.session.model_copy(
         update={
@@ -750,7 +807,10 @@ async def test_analyzer_omits_the_import_for_mixed_sources(
 
 
 async def test_task_runner_loads_analyzer_and_writes_cards(
-    client: StubClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    client: StubClient,
+    consumed: list[uuid.UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Exercise plugin loading, async invocation, and the JSON task receipt."""
     views = [_view(number, failed_tool=number == 301) for number in range(301, 0, -1)]
@@ -775,17 +835,7 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
         import_id=IMPORT_ID,
     )
     fetched: list[uuid.UUID] = []
-    consumed: list[uuid.UUID] = []
-    previous_node: weakref.ReferenceType[SessionNodeResponse] | None = None
-    consume = SessionProfiler.consume
-
-    def record_consumption(
-        profiler: SessionProfiler, session: SessionWithNodesResponse
-    ) -> None:
-        consume(profiler, session)
-        consumed.append(session.session.id)
-
-    monkeypatch.setattr(SessionProfiler, "consume", record_consumption)
+    responses: list[weakref.ReferenceType[SessionWithNodesResponse]] = []
 
     class Tasks:
         async def get_spec(self, requested_id: uuid.UUID) -> Any:
@@ -808,15 +858,17 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
         async def get_with_nodes(
             self, requested_id: uuid.UUID
         ) -> SessionWithNodesResponse:
-            nonlocal previous_node
-            assert consumed == fetched
-            if previous_node is not None:
-                assert previous_node() is None
+            # Profiled sessions are released, so only the prefetch window of
+            # fetched sessions is ever alive at once.
+            assert sum(ref() is not None for ref in responses) < (
+                SESSION_PREFETCH_WINDOW
+            )
             fetched.append(requested_id)
             view = next(view for view in views if view.session.id == requested_id)
             nodes = [node.model_copy(deep=True) for node in view.nodes]
-            previous_node = weakref.ref(nodes[0]) if nodes else None
-            return SessionWithNodesResponse(session=view.session, nodes=nodes)
+            response = SessionWithNodesResponse(session=view.session, nodes=nodes)
+            responses.append(weakref.ref(response))
+            return response
 
     result_path = tmp_path / "result.json"
     monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))

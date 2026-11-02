@@ -13,12 +13,14 @@
 #  limitations under the License.
 """Analyzer entrypoint for post-import insight generation."""
 
+from contextlib import aclosing
 from uuid import UUID
 
 from kitaru.api_models.v1.insight import InsightInput
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
 from kitaru.client import KitaruAPIClient
 from kitaru.client.exceptions import KitaruClientError
+from kitaru.task.importer import stream_bounded
 from kitaru_post_import_insights.generation import ModelGenerationConfig
 from kitaru_post_import_insights.models import (
     MAX_NAME_LENGTH,
@@ -36,6 +38,10 @@ from kitaru_post_import_insights.profiling import SessionProfiler
 
 DEFAULT_OPENAI_MODEL = "gpt-5.6-luna"
 DEFAULT_OPENAI_REASONING_EFFORT = "low"
+# Sessions held at once, counting the one being profiled. Each extra session
+# hides one more server round trip behind profiling and costs its full trace in
+# memory; a single-process local server stopped gaining throughput beyond 4.
+SESSION_PREFETCH_WINDOW = 4
 
 
 def _get_context(
@@ -166,9 +172,19 @@ async def _analyze_sessions(
     context: InsightGenerationContext | None = None
     source_import: SourceImportContext | None = None
     with SessionProfiler() as profiler:
-        async with KitaruAPIClient() as client:
-            for session_id in session_ids:
-                normalized = await client.sessions.get_with_nodes(session_id)
+        async with (
+            KitaruAPIClient() as client,
+            aclosing(
+                stream_bounded(
+                    (
+                        client.sessions.get_with_nodes(session_id)
+                        for session_id in session_ids
+                    ),
+                    SESSION_PREFETCH_WINDOW,
+                )
+            ) as sessions,
+        ):
+            async for normalized in sessions:
                 if context is None:
                     context = _get_context(
                         normalized,

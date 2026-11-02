@@ -53,6 +53,7 @@ from kitaru.client.config import (
 )
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ServerCredentials
+from kitaru.client.dashboard_urls import get_dashboard_base_url
 from kitaru.client.exceptions import APIError, NotFoundError
 
 # Worker tasks install freshly released Kitaru plugins under a project's
@@ -167,7 +168,7 @@ async def status(
             "credential_status": _credential_summary(credential),
             "authentication": authentication,
             "server": info.model_dump(mode="json"),
-            "dashboard_url": info.dashboard_url,
+            "dashboard_url": get_dashboard_base_url(info, target.server_url),
             "compatibility": compatibility,
             "live_worker_count": len(live_workers)
             if live_workers is not None
