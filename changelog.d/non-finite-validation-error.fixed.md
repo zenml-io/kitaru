@@ -1,0 +1,1 @@
+- A request whose rejected input holds an infinite or NaN number, such as `filter=Infinity` on a list endpoint or `1e999` in a JSON body, now gets HTTP 422 instead of HTTP 500.

@@ -10,12 +10,13 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import ModelCallLimitMiddleware
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, ToolMessage
-from langchain_core.outputs import LLMResult
+from langchain_core.outputs import ChatGeneration, LLMResult
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.tools import tool
 
 from kitaru.api_models.v1.session import TokenUsage
 from kitaru.api_models.v1.session_node import NodeType
+from kitaru.json_pointer import resolve_json_pointer
 from kitaru_langgraph import KitaruGraphRunner
 from kitaru_langgraph.callbacks import AsyncKitaruCallback
 from kitaru_langgraph.capture import CapturePolicy
@@ -280,3 +281,73 @@ def test_model_call_without_usage_records_identity_but_no_cost(
     )
     assert node.tokens is None
     assert node.cost is None
+
+
+def test_model_calls_point_at_their_joined_reply_text(fake_client: Any) -> None:
+    @tool
+    def lookup_order(order_id: str) -> str:
+        """Look up an order."""
+        return f"{order_id} shipped"
+
+    def call(call_id: str) -> dict[str, Any]:
+        return {"name": "lookup_order", "args": {"order_id": "ORD-1"}, "id": call_id}
+
+    blocks: list[str | dict[str, Any]] = [
+        {"type": "thinking", "thinking": "Check the order.", "signature": "sig"},
+        {"type": "text", "text": "Looking it up. "},
+        {"type": "text", "text": "One moment."},
+    ]
+    model = ToolCallingFakeModel(
+        responses=[
+            AIMessage(content="", tool_calls=[call("c-1")]),
+            AIMessage(content=blocks, tool_calls=[call("c-2")]),
+            AIMessage(content="Shipped."),
+        ]
+    )
+    runner = KitaruGraphRunner.from_agent_factory(
+        create_agent, factory_kwargs={"model": model, "tools": [lookup_order]}
+    )
+
+    runner.invoke({"messages": [{"role": "user", "content": "ORD-1?"}]})
+
+    replies = [
+        None
+        if node.output_text_selector is None
+        else resolve_json_pointer(node.outputs, node.output_text_selector)
+        for node in _model_nodes(fake_client)
+    ]
+    assert replies == [
+        None,
+        (True, "Looking it up. One moment."),
+        (True, "Shipped."),
+    ]
+
+
+async def test_model_call_with_several_generations_has_no_reply_pointer(
+    fake_client: Any,
+) -> None:
+    recorder = await InvocationRecorder.setup(
+        {"input": True},
+        None,
+        agent_id=uuid.uuid4(),
+        agent_version_id=None,
+        session_name=None,
+        batch_size=1,
+        policy=CapturePolicy(),
+    )
+    callback = AsyncKitaruCallback(recorder)
+    root_id = uuid.uuid4()
+    model_id = uuid.uuid4()
+    candidates = [ChatGeneration(message=AIMessage(content=text)) for text in "AB"]
+
+    await callback.on_chain_start({}, {}, run_id=root_id)
+    await callback.on_llm_start(
+        {"name": "model"}, ["prompt"], run_id=model_id, parent_run_id=root_id
+    )
+    await callback.on_llm_end(
+        LLMResult(generations=[candidates]), run_id=model_id, parent_run_id=root_id
+    )
+    await recorder.finalize(result={"done": True})
+
+    [node] = _model_nodes(fake_client)
+    assert node.output_text_selector is None

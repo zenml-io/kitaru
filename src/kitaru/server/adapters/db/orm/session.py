@@ -228,7 +228,7 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         """Build a domain session from this row.
 
         The token columns collapse back to ``None`` only when every one of
-        them is null, matching a session that has never rolled up a node.
+        them is null, meaning no complete token measurement is available.
 
         Args:
             exclude: Keys of payload columns to leave unread and unset on

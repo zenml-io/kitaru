@@ -68,6 +68,7 @@ MAX_ROLE_LENGTH = 32
 MAX_SELECTOR_LENGTH = 1_024
 MAX_SELECTOR_SEGMENTS = 64
 _DECIMAL_BASE_SIZE = Decimal(0).__sizeof__()
+_JSON_STRING_ENCODER = json.JSONEncoder(ensure_ascii=False)
 
 _CORRECTION_PATTERN = re.compile(
     r"\b(?:that(?:'s| is) not|you (?:didn't|did not)|doesn't work|does not work|"
@@ -226,27 +227,15 @@ class _Aggregate:
 
 
 def _calculate_json_string_size(value: str, limit: int) -> int | None:
-    """Return exact UTF-8 JSON string size, stopping once it exceeds a limit."""
-    size = 2  # Opening and closing quotes.
-    short_escapes = {"\b", "\t", "\n", "\f", "\r", '"', "\\"}
-    for character in value:
-        codepoint = ord(character)
-        if character in short_escapes:
-            size += 2
-        elif codepoint < 0x20:
-            size += 6
-        elif codepoint < 0x80:
-            size += 1
-        elif codepoint < 0x800:
-            size += 2
-        elif codepoint < 0x10000:
-            if 0xD800 <= codepoint <= 0xDFFF:
-                return None
-            size += 3
-        else:
-            size += 4
-        if size > limit:
-            return None
+    """Return exact UTF-8 JSON string size, or None past a limit or on a surrogate."""
+    # Every character encodes to at least one byte, so the length alone rejects
+    # an oversized string before the escaped copy is built.
+    if len(value) + 2 > limit:
+        return None
+    try:
+        size = len(_JSON_STRING_ENCODER.encode(value).encode("utf-8"))
+    except UnicodeEncodeError:
+        return None
     return size if size <= limit else None
 
 

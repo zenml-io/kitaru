@@ -228,7 +228,7 @@ known-first-party = [
 ]
 
 [tool.ty.src]
-include = ["src/**/*.py", "scripts/**/*.py", "tests/**/*.py", "examples/**/*.py"]
+include = ["src/**/*.py", "scripts/**/*.py", "tests/**/*.py", "examples/**/*.py", "devtools/**/*.py"]
 # Exclude the Python adapter examples: they import plugin packages (kitaru-langgraph,
 # kitaru-openai-agents) from the separate plugins workspace, which are not installed
 # in the root environment. The TypeScript examples' Python drivers import only kitaru
@@ -237,7 +237,7 @@ exclude = ["examples/python/**"]
 
 [tool.ty.environment]
 python-version = "3.11"
-root = [".", "src", "scripts", "tests"]
+root = [".", "src", "scripts", "tests", "devtools"]
 
 [tool.ty.rules]
 missing-type-argument = "error"
