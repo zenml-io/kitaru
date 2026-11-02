@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Accept any sessions that belong to one agent, including live-recorded sessions and sessions from several imports. When every session comes from the same import, the cards and copied investigation prompt still name that import and its provider; otherwise the prompt omits the import line.
+- Stop telling readers to compare against "the same import" when the analyzed sessions may share no import. The failure, marker, and language briefings now compare against the analyzed sessions, and the model-call card no longer calls them imported. The analysis version is bumped because briefing text is part of each candidate's content hash.
 
 ## 0.3.0 - 2026-11-02
 

@@ -61,7 +61,7 @@ from kitaru_post_import_insights.profiling_state import (
     SessionReferences,
 )
 
-ANALYSIS_VERSION = "2026-10-31.1"
+ANALYSIS_VERSION = "2026-11-02.1"
 MAX_DISTRIBUTION_EXAMPLES = 5
 MAX_LABEL_LENGTH = 120
 MAX_ROLE_LENGTH = 32
@@ -210,7 +210,7 @@ class CandidateFinding(_ProfilingModel):
 class ProfilingResult(_ProfilingModel):
     """Stable candidate envelope produced without a model or evaluations."""
 
-    analysis_version: Literal["2026-10-31.1"] = ANALYSIS_VERSION
+    analysis_version: Literal["2026-11-02.1"] = ANALYSIS_VERSION
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     coverage: Coverage
     candidates: list[CandidateFinding]
@@ -1208,8 +1208,8 @@ def _build_signal_briefing(
         )
     marker_look_first = (
         "Open the sessions named in evidence_locators; each locator points at "
-        "the node where the marker was recorded. Compare them with sessions "
-        "from the same import that have no occurrence"
+        "the node where the marker was recorded. Compare them with analyzed "
+        "sessions that have no occurrence"
     )
     if family == "language":
         look_first = (
@@ -1217,9 +1217,8 @@ def _build_signal_briefing(
             "is null the matching text is in the session's recorded inputs, "
             "otherwise it is in that node's inputs. First confirm that the matching "
             "text is customer input rather than agent policy or harness instructions. "
-            "Compare them with sessions from "
-            "the same import that have no occurrence, and read the agent turn "
-            "immediately before each flagged user message."
+            "Compare them with analyzed sessions that have no occurrence, and "
+            "read the agent turn immediately before each flagged user message."
         )
         cohort = (
             f"sessions with at least one user message matching this marker (the "
@@ -1312,14 +1311,15 @@ def _build_outcome_briefing(
     if completed:
         look_first = (
             "Open the failed sessions listed in contributing_session_ids and read "
-            "their last recorded node. Compare each with a completed session from "
-            "the same import that starts with a similar input."
+            "their last recorded node. Compare each with a completed analyzed "
+            "session that starts with a similar input."
         )
     else:
         look_first = (
             "Open the failed sessions listed in contributing_session_ids and read "
-            "their last recorded node. No completed session exists in this import, "
-            "so pick the comparison set from another import or agent version."
+            "their last recorded node. None of the analyzed sessions completed, so "
+            "pick the comparison set from other sessions of this agent or from "
+            "another agent version."
         )
     return _format_briefing(
         odd=odd,
@@ -1877,7 +1877,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             title="Model calls per session have a measurable spread",
             description=(
                 "The distribution shows how model-call activity varies across the "
-                "imported sessions."
+                "analyzed sessions."
             ),
             values=state.model_counts,
             highest_values=state.highest_model_counts,
@@ -2183,7 +2183,7 @@ def _finish_profile(state: _State, source_session_count: int | None) -> Profilin
     if sessions_available > sessions_analyzed:
         caveats[0] += (
             " Some source sessions were not supplied for profiling. nodes_available "
-            "counts only nodes in the supplied sessions, not the entire source import."
+            "counts only nodes in the supplied sessions, not every source session."
         )
     if state.timing_available < sessions_analyzed:
         caveats.append(
