@@ -16,7 +16,7 @@
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 
@@ -123,9 +123,7 @@ class SQLBlobRepository(BaseSQLRepository[BlobORM]):
             # Each statement reads a fresh READ COMMITTED snapshot, so this
             # read sees a row a concurrent writer committed while the insert
             # waited on it.
-            existing = await self.get_many_by_sha256s(
-                list({sha256 for sha256, _ in conflicted})
-            )
+            existing = await self._get_many_by_sha256_and_media_type(conflicted)
             stored.update({key: existing[key] for key in conflicted})
         return stored
 
@@ -144,6 +142,24 @@ class SQLBlobRepository(BaseSQLRepository[BlobORM]):
         )
         row = (await self._session.execute(statement)).scalar_one()
         return row.to_domain()
+
+    async def _get_many_by_sha256_and_media_type(
+        self, keys: Sequence[tuple[str, str]]
+    ) -> dict[tuple[str, str], Blob]:
+        """Bulk-load blobs by (sha256, media_type), keyed by it.
+
+        Args:
+            keys: (sha256, media_type) pairs to look up.
+
+        Returns:
+            Stored blobs keyed by (sha256, media_type), keys with no matching
+            row omitted.
+        """
+        statement = select(BlobORM).where(
+            tuple_(BlobORM.sha256, BlobORM.media_type).in_(keys)
+        )
+        rows = (await self._session.scalars(statement)).all()
+        return {(row.sha256, row.media_type): row.to_domain() for row in rows}
 
     async def get(self, blob_id: uuid.UUID) -> Blob:
         """Load a blob by id.

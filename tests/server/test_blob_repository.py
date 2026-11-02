@@ -171,9 +171,12 @@ async def test_create_many_stores_new_blobs_by_hash_and_media_type(
 async def test_create_many_returns_the_stored_row_for_a_known_key(
     setup: Setup,
 ) -> None:
-    """Return the stored row unchanged in place of a duplicate's new row."""
+    """Return the stored row of the duplicate's media type in place of its new row."""
     repository, owner_id = setup
     existing, _ = await repository.create(_blob(owner_id, b"same"))
+    await repository.create(
+        _blob(owner_id, b"same").model_copy(update={"media_type": "application/json"})
+    )
     duplicate = _blob(None, b"same")
     fresh = _blob(None, b"fresh")
 
