@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Accept any sessions that belong to one agent, including live-recorded sessions and sessions from several imports. When every session comes from the same import, the cards and copied investigation prompt still name that import and its provider; otherwise the prompt omits the import line.
+
+## 0.3.0 - 2026-11-02
+
 - Suppress uniform distribution and single-model inventory cards so analyses can return no findings instead of promoting an uninformative recommendation.
 - Exclude missing or unsupported assistant outputs from tool-request counts and retain incomplete tool-activity coverage even when no card is generated.
 - Fetch up to three sessions ahead while the current one is profiled, so post-import analysis waits on the server far less. Sessions are still profiled in import order and the first failure in that order is still the one reported, but up to four full sessions are now held in memory at once instead of one.

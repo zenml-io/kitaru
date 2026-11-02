@@ -1,1 +1,0 @@
-- `kitaru-langgraph` now sets `output_text_selector` on model-call nodes that returned exactly one generation with text, pointing at LangChain's joined reply text.
