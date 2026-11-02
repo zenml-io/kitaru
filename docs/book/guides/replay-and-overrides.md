@@ -20,7 +20,7 @@ Create an unchanged reproduction with an explicit recorded-history policy:
 kitaru replay create <baseline-session-id> \
   --evaluator refund-check@1 \
   --tool-policy '{"default":{"type":"history","scope":"baseline","on_miss":"fail"}}' \
-  --evaluate-baselines --output json
+  --baseline-evaluation-mode if_missing --output json
 ```
 
 The JSON result contains the replay ID and job ID. The command queues work and returns; it does not wait for the worker:
@@ -50,7 +50,7 @@ Every trustworthy comparison involves three sessions:
 import asyncio
 from kitaru.client import KitaruAPIClient
 from kitaru.api_models.v1.plugin import EvaluatorConfig
-from kitaru.api_models.v1.replay import ReplayCreateRequest
+from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayCreateRequest
 from kitaru.api_models.v1.replay_config import (
     HistoryConfig,
     ReplayOverride,
@@ -69,7 +69,7 @@ async def main() -> None:
             override=ReplayOverride(model={"openai:gpt-5.4": "openai:gpt-5-nano"}),
             tool_policy=RECORDED_TOOLS,
             evaluators=[EvaluatorConfig(evaluator="refund-check")],
-            evaluate_baselines=True,
+            baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
         )
     )
     print(replay.id, replay.job_id)
@@ -85,7 +85,7 @@ Field by field:
 - `override`: the fork. Omit it for a pure reproduction.
 - `tool_policy`: what tool calls hit. If omitted, the server applies its default, which currently passes calls through to live tools. For a replay that touches nothing real, set a `history` policy as above. Details in [Tool policies](tool-policies.md).
 - `evaluators`: at least one, always. A replay is evaluated on arrival.
-- `evaluate_baselines`: evaluate the original session with the same evaluators, so the comparison exists as soon as the replay settles.
+- `baseline_evaluation_mode`: `IF_MISSING` (the default) reuses the latest baseline evaluation with the same evaluator version and parameters, or schedules one if none matches. `FORCE` always reruns baseline evaluations; `NONE` skips them. Result sessions receive fresh evaluations.
 
 Watch it with `kitaru job watch <job-id>`; when the replay reads `completed`, `client.replays.get(replay.id)` carries the `result_session_id`.
 
