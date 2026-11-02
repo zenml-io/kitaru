@@ -651,37 +651,6 @@ def parse(payload: bytes, params: dict):
     )
 """
 
-_SINGLE_SESSION_WITH_NODE_PARSER_SCRIPT = """
-from kitaru.api_models.v1.session import SessionStatus
-from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import ImportedNode, ImportedSession
-
-
-def parse(payload: bytes, params: dict):
-    yield ImportedSession(
-        status=SessionStatus.COMPLETED,
-        name="session-1",
-        inputs=None,
-        outputs=None,
-        error=None,
-        started_at=None,
-        ended_at=None,
-        external_id="session-1",
-        metadata={},
-        nodes=[
-            ImportedNode(
-                external_id="call-1",
-                node_type=NodeType.LLM_CALL,
-                name="call-1",
-                status=NodeStatus.COMPLETED,
-                inputs=None,
-                outputs=None,
-                attributes=None,
-            )
-        ],
-    )
-"""
-
 _MANY_FAILURES_PARSER_SCRIPT = """
 from kitaru.api_models.v1.imports import ImportFailure
 
@@ -822,10 +791,10 @@ async def _create_api_source_task(
     return task_id
 
 
-async def test_importer_flow_batches_nodes_and_reingests_a_repeated_external_id(
+async def test_importer_flow_ingests_nodes_and_reuses_a_repeated_external_id(
     task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Batch node ingestion over NODE_BATCH_SIZE and recreate a revisited session."""
+    """Ingest a full session and reuse its id when the parser yields it again."""
     node_count = NODE_BATCH_SIZE + 50
     task_id, plugin_path = await _create_importer_task(
         task_app, _PARSER_SCRIPT, tmp_path, params={"node_count": node_count}
@@ -839,18 +808,18 @@ async def test_importer_flow_batches_nodes_and_reingests_a_repeated_external_id(
     monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
 
     call_count = 0
-    original_ingest = task_app.client.sessions.ingest_nodes
+    original_ingest = task_app.client.sessions.ingest
 
-    async def counting_ingest(session_id: uuid.UUID, batch: Any) -> Any:
+    async def counting_ingest(request: Any) -> Any:
         nonlocal call_count
         call_count += 1
-        return await original_ingest(session_id, batch)
+        return await original_ingest(request)
 
-    monkeypatch.setattr(task_app.client.sessions, "ingest_nodes", counting_ingest)
+    monkeypatch.setattr(task_app.client.sessions, "ingest", counting_ingest)
 
     await run(task_app.client, str(task_id))
 
-    assert call_count == 2
+    assert call_count == 1
     written = ImportStats.model_validate(json.loads(result_path.read_text()))
     assert written.created == 1
     assert written.skipped == 1
@@ -898,10 +867,10 @@ async def test_importer_flow_mid_stream_crash_writes_partial_stats(
     assert "parser exploded" in written.failures[0].error
 
 
-async def test_importer_flow_records_non_conflict_create_error(
+async def test_importer_flow_records_non_conflict_ingestion_error(
     task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Record a failure, not a skip, on a non-conflict session creation error."""
+    """Record a failure, not a skip, on a non-conflict ingestion error."""
     task_id, plugin_path = await _create_importer_task(
         task_app, _SINGLE_SESSION_PARSER_SCRIPT, tmp_path
     )
@@ -913,44 +882,16 @@ async def test_importer_flow_records_non_conflict_create_error(
     monkeypatch.setenv("KITARU_TASK_PAYLOAD_PATH", str(payload_path))
     monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
 
-    async def failing_create(request: Any) -> Any:
+    async def failing_ingest(request: Any) -> Any:
         raise APIError(httpx.codes.SERVICE_UNAVAILABLE, "backend unavailable")
 
-    monkeypatch.setattr(task_app.client.sessions, "create", failing_create)
+    monkeypatch.setattr(task_app.client.sessions, "ingest", failing_ingest)
 
     await run(task_app.client, str(task_id))
 
     written = ImportStats.model_validate(json.loads(result_path.read_text()))
     assert written.created == 0
     assert written.skipped == 0
-    assert written.failed == 1
-    assert written.failures[0].external_id == "session-1"
-
-
-async def test_importer_flow_records_ingest_nodes_error(
-    task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Record a failure when node ingestion fails after the session is created."""
-    task_id, plugin_path = await _create_importer_task(
-        task_app, _SINGLE_SESSION_WITH_NODE_PARSER_SCRIPT, tmp_path
-    )
-    payload_path = tmp_path / "payload.json"
-    payload_path.write_text(json.dumps({}))
-    result_path = tmp_path / "result.json"
-
-    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(plugin_path))
-    monkeypatch.setenv("KITARU_TASK_PAYLOAD_PATH", str(payload_path))
-    monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
-
-    async def failing_ingest(session_id: uuid.UUID, batch: Any) -> Any:
-        raise APIError(httpx.codes.UNPROCESSABLE_ENTITY, "invalid nodes")
-
-    monkeypatch.setattr(task_app.client.sessions, "ingest_nodes", failing_ingest)
-
-    await run(task_app.client, str(task_id))
-
-    written = ImportStats.model_validate(json.loads(result_path.read_text()))
-    assert written.created == 0
     assert written.failed == 1
     assert written.failures[0].external_id == "session-1"
 
