@@ -830,15 +830,15 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.27.3"
+version = "0.27.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/80/5d/2c0e6a63a1a73b9669a6f8b4d9d91106cb53501a3ef3cbfa0ff7f97adfd4/kitaru-0.27.3.tar.gz", hash = "sha256:f919d8c2206dbd1b7b1855480f7dc25f90cec0ced49f8a490bb28357f1db639d", size = 6988952, upload-time = "2026-10-30T09:09:06.93Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/35/d9514b68f4a449359d955f8408fa7884283a424a79392b2be521b14de735/kitaru-0.27.4.tar.gz", hash = "sha256:7d9970da511c0ec701e9858eef8acf87db349fa4d848b4de0dc2d05b3fc80678", size = 7033760, upload-time = "2026-11-02T14:06:57.209Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bc/99/ae435ac84460681ebb0502a3e2c5dc89349d8aca263042347eba4a5651fa/kitaru-0.27.3-py3-none-any.whl", hash = "sha256:d13b81720a9d76c9868154a41dfb1c3d0e6698735348af8ba55610614776c3e5", size = 3442464, upload-time = "2026-10-30T09:09:04.491Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/2a/4cf796573c5aaac533427355d84654a63c1f5ec2754ed2542e2edc20275e/kitaru-0.27.4-py3-none-any.whl", hash = "sha256:10657a166ed742600e9b46dd9de3970cd8c920e7515b8593d0ac08626484e4c0", size = 3459107, upload-time = "2026-11-02T14:06:55.099Z" },
 ]
 
 [package.optional-dependencies]
@@ -921,7 +921,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "kitaru", extras = ["cli", "mcp", "server", "worker"], specifier = ">=0.27.3" },
+    { name = "kitaru", extras = ["cli", "mcp", "server", "worker"], specifier = ">=0.27.4" },
     { name = "kitaru-langfuse-importer", specifier = ">=0.5.0" },
     { name = "kitaru-pydantic-ai", extras = ["openai"], specifier = ">=0.4.0" },
     { name = "langfuse", specifier = ">=5,<6" },
