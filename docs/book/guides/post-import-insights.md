@@ -7,7 +7,7 @@ icon: chart-pie
 
 Select post-import analyzers to find patterns in normalized sessions, such as failed tool calls, repeated calls, and outcome distributions. They store insight cards with supporting session references and investigation prompts. They run on your worker, including with a local or self-hosted server.
 
-The independently versioned `kitaru-post-import-insights` package supplies two analyzers: `kitaru/post-import-insights` uses deterministic checks without a model or API key; `kitaru/openai-post-import-insights` uses OpenAI to select findings and customize their wording. The server registers both package entrypoints; the worker installs the package when executing an analysis task. Imports run only the analyzers explicitly selected by the caller.
+The independently versioned `kitaru-post-import-insights` package supplies three analyzers: `kitaru/post-import-insights` uses deterministic checks without a model or API key; `kitaru/openai-post-import-insights` uses OpenAI to select findings and customize their wording; `kitaru/openai-session-findings` uses OpenAI to read the sessions themselves and verify each problem it finds on every session. The server registers all three package entrypoints; the worker installs the package when executing an analysis task. Imports run only the analyzers explicitly selected by the caller.
 
 ## Set up a worker and import
 
@@ -107,6 +107,38 @@ uv run kitaru session import sessions.jsonl \
 Both analyzers run independently and retain their results, even when findings overlap. The OpenAI analyzer requires credentials and uses Luna when no model parameter is provided; it does not switch to deterministic generation when credentials are missing. The model selects the cards and writes each card's eyebrow and description; titles, charts, counts, and caveats stay deterministic. A card's copy may restate only numbers that appear in that card's facts or chart, and must not add causes, outcomes, links, or markup. A card whose copy fails that check keeps the deterministic wording while the other cards keep the model's. If a model request fails or times out, the OpenAI analyzer task fails instead of returning deterministic cards. Without a connection or an eligible credential-equipped worker, its task stays queued; select only the deterministic analyzer if you want the import job to finish without OpenAI credentials.
 
 The plugin package includes its model and observability dependencies. Model calls receive a bounded projection of computed candidates, facts, sanitized labels, and evidence references, not the complete raw traces. Deterministic code computes the counts and charts in both analyzers. OpenAI analysis can incur charges.
+
+## Find and verify problems in sessions
+
+`kitaru/openai-session-findings` reads what the agent actually did in each session and reports problems such as an action that contradicts its system prompt or the policy a tool returned, or a claim in a reply that no tool output supports. It runs in four steps:
+
+1. A reader model reads the agent's system prompt and every imported session, and writes each problem it notices as a yes/no check about a single session.
+2. The OpenAI Decisions API answers every check on every session. A check counts as holding in a session only when the answer's probability is at least 0.8.
+3. A merge step groups the checks that held into findings, drops sessions where an earlier tool result explains what the agent did, and rates each finding's harm as high, medium, or low.
+4. Code counts the sessions behind each finding, so the counts come from the per-session answers rather than from the reader's own estimate.
+
+Each finding becomes one insight: the title names the problem, the description gives the verified count and the harm, and the text data holds one concrete example. The metadata under `kitaru.session-findings/v1` lists the IDs of the sessions where the finding was verified and the checks behind it. Findings are ordered most harmful first, at most ten per run.
+
+The analyzer accepts three optional parameters:
+
+| Parameter | Effect |
+|---|---|
+| `context` | Extra text about the agent, such as a summary of its code. The reader also writes a check for each risk it names, so a risk in the code is reported only when a session shows it happening. |
+| `model` | Model for the reader and merge steps. Defaults to `gpt-5.6-luna`. |
+| `decisions_model` | Model for the Decisions API. Defaults to `gpt-6-luna`. |
+
+```bash
+uv run kitaru session import sessions.jsonl \
+  --importer kitaru/kitaru-jsonl@latest \
+  --agent customer-service@latest \
+  --analyzer kitaru/openai-session-findings@latest \
+  --analyzer-params 'kitaru/openai-session-findings@latest={"context":"The refund tool does not check the approval limit."}' \
+  --wait
+```
+
+It needs the same OpenAI connection as `kitaru/openai-post-import-insights`, and the OpenAI project must have access to the Decisions API. Without that access, or when any model request fails, the analysis task fails with the failing step and error type instead of returning partial findings.
+
+Unlike the other two analyzers, this one sends session content to OpenAI: the system prompt, each user message, every tool call's inputs and outputs, and the agent's final reply, with each value cut to 2,000 characters. The reader and merge requests keep the newest sessions within about 400,000 characters of transcripts, while the Decisions API still checks every session. Do not select it for sessions whose content must not leave your deployment. It makes one Decisions API request per session plus two model requests, and the findings are model judgments that can differ between runs, so treat a finding as a lead to check in the sessions it lists.
 
 ## Coverage and large imports
 

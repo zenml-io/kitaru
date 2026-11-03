@@ -1,11 +1,12 @@
 # Kitaru post-import insights
 
-Generate evidence-backed insight cards from one agent's Kitaru sessions, whether they were imported or recorded live. This distribution provides two independently selectable analyzers. Both profile every selected session and build deterministic candidates; the OpenAI analyzer then uses bounded analyst and editor calls to select candidates and write their descriptions.
+Generate evidence-backed insight cards from one agent's Kitaru sessions, whether they were imported or recorded live. This distribution provides three independently selectable analyzers. The first two profile every selected session and build deterministic candidates; the OpenAI analyzer then uses bounded analyst and editor calls to select candidates and write their descriptions. The session findings analyzer instead sends the sessions themselves to OpenAI: a reader writes each problem it notices as a yes/no check, the Decisions API verifies every check on every session, and a merge step groups the verified checks into findings.
 
 | Catalog name | Entrypoint in `kitaru_post_import_insights.analyzer` | Required configuration |
 |---|---|---|
 | `kitaru/post-import-insights` | `analyze_post_import_sessions` | None |
 | `kitaru/openai-post-import-insights` | `analyze_openai_post_import_sessions` | OpenAI connection supplying `OPENAI_API_KEY`; defaults to `gpt-5.6-luna` with low reasoning effort and accepts an optional `model` override |
+| `kitaru/openai-session-findings` | `analyze_session_findings` in `kitaru_post_import_insights.session_findings` | OpenAI connection supplying `OPENAI_API_KEY` with Decisions API access; accepts optional `context`, `model` (default `gpt-5.6-luna`), and `decisions_model` (default `gpt-6-luna`) |
 
 Both entrypoints accept a list of session UUIDs for one agent, fetch each session with its nodes through `KitaruAPIClient`, and return `list[InsightInput]` for the task runner to persist. Each fetched trace is processed and released before the next fetch. The sessions can come from one import, from several imports, or from live recording. When every session comes from the same import, the copied investigation prompt names that import and its provider; otherwise the prompt omits the import line. Select either analyzer or both for the same sessions. Each invocation persists its own cards; matching candidate names do not replace another analyzer's results.
 
