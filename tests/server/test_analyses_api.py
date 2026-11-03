@@ -259,6 +259,29 @@ async def test_create_analyses_rejects_more_sessions_than_the_cap(
     assert "cap is 1" in response.text
 
 
+@pytest.mark.parametrize("policy", [TaskPolicy(analysis_session_limit=1)])
+async def test_create_analyses_rejects_a_session_list_longer_than_the_cap(
+    client: httpx.AsyncClient, session_repository: FakeSessionRepository
+) -> None:
+    """Observe HTTP 422 for a list over the cap even when fewer sessions match."""
+    finished = await _create_session(session_repository)
+    running = await _create_session(
+        session_repository, status=SessionStatus.IN_PROGRESS
+    )
+
+    response = await client.post(
+        "/api/v1/analyses",
+        json={
+            "agent_id": str(AGENT_ID),
+            "analyzers": [{"analyzer": "trends"}],
+            "session_ids": [str(finished), str(running)],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "session_ids lists 2 sessions, the cap is 1" in response.text
+
+
 @pytest.mark.parametrize(
     "scope",
     [

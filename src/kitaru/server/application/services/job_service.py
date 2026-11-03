@@ -435,8 +435,9 @@ class JobService:
 
         Raises:
             ValidationError: No finished session of the agent matches the
-                scope, more sessions match than the cap allows, or two
-                analyzer configs resolve to the same plugin version.
+                scope, more sessions match than the cap allows, the explicit
+                session list is longer than the cap, or two analyzer configs
+                resolve to the same plugin version.
             PluginNotFound: An analyzer config names an unknown plugin.
             PluginVersionNotFound: An analyzer config names an unknown
                 version.
@@ -460,8 +461,11 @@ class JobService:
         if command.session_ids is None:
             expressions = [AndExpression(operands=conditions)]
         elif len(command.session_ids) > limit:
+            # Reject by list length, before any query, because session_ids has
+            # no other length bound and every MAX_FILTER_IN_VALUES ids cost one
+            # query even when none of them match.
             raise ValidationError(
-                f"The scope selects {len(command.session_ids)} sessions, the cap is "
+                f"session_ids lists {len(command.session_ids)} sessions, the cap is "
                 f"{limit}"
             )
         else:
