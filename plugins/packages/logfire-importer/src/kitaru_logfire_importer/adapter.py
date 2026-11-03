@@ -14,7 +14,7 @@
 """Logfire importer-backed adapter."""
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
@@ -49,7 +49,7 @@ class LogfireAdapter(ImporterBackedAdapter):
         self._started_at: dict[str, datetime] = {}
 
     @contextmanager
-    def open_trace(self) -> Iterator[str]:
+    def open_trace(self) -> Generator[str, None, None]:
         """Activate a Logfire trace and yield its trace id.
 
         Raises:

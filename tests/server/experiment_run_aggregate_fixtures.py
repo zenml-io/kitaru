@@ -14,7 +14,7 @@
 """Shared app setup and data helpers for experiment run evaluation aggregate tests."""
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import httpx
@@ -82,7 +82,7 @@ def build_app(evaluation_service: ExperimentRunEvaluationService) -> FastAPI:
 
 
 @asynccontextmanager
-async def open_client(app: FastAPI, prefix: str) -> AsyncIterator[httpx.AsyncClient]:
+async def open_client(app: FastAPI, prefix: str) -> AsyncGenerator[httpx.AsyncClient]:
     """Open an HTTP client whose relative paths resolve under an API prefix."""
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
