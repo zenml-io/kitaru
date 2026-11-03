@@ -14,7 +14,7 @@
 """Langfuse importer-backed adapter."""
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 from langfuse import Langfuse, get_client
@@ -44,7 +44,7 @@ class LangfuseAdapter(ImporterBackedAdapter):
         self._completed_traces: dict[str, FetchedTrace] = {}
 
     @contextmanager
-    def open_trace(self) -> Iterator[str]:
+    def open_trace(self) -> Generator[str, None, None]:
         """Activate a Langfuse trace and yield its trace id.
 
         Yields:

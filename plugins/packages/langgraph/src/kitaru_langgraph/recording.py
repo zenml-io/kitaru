@@ -487,7 +487,7 @@ class InvocationRecorder:
                 output = capture_value(outputs, self.policy).value
         else:
             output = capture_value(outputs, self.policy).value
-        model_fields = (
+        model_fields: dict[str, Any] = (
             {
                 **_describe_model_call(pending, outputs),
                 "output_text_selector": _get_output_text_selector(output),
