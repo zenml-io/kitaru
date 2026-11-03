@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.27.5] - 2026-11-03
+
+### Added
+
+- Register the `kitaru/openai-session-findings` analyzer in the default plugin catalog. It reads imported sessions with OpenAI, verifies each problem it finds on every session with the Decisions API, and stores one insight per verified finding. It needs an OpenAI connection with Decisions API access and sends session content to OpenAI.
+
+### Changed
+
+- Document that LangGraph 1.2.19 and later no longer apply middleware trace policies to Kitaru's LangGraph callback, so middleware span nodes record the state each hook received.
+
 ## [0.27.4] - 2026-11-02
 
 ### Added
