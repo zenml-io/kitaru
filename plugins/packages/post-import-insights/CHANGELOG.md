@@ -4,6 +4,9 @@
 
 - Accept any sessions that belong to one agent, including live-recorded sessions and sessions from several imports. When every session comes from the same import, the cards and copied investigation prompt still name that import and its provider; otherwise the prompt omits the import line.
 - Stop telling readers to compare against "the same import" when the analyzed sessions may share no import. The failure, marker, and language briefings now compare against the analyzed sessions, and the model-call card no longer calls them imported. The analysis version is bumped because briefing text is part of each candidate's content hash.
+
+## 0.4.0 - 2026-11-03
+
 - Add the `kitaru/openai-session-findings` analyzer, which reads imported sessions, writes each problem it notices as a yes/no check, verifies every check on every session with the OpenAI Decisions API, and stores one insight per verified finding with its session count, harm, example, and session IDs. It sends session content to OpenAI and accepts optional `context`, `model`, and `decisions_model` parameters.
 - Require `openai` 3.37 or later for the `openai` extra, the first release with the current Decisions API types.
 
