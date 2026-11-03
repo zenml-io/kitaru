@@ -102,6 +102,22 @@ def test_openai_post_import_analyzer_has_separate_entrypoint_and_credentials() -
     assert schema["properties"]["OPENAI_API_KEY"]["writeOnly"] is True
 
 
+def test_session_findings_analyzer_shares_the_openai_distribution() -> None:
+    """Expose session findings from the same distribution and OpenAI credentials."""
+    definition = next(
+        item
+        for item in DEFAULT_PLUGIN_DEFINITIONS
+        if item.kind is PluginKind.ANALYZER
+        and item.name == "kitaru/openai-session-findings"
+    )
+    assert definition.entrypoint == (
+        "kitaru_post_import_insights.session_findings:analyze_session_findings"
+    )
+    assert definition.requirement == "kitaru-post-import-insights[openai]==0.3.0"
+    assert definition.provider == "openai"
+    assert definition.connection_schema is not None
+
+
 async def test_register_keeps_both_post_import_analyzers_independent(
     repository: FakePluginRepository,
 ) -> None:

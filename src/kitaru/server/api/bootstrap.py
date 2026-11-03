@@ -194,6 +194,21 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         connection_schema=OpenAIConnection,
     ),
     DefaultPluginDefinition(
+        kind=PluginKind.ANALYZER,
+        name="kitaru/openai-session-findings",
+        description=(
+            "Find problems in imported sessions with OpenAI and verify each one "
+            "on every session."
+        ),
+        provider="openai",
+        entrypoint=(
+            "kitaru_post_import_insights.session_findings:analyze_session_findings"
+        ),
+        requirement="kitaru-post-import-insights[openai]==0.3.0",
+        display_version="0.3.0",
+        connection_schema=OpenAIConnection,
+    ),
+    DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
         name=f"{RESERVED_NAMESPACE}/braintrust",
         description="Import Braintrust project-log and UI exports.",

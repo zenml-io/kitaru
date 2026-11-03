@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-openai = ["openai>=2.15,<4"]
+openai = ["openai>=3.37,<4"]
 
 [project.urls]
 Homepage = "https://kitaru.ai"
