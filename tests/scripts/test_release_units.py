@@ -145,7 +145,7 @@ def test_inventory_describes_core_and_plugin_distributions() -> None:
 def test_default_requirements_are_derived_from_release_units() -> None:
     inventory = load_inventory()
     assert set(default_requirements(inventory).values()) == {
-        "kitaru-post-import-insights==0.3.0",
+        "kitaru-post-import-insights==0.4.0",
         "kitaru-braintrust-importer==0.4.0",
         "kitaru-evaluator==0.3.0",
         "kitaru-jsonl-importer==0.2.0",

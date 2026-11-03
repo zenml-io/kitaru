@@ -1,1 +1,0 @@
-- Register the `kitaru/openai-session-findings` analyzer in the default plugin catalog. It reads imported sessions with OpenAI, verifies each problem it finds on every session with the Decisions API, and stores one insight per verified finding. It needs an OpenAI connection with Decisions API access and sends session content to OpenAI.
