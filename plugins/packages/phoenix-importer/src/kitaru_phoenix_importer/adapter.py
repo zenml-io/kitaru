@@ -14,7 +14,7 @@
 """Arize Phoenix importer-backed adapter."""
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -49,7 +49,7 @@ class PhoenixAdapter(ImporterBackedAdapter):
             raise ValueError("Phoenix project must be a non-empty string")
 
     @contextmanager
-    def open_trace(self) -> Iterator[str]:
+    def open_trace(self) -> Generator[str, None, None]:
         """Activate an OTel trace and yield its trace id.
 
         Raises:
