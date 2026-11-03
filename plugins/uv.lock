@@ -1735,7 +1735,7 @@ openai = [
 [package.metadata]
 requires-dist = [
     { name = "kitaru", editable = "../" },
-    { name = "openai", marker = "extra == 'openai'", specifier = ">=2.15,<4" },
+    { name = "openai", marker = "extra == 'openai'", specifier = ">=3.37,<4" },
 ]
 provides-extras = ["openai"]
 
