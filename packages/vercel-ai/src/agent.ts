@@ -55,6 +55,24 @@ if (
 }
 const ADAPTER_VERSION = packageMetadata.version;
 
+type ToolLoopAgentCallParameters<
+  CALL_OPTIONS,
+  TOOLS extends ToolSet,
+  RUNTIME_CONTEXT extends Record<string, unknown>,
+  OUTPUT extends Output.Output,
+> = Parameters<
+  ToolLoopAgent<CALL_OPTIONS, TOOLS, RUNTIME_CONTEXT, OUTPUT>["generate"]
+>[0];
+
+type ToolLoopAgentStreamParameters<
+  CALL_OPTIONS,
+  TOOLS extends ToolSet,
+  RUNTIME_CONTEXT extends Record<string, unknown>,
+  OUTPUT extends Output.Output,
+> = Parameters<
+  ToolLoopAgent<CALL_OPTIONS, TOOLS, RUNTIME_CONTEXT, OUTPUT>["stream"]
+>[0];
+
 type RuntimeSettings = Record<string, unknown> & {
   messages?: unknown;
   model: LanguageModel;
@@ -383,7 +401,14 @@ function createKitaruToolLoopAgentImpl<
     ): Promise<GenerateTextResult<TOOLS, RUNTIME_CONTEXT, OUTPUT>> {
       const state: InvocationState = {};
       try {
-        const result = await invocationAgent(state).generate(options);
+        const result = await invocationAgent(state).generate(
+          options as ToolLoopAgentCallParameters<
+            CALL_OPTIONS,
+            TOOLS,
+            RUNTIME_CONTEXT,
+            OUTPUT
+          >,
+        );
         if (state.recorder === undefined || state.tickets === undefined) {
           throw new Error("Kitaru recorder was not initialized");
         }
@@ -428,7 +453,14 @@ function createKitaruToolLoopAgentImpl<
       if (environment.KITARU_REPLAY_ID !== undefined) {
         throw new TypeError("Agent stream replay is not supported");
       }
-      return await new ToolLoopAgent(settings).stream(options);
+      return await new ToolLoopAgent(settings).stream(
+        options as ToolLoopAgentStreamParameters<
+          CALL_OPTIONS,
+          TOOLS,
+          RUNTIME_CONTEXT,
+          OUTPUT
+        >,
+      );
     },
   };
 }
