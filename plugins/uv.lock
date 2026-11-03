@@ -1363,7 +1363,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.27.5"
+version = "0.27.5+dev"
 source = { editable = "../" }
 dependencies = [
     { name = "httpx" },
