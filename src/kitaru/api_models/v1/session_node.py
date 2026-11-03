@@ -129,7 +129,7 @@ class SessionNodeCreateRequest(RequestModel):
 class SessionNodeListParams(FilterableListParams):
     """Session node list params."""
 
-    sort: Literal["position:asc"] = Field(
+    sort: Literal["position:asc"] = Field(  # ty: ignore[invalid-mutable-override]
         default="position:asc",
         description="Nodes are ordered by start time, then insertion.",
     )
