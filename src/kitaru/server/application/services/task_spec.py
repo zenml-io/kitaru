@@ -34,7 +34,7 @@ from kitaru.server.application.services.agent_version_resolution import (
 )
 from kitaru.server.domain.connection import ConnectionNotFound
 from kitaru.server.domain.imports import Import, ImportWithoutImporterVersion
-from kitaru.server.domain.plugin import PluginVersion, ScriptPluginSource
+from kitaru.server.domain.plugin import Plugin, PluginVersion, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
     AgentTaskDetails,
@@ -172,17 +172,18 @@ class TaskSpecBuilder:
         plugin_version = await self._plugins.get_version_by_id(task.plugin_version_id)
         plugin = await self._plugins.get(plugin_version.plugin_id)
         try:
-            env, secret_env = await self._get_connection_env(
-                task.connection_id, task.env
+            env, secret_env, unset_env = await self._get_connection_env(
+                plugin, task.connection_id, task.env
             )
         except ConnectionNotFound:
-            env, secret_env = task.env, {}
+            env, secret_env, unset_env = task.env, {}, []
         return TaskSpec(
             task_id=task.id,
             kind=TaskKind.EVALUATOR,
             timeout_seconds=self._policy.evaluator_timeout_seconds,
             env=env,
             secret_env=secret_env,
+            unset_env=unset_env,
             details=EvaluationTaskDetails(
                 evaluator_name=plugin.name,
                 params=task.params,
@@ -219,8 +220,8 @@ class TaskSpecBuilder:
         )
         plugin = await self._plugins.get(plugin_version.plugin_id)
         source = await self._import_source_spec(import_, plugin_version)
-        env, secret_env = await self._get_connection_env(
-            import_.connection_id, task.env
+        env, secret_env, unset_env = await self._get_connection_env(
+            plugin, import_.connection_id, task.env
         )
         return TaskSpec(
             task_id=task.id,
@@ -228,6 +229,7 @@ class TaskSpecBuilder:
             timeout_seconds=self._policy.importer_timeout_seconds,
             env=env,
             secret_env=secret_env,
+            unset_env=unset_env,
             details=ImportTaskDetails(
                 plugin=await self._plugin_spec(plugin_version),
                 source=source,
@@ -277,17 +279,18 @@ class TaskSpecBuilder:
         plugin_version = await self._plugins.get_version_by_id(task.plugin_version_id)
         plugin = await self._plugins.get(plugin_version.plugin_id)
         try:
-            env, secret_env = await self._get_connection_env(
-                task.connection_id, task.env
+            env, secret_env, unset_env = await self._get_connection_env(
+                plugin, task.connection_id, task.env
             )
         except ConnectionNotFound:
-            env, secret_env = task.env, {}
+            env, secret_env, unset_env = task.env, {}, []
         return TaskSpec(
             task_id=task.id,
             kind=TaskKind.ANALYZER,
             timeout_seconds=self._policy.analyzer_timeout_seconds,
             env=env,
             secret_env=secret_env,
+            unset_env=unset_env,
             details=AnalysisTaskDetails(
                 analyzer_name=plugin.name,
                 params=task.params,
@@ -299,11 +302,15 @@ class TaskSpecBuilder:
         )
 
     async def _get_connection_env(
-        self, connection_id: uuid.UUID | None, task_env: dict[str, str]
-    ) -> tuple[dict[str, str], dict[str, str]]:
+        self,
+        plugin: Plugin,
+        connection_id: uuid.UUID | None,
+        task_env: dict[str, str],
+    ) -> tuple[dict[str, str], dict[str, str], list[str]]:
         """Load the environment carried by a connection.
 
         Args:
+            plugin: Plugin the task runs, whose schema names the connection keys.
             connection_id: Connection to load.
             task_env: Task environment values.
 
@@ -312,16 +319,23 @@ class TaskSpecBuilder:
             SecretNotFound: The connection names an unknown secret.
 
         Returns:
-            Non-secret and secret environment values.
+            Non-secret and secret environment values, and the schema keys
+            the connection leaves out, removed from the worker's environment.
         """
         if connection_id is None:
-            return task_env, {}
+            return task_env, {}, []
         connection = await self._connections.get(connection_id)
         secret = await self._secrets.get(connection.secret_id)
         secret_env = {
             key: value.get_secret_value() for key, value in secret.values.items()
         }
-        return {**connection.env, **task_env}, secret_env
+        # Remove the schema keys the connection leaves out from the worker's
+        # environment, so a credential the worker holds never runs with a
+        # connection's values, such as a base URL pointing somewhere else.
+        unset_env = sorted(
+            plugin.get_connection_keys() - connection.env.keys() - secret_env.keys()
+        )
+        return {**connection.env, **task_env}, secret_env, unset_env
 
     async def _plugin_spec(self, plugin_version: PluginVersion) -> PluginSpec:
         """Convert a plugin version's code source into its spec form.

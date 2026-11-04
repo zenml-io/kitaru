@@ -125,12 +125,22 @@ jobs:
           --no-skills --no-mcp --quiet
       - name: Inside a project, install into that project's environment
         shell: bash
+        # Retry like the first install step: right after a release publish,
+        # some PyPI index mirrors can still miss the new version. Each attempt
+        # starts from a fresh project so a failed attempt leaves nothing behind.
         run: |
           set -euxo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-          cd "$(mktemp -d)"
-          uv init --quiet -p 3.12 --name demo-agent .
-          cat "$GITHUB_WORKSPACE/install.sh" | bash -s -- --no-skills --no-mcp
+          for attempt in 1 2 3 4 5; do
+            cd "$(mktemp -d)"
+            uv init --quiet -p 3.12 --name demo-agent .
+            if cat "$GITHUB_WORKSPACE/install.sh" | bash -s -- --no-skills --no-mcp; then break; fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "project installer failed after $attempt attempts" >&2; exit 1
+            fi
+            echo "project installer attempt $attempt failed; retrying in 30s" >&2
+            sleep 30
+          done
           grep -q 'kitaru\[cli,mcp,worker\]' pyproject.toml
           uv run kitaru --version
           uv run kitaru-mcp --help >/dev/null

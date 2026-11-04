@@ -10443,6 +10443,14 @@
             "description": "Process timeout.",
             "title": "Timeout Seconds",
             "type": "integer"
+          },
+          "unset_env": {
+            "description": "Inherited variables removed before the spec's values apply.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Unset Env",
+            "type": "array"
           }
         },
         "required": [
@@ -11547,7 +11555,7 @@
   },
   "info": {
     "title": "Kitaru",
-    "version": "0.27.5"
+    "version": "0.27.5+dev"
   },
   "openapi": "3.1.0",
   "paths": {

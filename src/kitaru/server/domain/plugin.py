@@ -348,6 +348,15 @@ class Plugin(DomainModel):
         """
         self.connection_schema = connection_schema
 
+    def get_connection_keys(self) -> set[str]:
+        """Get the property names of the connection schema.
+
+        Returns:
+            Property names, empty without a schema.
+        """
+        properties = (self.connection_schema or {}).get("properties")
+        return set(properties) if isinstance(properties, dict) else set()
+
 
 class PluginVersion(DomainModel):
     """Plugin version."""
