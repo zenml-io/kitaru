@@ -34,6 +34,21 @@ class BlobRepository(Protocol):
         """
         ...
 
+    async def create_many(self, blobs: Sequence[Blob]) -> dict[tuple[str, str], Blob]:
+        """Persist many new blobs, deduping concurrent identical uploads.
+
+        A blob whose (sha256, media_type) is already stored, including by a
+        concurrent writer that committed first, is not stored again.
+
+        Args:
+            blobs: Blobs to store, at most one per (sha256, media_type).
+
+        Returns:
+            Stored blobs keyed by (sha256, media_type), the already-stored
+            row in place of each blob that was not stored again.
+        """
+        ...
+
     async def get(self, blob_id: uuid.UUID) -> Blob:
         """Load a blob by id.
 

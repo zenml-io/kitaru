@@ -20,7 +20,7 @@ import os
 import sys
 import uuid
 from collections.abc import AsyncGenerator, Callable, Generator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -31,7 +31,7 @@ import pytest
 from fastapi import FastAPI
 from hypothesis import settings
 from hypothesis.database import DirectoryBasedExampleDatabase
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -526,6 +526,28 @@ async def pg_session() -> AsyncGenerator[AsyncSession, None]:
     """
     async with pg_session_with_engine() as (session, _):
         yield session
+
+
+@contextmanager
+def capture_statements(engine: AsyncEngine) -> Generator[list[str], None, None]:
+    """Record the SQL of every statement the engine sends while the block runs.
+
+    Args:
+        engine: Engine to listen on.
+
+    Yields:
+        Statements in send order, one entry per database round trip.
+    """
+    statements: list[str] = []
+
+    def record(_connection: Any, _cursor: Any, statement: str, *_: Any) -> None:
+        statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", record)
+    try:
+        yield statements
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record)
 
 
 def base_asgi_scope(**overrides: Any) -> dict[str, Any]:
