@@ -175,6 +175,13 @@ updates:
       # claim 2.x but every real workflow either silently downgrades or breaks.
       - dependency-name: griffe
         update-types: ["version-update:semver-major"]
+      # cyclopts 5 reports a mistyped short-flag token such as `-xo` as an
+      # error about the global `-o/--output` flag instead of naming the typo
+      # (tests/cli/test_app.py::test_hyphen_leading_typo_is_not_blamed_on_output_flag).
+      # pyproject.toml caps cyclopts below 5; remove both once
+      # https://github.com/BrianPugh/cyclopts/issues/1039 is fixed.
+      - dependency-name: cyclopts
+        versions: [">= 5"]
     cooldown:
       default-days: 7
       semver-major-days: 14

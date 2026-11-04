@@ -1,0 +1,1 @@
+- Kitaru caps `cyclopts` below 5, so the CLI reports a mistyped short option such as `-xo` as unknown instead of as a problem with `-o/--output`.
