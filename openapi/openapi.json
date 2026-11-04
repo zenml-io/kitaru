@@ -10291,6 +10291,14 @@
             "description": "Process timeout.",
             "title": "Timeout Seconds",
             "type": "integer"
+          },
+          "unset_env": {
+            "description": "Inherited variables removed before the spec's values apply.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Unset Env",
+            "type": "array"
           }
         },
         "required": [

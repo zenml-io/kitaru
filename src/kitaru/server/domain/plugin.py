@@ -22,7 +22,6 @@ from packaging.requirements import InvalidRequirement, Requirement
 from pydantic import AfterValidator, Field, model_validator
 
 from kitaru.base import FrozenModel
-from kitaru.json_schema import get_write_only_keys
 from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
@@ -349,13 +348,14 @@ class Plugin(DomainModel):
         """
         self.connection_schema = connection_schema
 
-    def get_connection_secret_keys(self) -> set[str]:
-        """Get the connection schema properties marked as secrets.
+    def get_connection_keys(self) -> set[str]:
+        """Get the property names of the connection schema.
 
         Returns:
-            Names of the `writeOnly` properties, empty without a schema.
+            Property names, empty without a schema.
         """
-        return get_write_only_keys(self.connection_schema)
+        properties = (self.connection_schema or {}).get("properties")
+        return set(properties) if isinstance(properties, dict) else set()
 
 
 class PluginVersion(DomainModel):

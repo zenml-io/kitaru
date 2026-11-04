@@ -240,10 +240,10 @@ async def test_analysis_spec_uses_the_recorded_connection(
     assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk"}
 
 
-async def test_analysis_spec_blanks_schema_secrets_the_connection_omits(
+async def test_analysis_spec_unsets_schema_keys_the_connection_omits(
     services: JobAndTaskServices,
 ) -> None:
-    """A connection without the plugin's secret cannot run with the worker's own."""
+    """A connection without the plugin's key cannot run with the worker's own."""
     spec = await build_connected_analysis_spec(
         services,
         env={"OPENAI_BASE_URL": "https://elsewhere.test/v1"},
@@ -251,25 +251,27 @@ async def test_analysis_spec_blanks_schema_secrets_the_connection_omits(
     )
 
     assert spec.env == {"OPENAI_BASE_URL": "https://elsewhere.test/v1"}
-    assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk", "OPENAI_API_KEY": ""}
+    assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk"}
+    assert spec.unset_env == ["OPENAI_API_KEY"]
 
 
-async def test_analysis_spec_keeps_the_schema_secrets_the_connection_sets(
+async def test_analysis_spec_keeps_the_schema_keys_the_connection_sets(
     services: JobAndTaskServices,
 ) -> None:
-    """Secrets the connection sets as secrets or env stay; optional ones blank."""
+    """Keys the connection sets as env or secrets stay; the others are unset."""
 
     class _Connection(BaseModel):
         LANGFUSE_SECRET_KEY: SecretStr
-        LANGFUSE_PUBLIC_KEY: SecretStr
-        LANGFUSE_TOKEN: SecretStr | None = None
+        LANGFUSE_PUBLIC_KEY: str
+        LANGFUSE_BASE_URL: str = "https://cloud.langfuse.com"
 
     spec = await build_connected_analysis_spec(
         services, env={"LANGFUSE_PUBLIC_KEY": "pk"}, connection_schema=_Connection
     )
 
     assert spec.env == {"LANGFUSE_PUBLIC_KEY": "pk"}
-    assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk", "LANGFUSE_TOKEN": ""}
+    assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk"}
+    assert spec.unset_env == ["LANGFUSE_BASE_URL"]
 
 
 async def build_connected_analysis_spec(

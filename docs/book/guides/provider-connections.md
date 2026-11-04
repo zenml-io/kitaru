@@ -106,7 +106,7 @@ The resolved importer connection is recorded on the import as `connection_id`. E
 
 A connection's values land in the task process environment alongside everything else the worker already merges, lowest precedence first:
 
-1. The worker's own environment.
+1. The worker's own environment, without the schema keys a resolved connection leaves out (see below).
 2. The connection's `env` values.
 3. The task's own `env` (set on the import request).
 4. The connection's secret values.
@@ -114,7 +114,7 @@ A connection's values land in the task process environment alongside everything 
 
 Only step 2 is new. Creating or updating a connection rejects a `KITARU_*` key outright, and rejects a key set as both an `env` value and a secret, since the merge order can't express "this key wins" for a collision that shouldn't exist in the first place.
 
-A connection supplies all of a plugin's secrets or none of them. When a task resolves a connection, every secret property of the plugin's `connection_schema` that the connection leaves out is set to an empty string in step 4. A credential in the worker's own environment therefore never runs with a connection's other values, and a plugin whose connection lacks a required secret fails instead of borrowing the worker's. A property counts as a secret when the schema marks it `writeOnly`, as Pydantic does for `SecretStr` fields, so declare a custom plugin's credentials that way.
+A connection supplies all of a plugin's connection values or none of them. When a task resolves a connection, every property of the plugin's `connection_schema` that the connection sets neither as an `env` value nor as a secret is removed from the worker's environment before step 2. A credential the worker holds therefore never runs with a connection's other values, and a plugin whose connection lacks a required key fails instead of borrowing the worker's. Workers from Kitaru releases before this rule ignore it and keep their own value.
 
 ## Worker credentials
 

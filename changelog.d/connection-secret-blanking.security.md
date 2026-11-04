@@ -1,1 +1,0 @@
-- A task that uses a connection no longer inherits the plugin's secret connection values from the worker's environment. Secrets the connection leaves out are set to empty, so they cannot run with the connection's other values.
