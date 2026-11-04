@@ -34,7 +34,7 @@ from kitaru.server.application.services.agent_version_resolution import (
 )
 from kitaru.server.domain.connection import ConnectionNotFound
 from kitaru.server.domain.imports import Import, ImportWithoutImporterVersion
-from kitaru.server.domain.plugin import PluginVersion, ScriptPluginSource
+from kitaru.server.domain.plugin import Plugin, PluginVersion, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
     AgentTaskDetails,
@@ -173,7 +173,7 @@ class TaskSpecBuilder:
         plugin = await self._plugins.get(plugin_version.plugin_id)
         try:
             env, secret_env = await self._get_connection_env(
-                task.connection_id, task.env
+                plugin, task.connection_id, task.env
             )
         except ConnectionNotFound:
             env, secret_env = task.env, {}
@@ -220,7 +220,7 @@ class TaskSpecBuilder:
         plugin = await self._plugins.get(plugin_version.plugin_id)
         source = await self._import_source_spec(import_, plugin_version)
         env, secret_env = await self._get_connection_env(
-            import_.connection_id, task.env
+            plugin, import_.connection_id, task.env
         )
         return TaskSpec(
             task_id=task.id,
@@ -278,7 +278,7 @@ class TaskSpecBuilder:
         plugin = await self._plugins.get(plugin_version.plugin_id)
         try:
             env, secret_env = await self._get_connection_env(
-                task.connection_id, task.env
+                plugin, task.connection_id, task.env
             )
         except ConnectionNotFound:
             env, secret_env = task.env, {}
@@ -298,11 +298,15 @@ class TaskSpecBuilder:
         )
 
     async def _get_connection_env(
-        self, connection_id: uuid.UUID | None, task_env: dict[str, str]
+        self,
+        plugin: Plugin,
+        connection_id: uuid.UUID | None,
+        task_env: dict[str, str],
     ) -> tuple[dict[str, str], dict[str, str]]:
         """Load the environment carried by a connection.
 
         Args:
+            plugin: Plugin the task runs, whose schema names its secrets.
             connection_id: Connection to load.
             task_env: Task environment values.
 
@@ -320,6 +324,11 @@ class TaskSpecBuilder:
         secret_env = {
             key: value.get_secret_value() for key, value in secret.values.items()
         }
+        # Blank the schema secrets the connection leaves out, so a credential
+        # in the worker's own environment never runs with a connection's
+        # values, such as a base URL pointing somewhere else.
+        for key in plugin.get_connection_secret_keys() - connection.env.keys():
+            secret_env.setdefault(key, "")
         return {**connection.env, **task_env}, secret_env
 
     async def _plugin_spec(self, plugin_version: PluginVersion) -> PluginSpec:

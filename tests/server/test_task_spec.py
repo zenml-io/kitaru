@@ -16,10 +16,11 @@
 import uuid
 
 import pytest
-from pydantic import SecretStr
+from pydantic import BaseModel, SecretStr
 
 from kitaru.api_models.v1.imports import ImportQuery
 from kitaru.api_models.v1.task import TaskStatus
+from kitaru.server.api.bootstrap import OpenAIConnection
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.imports import Import
@@ -34,6 +35,7 @@ from kitaru.server.domain.task import (
     ImportTask,
     ImportTaskDetails,
     ScriptPluginSpec,
+    TaskSpec,
 )
 from kitaru_test_support import (
     JobAndTaskServices,
@@ -227,8 +229,72 @@ async def test_analysis_spec_uses_the_recorded_connection(
     services: JobAndTaskServices,
 ) -> None:
     """An analysis task injects its recorded connection's env and secrets."""
+    spec = await build_connected_analysis_spec(
+        services, env={"LANGFUSE_BASE_URL": "https://cloud", "REGION": "eu"}
+    )
+
+    assert spec.env == {
+        "LANGFUSE_BASE_URL": "https://cloud",
+        "REGION": "eu",
+    }
+    assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk"}
+
+
+async def test_analysis_spec_blanks_schema_secrets_the_connection_omits(
+    services: JobAndTaskServices,
+) -> None:
+    """A connection without the plugin's secret cannot run with the worker's own."""
+    spec = await build_connected_analysis_spec(
+        services,
+        env={"OPENAI_BASE_URL": "https://elsewhere.test/v1"},
+        connection_schema=OpenAIConnection,
+    )
+
+    assert spec.env == {"OPENAI_BASE_URL": "https://elsewhere.test/v1"}
+    assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk", "OPENAI_API_KEY": ""}
+
+
+async def test_analysis_spec_keeps_the_schema_secrets_the_connection_sets(
+    services: JobAndTaskServices,
+) -> None:
+    """Secrets the connection sets as secrets or env stay; optional ones blank."""
+
+    class _Connection(BaseModel):
+        LANGFUSE_SECRET_KEY: SecretStr
+        LANGFUSE_PUBLIC_KEY: SecretStr
+        LANGFUSE_TOKEN: SecretStr | None = None
+
+    spec = await build_connected_analysis_spec(
+        services, env={"LANGFUSE_PUBLIC_KEY": "pk"}, connection_schema=_Connection
+    )
+
+    assert spec.env == {"LANGFUSE_PUBLIC_KEY": "pk"}
+    assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk", "LANGFUSE_TOKEN": ""}
+
+
+async def build_connected_analysis_spec(
+    services: JobAndTaskServices,
+    env: dict[str, str],
+    connection_schema: type[BaseModel] | None = None,
+) -> TaskSpec:
+    """Build the spec of an analysis task that recorded a connection.
+
+    Args:
+        services: Fake-backed job and task services.
+        env: Non-secret values of the task's connection.
+        connection_schema: Connection schema of the analyzer, None for none.
+
+    Returns:
+        Execution spec.
+    """
     plugin = await create_plugin(
-        services.plugins, ACTOR.account.id, PluginKind.ANALYZER, name="trends"
+        services.plugins,
+        ACTOR.account.id,
+        PluginKind.ANALYZER,
+        name="trends",
+        connection_schema=(
+            None if connection_schema is None else connection_schema.model_json_schema()
+        ),
     )
     code_blob = await create_blob(services.blobs, ACTOR.account.id, content=b"code")
     version = await services.plugins.create_version(
@@ -236,10 +302,7 @@ async def test_analysis_spec_uses_the_recorded_connection(
         ScriptPluginSource(blob_id=code_blob.id, entrypoint="analyze"),
         display_version=None,
     )
-    connection_id = await store_connection(
-        services,
-        env={"LANGFUSE_BASE_URL": "https://cloud", "REGION": "eu"},
-    )
+    connection_id = await store_connection(services, env=env)
     agent = await create_agent(services.agents, ACTOR.account.id)
     job = await create_job(services.jobs, ACTOR.account.id)
     task = await create_analysis_task(
@@ -249,14 +312,7 @@ async def test_analysis_spec_uses_the_recorded_connection(
         agent_id=agent.id,
         connection_id=connection_id,
     )
-
-    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
-
-    assert spec.env == {
-        "LANGFUSE_BASE_URL": "https://cloud",
-        "REGION": "eu",
-    }
-    assert spec.secret_env == {"LANGFUSE_SECRET_KEY": "sk"}
+    return await services.task_service.get_spec(task.id, actor=ACTOR)
 
 
 async def test_analysis_spec_task_env_wins_over_the_connection_env(

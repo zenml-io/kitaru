@@ -114,6 +114,8 @@ A connection's values land in the task process environment alongside everything 
 
 Only step 2 is new. Creating or updating a connection rejects a `KITARU_*` key outright, and rejects a key set as both an `env` value and a secret, since the merge order can't express "this key wins" for a collision that shouldn't exist in the first place.
 
+A connection supplies all of a plugin's secrets or none of them. When a task resolves a connection, every secret property of the plugin's `connection_schema` that the connection leaves out is set to an empty string in step 4. A credential in the worker's own environment therefore never runs with a connection's other values, and a plugin whose connection lacks a required secret fails instead of borrowing the worker's. A property counts as a secret when the schema marks it `writeOnly`, as Pydantic does for `SecretStr` fields, so declare a custom plugin's credentials that way.
+
 ## Worker credentials
 
 Some customers won't hand a Kitaru server their provider credentials at all, and a connection doesn't change that: it still means putting a secret on the server. For that case, the credentials stay in the worker's environment. An API import, analysis, or evaluation task whose plugin declares a `connection_schema` but resolved no connection carries the label `kitaru/requires-credentials=<provider>` alongside its usual [task labels](../deploy/workers.md), and a worker selects the providers it holds credentials for:
