@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     ANALYZER_TASK_TIMEOUT_SECONDS: int = 900
     MAX_TASK_RESULT_BYTES: int = 1024 * 1024
     EVALUATION_PAIR_LIMIT: int = 100
+    ANALYSIS_SESSION_LIMIT: int = 1000
 
     DB_HOST: str | None = None
     DB_PORT: int = 5432

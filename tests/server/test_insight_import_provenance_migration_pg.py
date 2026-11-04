@@ -33,7 +33,6 @@ from kitaru.server.adapters.db.repositories.job_repository import SQLJobReposito
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
 )
-from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
 from kitaru.server.database.migrations.alembic import Alembic
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import Account
@@ -44,7 +43,6 @@ from kitaru.server.domain.plugin import (
     Plugin,
     PluginKind,
 )
-from kitaru.server.domain.task import AnalysisTask
 
 IMPORT_PROVENANCE_REVISION = "018_insight_import_provenance"
 PREVIOUS_REVISION = "017_connection"
@@ -99,28 +97,32 @@ async def test_upgrade_backfills_imports_and_downgrade_preserves_insights() -> N
             job = await SQLJobRepository(session).create(
                 Job(owner_id=owner.id, kind=JobKind.IMPORT)
             )
-            tasks = SQLTaskRepository(session)
-            task = await tasks.create(
-                AnalysisTask(
-                    job_id=job.id,
-                    agent_id=agent.id,
-                    plugin_version_id=version.id,
-                    import_id=import_id,
+            # Seed tasks the same way, since the task row later gained
+            # session_ids.
+            task_ids = [uuid.uuid4(), uuid.uuid4()]
+            for task_id, task_import_id in zip(
+                task_ids, [import_id, uuid.uuid4()], strict=True
+            ):
+                await session.execute(
+                    text(
+                        "INSERT INTO task (id, kind, job_id, plugin_version_id, "
+                        "import_id, agent_id, status, attempt, on_failure, labels, "
+                        "env, inputs, created, updated) VALUES "
+                        "(:id, 'analyzer', :job_id, :version_id, :import_id, "
+                        ":agent_id, 'pending', 0, 'abort', '{}'::jsonb, "
+                        "'{}'::jsonb, '{}'::jsonb, now(), now())"
+                    ),
+                    {
+                        "id": task_id,
+                        "job_id": job.id,
+                        "version_id": version.id,
+                        "import_id": task_import_id,
+                        "agent_id": agent.id,
+                    },
                 )
-            )
-            orphaned_task = await tasks.create(
-                AnalysisTask(
-                    job_id=job.id,
-                    agent_id=agent.id,
-                    plugin_version_id=version.id,
-                    import_id=uuid.uuid4(),
-                )
-            )
             insight_ids = [uuid.uuid4() for _ in range(3)]
             # Insert the previous schema, which has no insight.import_id column.
-            for insight_id, task_id in zip(
-                insight_ids, [task.id, orphaned_task.id, None], strict=True
-            ):
+            for insight_id, task_id in zip(insight_ids, [*task_ids, None], strict=True):
                 await session.execute(
                     text(
                         "INSERT INTO insight (id, owner_id, agent_id, "

@@ -78,3 +78,4 @@ class TaskPolicy(FrozenModel):
     analyzer_timeout_seconds: int = 900
     max_result_bytes: int = 1024 * 1024
     evaluation_pair_limit: int = 100
+    analysis_session_limit: int = 1000

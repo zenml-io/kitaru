@@ -82,11 +82,18 @@ def build_task_grants(spec: TaskSpec) -> dict[GrantKind, frozenset[uuid.UUID]]:
     sessions: set[uuid.UUID] = set()
     blobs: set[uuid.UUID] = set()
     imports: set[uuid.UUID] = set()
+    agents: set[uuid.UUID] = set()
     details = spec.details
     if isinstance(details, EvaluationTaskDetails):
         sessions.add(details.input_session_id)
+    # Grant a session list through its agent rather than per session, since
+    # the grants travel inside the task token and a list of up to the analysis
+    # session cap would outgrow request header limits.
     if isinstance(details, AnalysisTaskDetails):
-        imports.add(details.import_id)
+        if details.session_ids is not None:
+            agents.add(details.agent_id)
+        elif details.import_id is not None:
+            imports.add(details.import_id)
     if isinstance(
         details, (EvaluationTaskDetails, ImportTaskDetails, AnalysisTaskDetails)
     ) and isinstance(details.plugin, ScriptPluginSpec):
@@ -110,14 +117,16 @@ def build_task_grants(spec: TaskSpec) -> dict[GrantKind, frozenset[uuid.UUID]]:
         grants[GrantKind.BLOB] = frozenset(blobs)
     if imports:
         grants[GrantKind.IMPORT] = frozenset(imports)
+    if agents:
+        grants[GrantKind.AGENT] = frozenset(agents)
     return grants
 
 
 def check_task_session_read(session: Session, actor: AuthContext) -> None:
     """Require a task principal to own the session or hold a grant covering it.
 
-    A grant covers the session directly by id or through the import that
-    created it. An account principal always passes.
+    A grant covers the session directly by id, through the import that
+    created it, or through its agent. An account principal always passes.
 
     Args:
         session: Session being read.
@@ -137,6 +146,8 @@ def check_task_session_read(session: Session, actor: AuthContext) -> None:
     if session.import_id is not None and principal.has_grant(
         GrantKind.IMPORT, session.import_id
     ):
+        return
+    if principal.has_grant(GrantKind.AGENT, session.agent_id):
         return
     raise SessionAccessDenied(session.id)
 
@@ -185,8 +196,8 @@ def scope_task_session_filter(
 ) -> SessionFilter:
     """Restrict a session listing to the sessions a task principal may read.
 
-    A task principal lists the sessions it produced and those created by the
-    imports it is granted. An account principal's filter passes through
+    A task principal lists the sessions it produced and those of the imports
+    and agents it is granted. An account principal's filter passes through
     unchanged.
 
     Args:
@@ -194,7 +205,7 @@ def scope_task_session_filter(
         actor: Caller context.
 
     Returns:
-        Filter restricted to the task's own and granted-import sessions.
+        Filter restricted to the task's own and granted sessions.
     """
     if not isinstance(actor.principal, TaskPrincipal):
         return session_filter
@@ -202,16 +213,15 @@ def scope_task_session_filter(
     scope: FilterExpression = FilterCondition(
         field="task_id", op=FilterOp.EQ, value=principal.task_id
     )
-    import_ids = principal.grants.get(GrantKind.IMPORT)
-    if import_ids:
-        scope = OrExpression(
-            operands=(
-                scope,
-                FilterCondition(
-                    field="import_id", op=FilterOp.IN, value=sorted(import_ids)
-                ),
+    for kind, field in ((GrantKind.IMPORT, "import_id"), (GrantKind.AGENT, "agent_id")):
+        granted = principal.grants.get(kind)
+        if granted:
+            scope = OrExpression(
+                operands=(
+                    scope,
+                    FilterCondition(field=field, op=FilterOp.IN, value=sorted(granted)),
+                )
             )
-        )
     expression = (
         scope
         if session_filter.expression is None

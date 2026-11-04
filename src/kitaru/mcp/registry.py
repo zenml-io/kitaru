@@ -239,7 +239,7 @@ async def review_manage_tool(
 async def workflow_start_tool(
     request: WorkflowStartRequest, context: Context
 ) -> WorkflowStartResult:
-    """Start an evaluation batch or experiment run and return immediately."""
+    """Start an evaluation batch, an analysis, or an experiment run; return at once."""
     return cast(
         WorkflowStartResult,
         await _invoke(context, request, WorkflowStartResult, handle_workflow_start),

@@ -19,9 +19,12 @@ from typing import Any, ClassVar
 
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.base import FrozenModel
-from kitaru.server.application.models.plugin import EvaluatorConfigInput
+from kitaru.server.application.models.plugin import (
+    AnalyzerConfigInput,
+    EvaluatorConfigInput,
+)
 from kitaru.server.base import ListFilter
-from kitaru.server.filtering import EQUALITY_OPS, FilterField
+from kitaru.server.filtering import EQUALITY_OPS, FilterExpression, FilterField
 
 
 class JobFilter(ListFilter):
@@ -49,3 +52,13 @@ class EvaluationBatchCreate(FrozenModel):
 
     input_session_ids: list[uuid.UUID]
     evaluators: list[EvaluatorConfigInput]
+
+
+class AnalysisCreate(FrozenModel):
+    """Analysis create command."""
+
+    agent_id: uuid.UUID
+    session_ids: list[uuid.UUID] | None = None
+    scope: tuple[FilterExpression, ...] = ()
+    import_id: uuid.UUID | None = None
+    analyzers: list[AnalyzerConfigInput]

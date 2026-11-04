@@ -149,6 +149,7 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     env: Mapped[dict[str, str]] = mapped_column(JSONB)
     worker_id: Mapped[uuid.UUID | None]
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    session_ids: Mapped[list[str] | None] = mapped_column(JSONB(none_as_null=True))
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancel_requested_at: Mapped[datetime | None] = mapped_column(
@@ -201,6 +202,11 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             row.plugin_version_id = task.plugin_version_id
             row.agent_id = task.agent_id
             row.import_id = task.import_id
+            row.session_ids = (
+                None
+                if task.session_ids is None
+                else [str(session_id) for session_id in task.session_ids]
+            )
             row.connection_id = task.connection_id
             row.inputs = task.params
         return row
@@ -272,11 +278,15 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         if kind is TaskKind.ANALYZER:
             assert self.plugin_version_id is not None
             assert self.agent_id is not None
-            assert self.import_id is not None
             return AnalysisTask(
                 plugin_version_id=self.plugin_version_id,
                 agent_id=self.agent_id,
                 import_id=self.import_id,
+                session_ids=(
+                    None
+                    if self.session_ids is None
+                    else [uuid.UUID(value) for value in self.session_ids]
+                ),
                 connection_id=self.connection_id,
                 params=self.inputs if self.inputs is not None else {},
                 **shared,

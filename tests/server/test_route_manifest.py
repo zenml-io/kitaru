@@ -37,6 +37,7 @@ def test_route_manifest_is_registered() -> None:
         "/api/v1/agents",
         "/api/v1/agents/{agent_id}",
         "/api/v1/agents/{agent_id}/versions",
+        "/api/v1/analyses",
         "/api/v1/analyzers",
         "/api/v1/analyzers/{analyzer_id}",
         "/api/v1/analyzers/{analyzer_id}/versions",

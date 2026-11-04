@@ -56,7 +56,7 @@ async def call_analyzer(
     Args:
         name: Analyzer name, named in error messages.
         analyzer: Analyzer callable, sync or returning an awaitable.
-        session_ids: Imported session IDs passed to the analyzer. Analyzers
+        session_ids: Session IDs passed to the analyzer. Analyzers
             fetch any session details they need through the API client.
         params: Parameters passed to the analyzer.
 
@@ -106,8 +106,31 @@ def _resolve_analyzer(
         raise AnalysisError(str(exc)) from exc
 
 
+async def _get_session_ids(
+    client: KitaruAPIClient, details: AnalysisTaskDetails
+) -> list[uuid.UUID]:
+    """Return the sessions an analysis task reads.
+
+    Args:
+        client: API client.
+        details: Analysis task details.
+
+    Returns:
+        The task's fixed session list, or every session of its import.
+    """
+    if details.session_ids is not None:
+        return details.session_ids
+    params = SessionListParams(
+        filter=FilterCondition(
+            field="import_id", op=FilterOp.EQ, value=str(details.import_id)
+        ),
+        size=1000,
+    )
+    return [session.id async for session in client.sessions.iter(params)]
+
+
 async def run(client: KitaruAPIClient, task_id: str) -> None:
-    """Run the analysis flow: analyze the import's sessions and write the result.
+    """Run the analysis flow: analyze the task's sessions and write the result.
 
     Args:
         client: API client.
@@ -122,14 +145,7 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
     if not isinstance(details, AnalysisTaskDetails):
         raise AnalysisError(f"Task {task_id} is not an analyzer task")
     analyzer = _resolve_analyzer(details)
-
-    params = SessionListParams(
-        filter=FilterCondition(
-            field="import_id", op=FilterOp.EQ, value=str(details.import_id)
-        ),
-        size=1000,
-    )
-    session_ids = [session.id async for session in client.sessions.iter(params)]
+    session_ids = await _get_session_ids(client, details)
     results = await call_analyzer(
         details.analyzer_name, analyzer, session_ids, details.params
     )

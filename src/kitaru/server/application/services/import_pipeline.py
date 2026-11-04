@@ -25,7 +25,7 @@ from kitaru.server.application.interfaces.session_repository import SessionRepos
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.services.plugin_resolution import get_plugin_task_labels
-from kitaru.server.domain.imports import Import, ImportNotFound
+from kitaru.server.domain.imports import ImportNotFound
 from kitaru.server.domain.plugin import AnalyzerConfig
 from kitaru.server.domain.session import Session, SessionNotEvaluatable
 from kitaru.server.domain.task import AnalysisTask, EvaluationTask, ImportTask, Task
@@ -98,7 +98,13 @@ async def record_import_outcome(
             )
     for analyzer in import_.analyzers:
         fan_out_tasks.append(
-            await build_analysis_task(analyzer, import_, task.job_id, len(sessions))
+            await build_analysis_task(
+                analyzer,
+                task.job_id,
+                len(sessions),
+                agent_id=import_.agent_id,
+                import_id=import_.id,
+            )
         )
     if fan_out_tasks:
         await task_repository.create_many(fan_out_tasks)
@@ -135,17 +141,24 @@ async def query_evaluatable_sessions(
 
 async def build_analysis_task(
     analyzer: AnalyzerConfig,
-    import_: Import,
     job_id: uuid.UUID,
     eligible_session_count: int,
+    *,
+    agent_id: uuid.UUID,
+    import_id: uuid.UUID | None,
+    session_ids: list[uuid.UUID] | None = None,
 ) -> AnalysisTask:
-    """Build the task running an analyzer over an import's sessions.
+    """Build the task running an analyzer over an import or a session list.
 
     Args:
         analyzer: Resolved analyzer config.
-        import_: Import the analyzer reads.
         job_id: Job the task belongs to.
-        eligible_session_count: Number of eligible sessions in this import.
+        eligible_session_count: Number of eligible sessions in scope.
+        agent_id: Agent the sessions and insights belong to.
+        import_id: Import the analyzer reads, or the import its session list
+            was drawn from.
+        session_ids: Fixed session list the analyzer reads instead of the
+            whole import.
 
     Returns:
         Analysis task, not yet stored.
@@ -153,8 +166,9 @@ async def build_analysis_task(
     task = AnalysisTask(
         job_id=job_id,
         plugin_version_id=analyzer.analyzer_version_id,
-        agent_id=import_.agent_id,
-        import_id=import_.id,
+        agent_id=agent_id,
+        import_id=import_id,
+        session_ids=session_ids,
         connection_id=analyzer.connection_id,
         params=analyzer.params,
         labels=get_plugin_task_labels(
