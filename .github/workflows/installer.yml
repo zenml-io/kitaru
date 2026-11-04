@@ -153,7 +153,7 @@ jobs:
               capture_output=True, text=True, timeout=45,
           )
           if result.returncode != 128 or not re.search(
-              r"SSL certificate problem|certificate verify failed|server certificate verification failed|certificate.*revoked",
+              r"SSL certificate problem|SSL certificate OpenSSL verify result|certificate verify failed|server certificate verification failed|certificate.*revoked",
               result.stderr, re.IGNORECASE,
           ):
               raise SystemExit(f"Git must reject the compromised chain with a certificate error; got {result.returncode}: {result.stderr}")

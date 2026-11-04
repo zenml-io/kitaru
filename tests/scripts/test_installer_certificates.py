@@ -295,6 +295,8 @@ def test_probes_fail_on_subprocess_timeout(tool: str) -> None:
     "message",
     [
         "SSL certificate problem",
+        "SSL certificate OpenSSL verify result: "
+        "unable to get local issuer certificate (20)",
         "certificate verify failed",
         "server certificate verification failed",
         "certificate has been revoked",
