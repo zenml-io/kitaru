@@ -43,4 +43,5 @@ optimiser = "optimiser"
 [default]
 locale = "en-us"
 # FastAPI's route attribute uses British spelling; prose still gets corrected.
-extend-ignore-re = ['\.dependant\b']
+# PEM certificate bodies are encoded data, not prose.
+extend-ignore-re = ['\.dependant\b', '(?s)-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----']
