@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.27.6] - 2026-11-04
+
+### Changed
+
+- Self-hosted installations must upgrade both the server and workers to receive the connection credential-isolation fix. Connections must contain all required credentials; partial connections no longer fall back to the worker's environment.
+
+### Security
+
+- A task that uses a connection no longer takes any of the plugin's connection keys from the worker's environment. Keys in the plugin's `connection_schema` that the connection does not set are removed from the task environment, so a credential the worker holds cannot run with a connection's values.
+
 ## [0.27.5] - 2026-11-03
 
 ### Added
