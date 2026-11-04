@@ -9782,6 +9782,11 @@ export interface components {
              * @description Process timeout.
              */
             timeout_seconds: number;
+            /**
+             * Unset Env
+             * @description Inherited variables removed before the spec's values apply.
+             */
+            unset_env?: string[];
         };
         /**
          * TaskStatus
