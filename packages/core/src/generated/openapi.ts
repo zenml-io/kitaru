@@ -8559,7 +8559,7 @@ export interface components {
             id?: string | null;
             /**
              * Last User Activity
-             * @description UTC time of the last user activity, or the current time while a task is in flight. Null when none was recorded.
+             * @description UTC time of the last user activity, or the current time while a task is in flight. Null when unknown or not recorded.
              */
             last_user_activity?: string | null;
             /**

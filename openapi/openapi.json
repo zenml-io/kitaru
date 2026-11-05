@@ -7994,7 +7994,7 @@
                 "type": "null"
               }
             ],
-            "description": "UTC time of the last user activity, or the current time while a task is in flight. Null when none was recorded.",
+            "description": "UTC time of the last user activity, or the current time while a task is in flight. Null when unknown or not recorded.",
             "title": "Last User Activity"
           },
           "max_blob_size_bytes": {
