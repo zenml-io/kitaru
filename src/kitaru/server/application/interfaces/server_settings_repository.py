@@ -14,6 +14,7 @@
 """Server settings repository interface."""
 
 import uuid
+from datetime import datetime
 from typing import Protocol
 
 
@@ -28,5 +29,21 @@ class ServerSettingsRepository(Protocol):
 
         Returns:
             Stored server id.
+        """
+        ...
+
+    async def get_last_user_activity(self) -> datetime | None:
+        """Load the time of the last recorded user activity.
+
+        Returns:
+            Stored timestamp, or ``None`` when none was recorded yet.
+        """
+        ...
+
+    async def record_user_activity(self, at: datetime) -> None:
+        """Store a user activity time unless a later one is already stored.
+
+        Args:
+            at: Time of the activity.
         """
         ...
