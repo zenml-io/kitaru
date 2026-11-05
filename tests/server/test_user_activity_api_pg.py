@@ -111,9 +111,9 @@ async def test_user_requests_advance_activity_but_info_and_health_do_not(
         await client.get("/api/v1/agents", headers=headers)
         assert await _get_activity(client) == now
 
+        now += timedelta(minutes=1)
         for path in ("/api/v1/info", "/health", "/health/live"):
             await client.get(path)
-        now += timedelta(minutes=1)
         assert await _get_activity(client) == now - timedelta(minutes=1)
 
         await client.get("/api/v1/agents", headers=headers)

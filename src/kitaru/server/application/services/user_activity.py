@@ -151,9 +151,11 @@ class UserActivityService:
                 asyncio.shield(read), READ_TIMEOUT_SECONDS
             )
         except Exception:
-            read.cancel()
             logger.warning("Failed to read user activity.", exc_info=True)
             return None
+        finally:
+            if not read.done():
+                read.cancel()
         if in_flight:
             return datetime.now(UTC)
         remembered = self._recorder.latest if self._recorder is not None else None
