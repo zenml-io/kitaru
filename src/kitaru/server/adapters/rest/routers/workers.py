@@ -48,6 +48,7 @@ from kitaru.server.adapters.rest.mapping.workers import (
 )
 from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute
+from kitaru.server.adapters.rest.user_activity import not_user_activity
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext, WorkerAuthContext
 from kitaru.server.application.services.task_service import TaskService
@@ -136,6 +137,7 @@ async def register_worker(
 
 
 @router.post("/{worker_id}/token", responses=error_responses(404))
+@not_user_activity
 async def renew_worker_token(
     worker_id: uuid.UUID,
     service: Annotated[WorkerService, Depends(get_worker_service)],

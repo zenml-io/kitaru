@@ -14,6 +14,7 @@
 """Server info API models."""
 
 import uuid
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import Field
@@ -62,4 +63,11 @@ class ServerInfoResponse(ResponseModel):
         default=None,
         ge=0,
         description="Maximum accepted blob size in bytes.",
+    )
+    last_user_activity: datetime | None = Field(
+        default=None,
+        description=(
+            "UTC time of the last user activity, or the current time while "
+            "a task is in flight. Null when none was recorded."
+        ),
     )
