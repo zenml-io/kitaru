@@ -91,6 +91,7 @@ def _check_worker_client(client: str) -> None:
 
 
 @router.post("", responses=error_responses(426))
+@not_user_activity
 async def register_worker(
     body: WorkerCreateRequest,
     service: Annotated[WorkerService, Depends(get_worker_service)],

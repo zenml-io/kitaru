@@ -114,12 +114,13 @@ async def test_user_requests_advance_activity_but_info_and_health_do_not(
 async def test_idle_worker_traffic_does_not_advance_activity(
     settings: APISettings,
 ) -> None:
-    """Leave the time alone for claim, heartbeat, and token renewal calls."""
+    """Leave the time alone for worker registration, claim, heartbeat, and renewal."""
     async with _serve(settings) as (_, client):
         headers = await _login(client)
-        worker_id, worker_headers = await _register_worker(client, headers)
+        await client.get("/api/v1/agents", headers=headers)
         before = await _get_activity(client)
         assert before is not None
+        worker_id, worker_headers = await _register_worker(client, headers)
 
         claimed = await client.post(
             "/api/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
