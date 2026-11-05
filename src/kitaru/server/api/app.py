@@ -377,14 +377,16 @@ def create_app(settings: APISettings) -> FastAPI:
             yield
         finally:
             await stop_task_sweeper(sweep_task)
-            await app.state.user_activity.aclose()
-            await analytics.aclose()
-            if app.state.control_plane_client is not None:
-                await app.state.control_plane_client.close()
-            await database.cleanup()
-            # Last, so telemetry produced during the steps above still
-            # gets exported and flushed.
-            shutdown_otel()
+            try:
+                await app.state.user_activity.aclose()
+            finally:
+                await analytics.aclose()
+                if app.state.control_plane_client is not None:
+                    await app.state.control_plane_client.close()
+                await database.cleanup()
+                # Last, so telemetry produced during the steps above still
+                # gets exported and flushed.
+                shutdown_otel()
 
     cors_allow_origins = settings.get_cors_allow_origins()
     app = FastAPI(

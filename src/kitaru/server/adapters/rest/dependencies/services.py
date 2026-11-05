@@ -14,6 +14,7 @@
 """Service providers bound to request-scoped SQL repositories."""
 
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -155,33 +156,36 @@ from kitaru.server.domain.blob import BlobStorageBackend
 from kitaru.server.domain.plugin import PluginKind
 
 
-async def get_user_activity_service(
+def get_user_activity_service(
     request: Request,
     recorder: Annotated[
         UserActivityRecorder | None, Depends(get_user_activity_recorder)
     ],
-) -> AsyncGenerator[UserActivityService | None, None]:
-    """Provide a user activity service on a session of its own.
-
-    The unauthenticated info route has no request session, and a failing read
-    here must not leave one behind for the route class to commit.
+) -> UserActivityService | None:
+    """Return a user activity service reading on sessions of its own.
 
     Args:
         request: Incoming request.
         recorder: Recorder for this process.
 
-    Yields:
-        User activity service bound to the SQL repositories, or None before
-        startup created the database service.
+    Returns:
+        User activity service, or None before startup created the database
+        service.
     """
     database: DatabaseService | None = request.app.state.database
     if database is None:
-        yield None
-        return
-    async for session in database.get_async_session():
-        yield UserActivityService(
-            SQLServerSettingsRepository(session), SQLTaskRepository(session), recorder
-        )
+        return None
+
+    # The info route has no request session, and the service opens its own so
+    # that its timeout covers connecting and closing too.
+    @asynccontextmanager
+    async def open_repositories() -> AsyncGenerator[
+        tuple[SQLServerSettingsRepository, SQLTaskRepository], None
+    ]:
+        async for session in database.get_async_session():
+            yield SQLServerSettingsRepository(session), SQLTaskRepository(session)
+
+    return UserActivityService(open_repositories, recorder)
 
 
 def get_permission_service(

@@ -202,6 +202,7 @@ async def list_workers(
 
 
 @router.get("/{worker_id}", responses=error_responses(404))
+@not_user_activity
 async def get_worker(
     worker_id: uuid.UUID,
     service: Annotated[WorkerService, Depends(get_worker_service)],

@@ -28,6 +28,7 @@ from conftest import drop_test_database, local_settings, postgres_available
 from kitaru.server.adapters.db.orm.server_settings import ServerSettingsORM
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.services.user_activity import UserActivityRecorder
 from kitaru.server.database.service import DatabaseService
 
 RUNTIME = {"platform": "bare"}
@@ -51,7 +52,7 @@ async def settings() -> AsyncGenerator[APISettings, None]:
 async def _serve(
     settings: APISettings,
 ) -> AsyncGenerator[tuple[FastAPI, httpx.AsyncClient], None]:
-    """Run one server process on the shared database through its lifespan."""
+    """Run one application instance on the shared database through its lifespan."""
     app = create_app(settings)
     async with (
         app.router.lifespan_context(app),
@@ -93,28 +94,36 @@ async def test_user_requests_advance_activity_but_info_and_health_do_not(
     settings: APISettings,
 ) -> None:
     """Report activity from authenticated requests only."""
-    async with _serve(settings) as (_, client):
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+
+    async def keep_in_memory(at: datetime) -> None:
+        return None
+
+    async with _serve(settings) as (app, client):
+        # Swap in a recorder on a controlled clock so the later request is
+        # later by construction.
+        app.state.user_activity = UserActivityRecorder(
+            keep_in_memory, clock=lambda: now
+        )
         assert await _get_activity(client) is None
         headers = await _login(client)
 
         await client.get("/api/v1/agents", headers=headers)
-        first = await _get_activity(client)
-        assert first is not None
+        assert await _get_activity(client) == now
 
         for path in ("/api/v1/info", "/health", "/health/live"):
             await client.get(path)
-        assert await _get_activity(client) == first
+        now += timedelta(minutes=1)
+        assert await _get_activity(client) == now - timedelta(minutes=1)
 
         await client.get("/api/v1/agents", headers=headers)
-        second = await _get_activity(client)
-        assert second is not None
-        assert second > first
+        assert await _get_activity(client) == now
 
 
 async def test_idle_worker_traffic_does_not_advance_activity(
     settings: APISettings,
 ) -> None:
-    """Leave the time alone for worker registration, claim, heartbeat, and renewal."""
+    """Leave the time alone for worker registration, lookup, polling, and renewal."""
     async with _serve(settings) as (_, client):
         headers = await _login(client)
         await client.get("/api/v1/agents", headers=headers)
@@ -136,6 +145,8 @@ async def test_idle_worker_traffic_does_not_advance_activity(
             f"/api/v1/workers/{worker_id}/token", headers=headers
         )
         assert renewal.status_code == 200
+        lookup = await client.get(f"/api/v1/workers/{worker_id}", headers=headers)
+        assert lookup.status_code == 200
 
         assert await _get_activity(client) == before
 
@@ -272,3 +283,41 @@ async def test_a_slow_write_does_not_hold_up_the_request(settings: APISettings) 
                 await session.execute(select(ServerSettingsORM.last_user_activity))
             ).scalar_one()
         assert stored == reported
+
+
+async def test_info_answers_null_when_the_read_hangs(settings: APISettings) -> None:
+    """Answer the info route with no time instead of waiting on a locked table."""
+    async with _serve(settings) as (_, client):
+        await client.get("/api/v1/agents", headers=await _login(client))
+        connection = await _connect(settings)
+        transaction = connection.transaction()
+        await transaction.start()
+        try:
+            await connection.execute(
+                "LOCK TABLE server_settings IN ACCESS EXCLUSIVE MODE"
+            )
+            response = await asyncio.wait_for(client.get("/api/v1/info"), timeout=15)
+        finally:
+            await transaction.rollback()
+            await connection.close()
+
+        assert response.status_code == 200
+        assert response.json()["last_user_activity"] is None
+
+
+async def test_shutdown_does_not_wait_on_a_locked_write(settings: APISettings) -> None:
+    """Finish the lifespan while the activity write waits on a row lock."""
+    server = _serve(settings)
+    _, client = await server.__aenter__()
+    connection = await _connect(settings)
+    transaction = connection.transaction()
+    try:
+        headers = await _login(client)
+        await transaction.start()
+        await connection.fetch("SELECT * FROM server_settings FOR UPDATE")
+        response = await client.get("/api/v1/agents", headers=headers)
+        assert response.status_code == 200
+        await asyncio.wait_for(server.__aexit__(None, None, None), timeout=30)
+    finally:
+        await transaction.rollback()
+        await connection.close()

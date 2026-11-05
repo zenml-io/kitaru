@@ -68,6 +68,6 @@ class ServerInfoResponse(ResponseModel):
         default=None,
         description=(
             "UTC time of the last user activity, or the current time while "
-            "a task is in flight. Null when none was recorded."
+            "a task is in flight. Null when unknown or not recorded."
         ),
     )

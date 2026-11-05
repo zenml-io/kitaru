@@ -24,9 +24,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 def not_user_activity(endpoint: F) -> F:
     """Exclude an endpoint from counting as user activity.
 
-    Marks a route an account credential reaches on behalf of a machine, such
-    as a worker renewing its token, which says nothing about a person using
-    the server.
+    Account authentication on the route does not record activity.
 
     Args:
         endpoint: Route handler function.
