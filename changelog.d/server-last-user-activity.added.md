@@ -1,0 +1,1 @@
+- Added `last_user_activity` to `GET /api/v1/info`. It reports when a user last used the server, and the current time while a task is claimed or running. Worker polling, worker heartbeats, and worker token renewal do not count.

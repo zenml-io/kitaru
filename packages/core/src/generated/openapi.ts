@@ -2287,6 +2287,7 @@ export interface paths {
          *         settings: Service settings governing auth behavior.
          *         server_id: Persisted server id.
          *         ui_version: UI version served by this process.
+         *         activity: User activity service, absent before startup.
          *
          *     Returns:
          *         Server info.
@@ -8556,6 +8557,11 @@ export interface components {
              * @description Server ID.
              */
             id?: string | null;
+            /**
+             * Last User Activity
+             * @description UTC time of the last user activity, or the current time while a task is in flight. Null when none was recorded.
+             */
+            last_user_activity?: string | null;
             /**
              * Max Blob Size Bytes
              * @description Maximum accepted blob size in bytes.
