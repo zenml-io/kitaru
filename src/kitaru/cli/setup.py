@@ -320,13 +320,12 @@ def skill_destinations(home: Path) -> list[Path]:
     """Return every skill directory a detected client reads.
 
     `~/.agents/skills` is the cross-agent location and always included.
-    Client-specific directories are added when that client's CLI is on PATH
-    or its home directory already exists.
+    Claude Code also needs its client-specific directory when its CLI is on
+    PATH or its home directory exists. Codex reads the cross-agent location.
     """
     destinations = [home / ".agents" / "skills"]
-    for executable, directory in (("claude", ".claude"), ("codex", ".codex")):
-        if shutil.which(executable) or (home / directory).is_dir():
-            destinations.append(home / directory / "skills")
+    if shutil.which("claude") or (home / ".claude").is_dir():
+        destinations.append(home / ".claude" / "skills")
     return destinations
 
 

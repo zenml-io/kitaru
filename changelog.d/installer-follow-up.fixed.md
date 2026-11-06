@@ -1,0 +1,1 @@
+- Fixed installer startup verification, missing option values, uv bootstrap paths, shell-profile failures, and interrupted legacy skill updates. Ordinary global upgrades now preserve Python and add-on packages, ambiguous projects receive package-manager guidance, and setup avoids adding a duplicate Codex skill copy.
