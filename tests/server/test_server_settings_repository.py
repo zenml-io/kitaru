@@ -14,6 +14,7 @@
 """Tests for the server settings repository."""
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -58,3 +59,22 @@ async def test_ensure_server_id_generates_without_a_configured_id() -> None:
         server_id = await ensure_server_id(repository, None)
         await session.commit()
         assert await ensure_server_id(repository, None) == server_id
+
+
+async def test_record_user_activity_never_moves_the_stored_time_backward() -> None:
+    """Keep the latest of the recorded times regardless of write order."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+
+    later = datetime(2026, 1, 1, 12, tzinfo=UTC)
+    async with pg_session() as session:
+        repository = SQLServerSettingsRepository(session)
+        await repository.ensure_server_id(uuid.uuid4())
+        assert await repository.get_last_user_activity() is None
+
+        await repository.record_user_activity(later)
+        await repository.record_user_activity(later - timedelta(hours=1))
+        assert await repository.get_last_user_activity() == later
+
+        await repository.record_user_activity(later + timedelta(hours=1))
+        assert await repository.get_last_user_activity() == later + timedelta(hours=1)

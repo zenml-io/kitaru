@@ -14,7 +14,9 @@
 """Server settings ORM table."""
 
 import uuid
+from datetime import datetime
 
+from sqlalchemy import DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.server.adapters.db.orm.base import Base, TimestampMixin
@@ -29,3 +31,4 @@ class ServerSettingsORM(TimestampMixin, Base):
     # concurrent first startup resolves through the primary key conflict.
     singleton: Mapped[bool] = mapped_column(primary_key=True, default=True)
     server_id: Mapped[uuid.UUID]
+    last_user_activity: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

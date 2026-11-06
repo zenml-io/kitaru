@@ -15,6 +15,7 @@
 
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from datetime import datetime
 from importlib.metadata import version
 from typing import Any
 
@@ -100,6 +101,7 @@ from kitaru.server.application.services.server_analytics import (
     ServerAnalytics,
     build_analytics_context,
 )
+from kitaru.server.application.services.user_activity import UserActivityRecorder
 from kitaru.server.client_identity import parse_client_identity
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.base import (
@@ -363,18 +365,28 @@ def create_app(settings: APISettings) -> FastAPI:
         async for session in database.get_async_session():
             await register_default_plugins(SQLPluginRepository(session))
             await session.commit()
+
+        async def persist_user_activity(at: datetime) -> None:
+            async for session in database.get_async_session():
+                await SQLServerSettingsRepository(session).record_user_activity(at)
+                await session.commit()
+
+        app.state.user_activity = UserActivityRecorder(persist_user_activity)
         sweep_task = start_task_sweeper(database, settings, analytics)
         try:
             yield
         finally:
             await stop_task_sweeper(sweep_task)
-            await analytics.aclose()
-            if app.state.control_plane_client is not None:
-                await app.state.control_plane_client.close()
-            await database.cleanup()
-            # Last, so telemetry produced during the steps above still
-            # gets exported and flushed.
-            shutdown_otel()
+            try:
+                await app.state.user_activity.aclose()
+            finally:
+                await analytics.aclose()
+                if app.state.control_plane_client is not None:
+                    await app.state.control_plane_client.close()
+                await database.cleanup()
+                # Last, so telemetry produced during the steps above still
+                # gets exported and flushed.
+                shutdown_otel()
 
     cors_allow_origins = settings.get_cors_allow_origins()
     app = FastAPI(
@@ -394,8 +406,12 @@ def create_app(settings: APISettings) -> FastAPI:
     app.state.analytics = analytics
     # Replaced with a live client at startup under the control plane scheme.
     app.state.control_plane_client = None
+    # Replaced with a live database service at startup.
+    app.state.database = None
     # Replaced with the persisted server id at startup.
     app.state.server_id = None
+    # Replaced with a live recorder at startup.
+    app.state.user_activity = None
     # Replaced with a live store at startup when S3 blob storage is configured.
     app.state.s3_blob_data_store = None
     # Replaced with a live backend at startup when an ephemeral worker backend

@@ -13,6 +13,8 @@
 #  permissions and limitations under the License.
 """Service providers bound to request-scoped SQL repositories."""
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -74,6 +76,9 @@ from kitaru.server.adapters.db.repositories.replay_repository import (
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
+from kitaru.server.adapters.db.repositories.server_settings_repository import (
+    SQLServerSettingsRepository,
+)
 from kitaru.server.adapters.db.repositories.session_node_repository import (
     SQLSessionNodeRepository,
 )
@@ -92,6 +97,7 @@ from kitaru.server.adapters.rest.dependencies.request import (
     get_engine,
     get_server_analytics,
     get_session,
+    get_user_activity_recorder,
 )
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.interfaces.blob_data_store import (
@@ -140,9 +146,46 @@ from kitaru.server.application.services.session_node_service import (
 )
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.application.services.tag_service import TagService
+from kitaru.server.application.services.user_activity import (
+    UserActivityRecorder,
+    UserActivityService,
+)
 from kitaru.server.application.services.worker_service import WorkerService
+from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.blob import BlobStorageBackend
 from kitaru.server.domain.plugin import PluginKind
+
+
+def get_user_activity_service(
+    request: Request,
+    recorder: Annotated[
+        UserActivityRecorder | None, Depends(get_user_activity_recorder)
+    ],
+) -> UserActivityService | None:
+    """Return a user activity service reading on sessions of its own.
+
+    Args:
+        request: Incoming request.
+        recorder: Recorder for this process.
+
+    Returns:
+        User activity service, or None before startup created the database
+        service.
+    """
+    database: DatabaseService | None = request.app.state.database
+    if database is None:
+        return None
+
+    # The info route has no request session, and the service opens its own so
+    # that its timeout covers connecting and closing too.
+    @asynccontextmanager
+    async def open_repositories() -> AsyncGenerator[
+        tuple[SQLServerSettingsRepository, SQLTaskRepository], None
+    ]:
+        async for session in database.get_async_session():
+            yield SQLServerSettingsRepository(session), SQLTaskRepository(session)
+
+    return UserActivityService(open_repositories, recorder)
 
 
 def get_permission_service(
