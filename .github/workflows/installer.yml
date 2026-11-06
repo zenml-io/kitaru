@@ -33,6 +33,8 @@ on:
     paths:
       - install.sh
       - scripts/test-installer.sh
+      - tests/scripts/test_installer_behavior.py
+      - pyproject.toml
       - src/kitaru/cli/setup.py
       - .github/workflows/installer.yml
 permissions: {}

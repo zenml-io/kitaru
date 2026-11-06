@@ -4,7 +4,7 @@ set -euo pipefail
 INSTALLER="${1:-$(cd "$(dirname "$0")/.." && pwd)/install.sh}"
 INSTALLER="$(cd "$(dirname "$INSTALLER")" && pwd)/$(basename "$INSTALLER")"
 command -v uv >/dev/null
-PYTHON="$(command -v python3)"
+PYTHON="$(uv python find --no-python-downloads ">=3.11")"
 TMP="$(mktemp -d /tmp/kitaru-installer.XXXXXX)"
 TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
@@ -15,7 +15,7 @@ export XDG_CONFIG_HOME="$TMP/config" XDG_DATA_HOME="$TMP/data"
 export XDG_CACHE_HOME="$TMP/xdg-cache"
 export UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never UV_NO_CONFIG=1
 export UV_NO_INDEX=1 UV_FIND_LINKS="$TMP/wheels"
-unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT UV_PYTHON
+unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT UV_PYTHON UV_PROJECT UV_WORKING_DIR UV_CONSTRAINT UV_FROZEN UV_NO_SYNC
 mkdir -p "$TMP/wheels"
 # This is an installer fixture, not a test of the real Kitaru package.
 "$PYTHON" - "$TMP/wheels" <<'PY'
@@ -94,6 +94,7 @@ for flag in 0 1; do
     export BOOTSTRAP_OBSERVED="$TMP/bootstrap-$flag"
     unset UV_NO_MODIFY_PATH
     export KITARU_NO_MODIFY_PATH="$flag"
+    export ORIG_PATH="$PATH" UV_BIN_DIR="$TMP/bootstrap-bin"
     # shellcheck source=/dev/null
     source "$TMP/bootstrap-function.sh"
     install_uv
@@ -152,13 +153,12 @@ extract_function() {
 }
 extract_function persist_path > "$TMP/functions.sh"
 extract_function install_skills >> "$TMP/functions.sh"
-extract_function skills_complete >> "$TMP/functions.sh"
 # shellcheck source=/dev/null
 source "$TMP/functions.sh"
 TEST_HOME="$TMP/test-home"
 mkdir -p "$TEST_HOME"
 # shellcheck disable=SC2016
-printf '%s\n' 'export PATH="$HOME/.local/bin:$PATH"' > "$TEST_HOME/.zshenv"
+printf 'export PATH="%s:$PATH"\n' "$TEST_HOME/.local/bin" > "$TEST_HOME/.zshenv"
 persist_path "$TEST_HOME/.local/bin"
 [ ! -e "$TEST_HOME/.profile" ]
 echo 'PASS: zshenv persistence detected'
@@ -265,3 +265,51 @@ ORIGINAL_TEST_PATH="$TMP/stubs:$PATH"
 ) > "$TMP/persistence.log" 2>&1 || { cat "$TMP/persistence.log"; exit 1; }
 [ "$(cat "$OBSERVED_PATH")" = "$ORIGINAL_TEST_PATH" ]
 echo 'PASS: update-shell receives original PATH'
+
+# A normal rerun must upgrade the package while retaining the existing tool's
+# add-ons and interpreter. Inspect uv's real receipt, not just command flags.
+"$PYTHON" - "$TMP/wheels" <<'PY'
+import pathlib
+import sys
+import zipfile
+root = pathlib.Path(sys.argv[1])
+files = {
+    "fixture_extra.py": "VALUE = 1\n",
+    "fixture_extra-1.0.0.dist-info/METADATA": "Metadata-Version: 2.1\nName: fixture-extra\nVersion: 1.0.0\n",
+    "fixture_extra-1.0.0.dist-info/WHEEL": "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+    "fixture_extra-1.0.0.dist-info/RECORD": "",
+}
+with zipfile.ZipFile(root / "fixture_extra-1.0.0-py3-none-any.whl", "w") as archive:
+    for name, content in files.items():
+        archive.writestr(name, content)
+PY
+(
+  cd "$TMP"
+  export UV_TOOL_DIR="$TMP/preserve-tools" UV_TOOL_BIN_DIR="$TMP/preserve-bin"
+  uv tool install --python "$PYTHON" --with fixture-extra 'kitaru[cli,mcp,worker]' >/dev/null 2>&1
+  before="$("$UV_TOOL_DIR/kitaru/bin/python" -c 'import sys; print(sys.base_prefix)')"
+  "$PYTHON" - "$TMP/wheels" <<'PY'
+import pathlib
+import sys
+import zipfile
+root = pathlib.Path(sys.argv[1])
+with zipfile.ZipFile(root / "kitaru-0.0.1-py3-none-any.whl") as old:
+    files = {name.replace("0.0.1", "0.0.2"): old.read(name).replace(b"0.0.1", b"0.0.2") for name in old.namelist()}
+with zipfile.ZipFile(root / "kitaru-0.0.2-py3-none-any.whl", "w") as new:
+    for name, content in files.items():
+        new.writestr(name, content)
+PY
+  bash "$INSTALLER" --global --no-skills --no-mcp --no-modify-path
+  [ "$("$UV_TOOL_DIR/kitaru/bin/python" -c 'import sys; print(sys.base_prefix)')" = "$before" ]
+  "$UV_TOOL_DIR/kitaru/bin/python" -c 'import fixture_extra; assert fixture_extra.VALUE == 1'
+  "$PYTHON" - "$UV_TOOL_DIR/kitaru/uv-receipt.toml" "$PYTHON" <<'PY'
+import pathlib
+import sys
+import tomllib
+receipt = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())["tool"]
+assert any(item["name"] == "fixture-extra" for item in receipt["requirements"]), receipt
+assert receipt["python"] == sys.argv[2], receipt
+PY
+  "$UV_TOOL_BIN_DIR/kitaru" --version | grep -F 'version 0.0.2'
+) > "$TMP/global-preservation.log" 2>&1 || { cat "$TMP/global-preservation.log"; exit 1; }
+echo 'PASS: real global upgrade preserves receipt, add-on package and Python'
