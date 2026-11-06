@@ -676,6 +676,60 @@ async def test_failed_skill_swap_restores_the_previous_skill(home: Path, monkeyp
     assert [p.name for p in codex_skills.iterdir() if p.name.startswith(".")] == []
 
 
+@pytest.mark.parametrize(
+    "kind", ["file", "file_symlink", "directory_symlink", "dangling_symlink"]
+)
+@pytest.mark.parametrize("publish_fails", [False, True], ids=["success", "rollback"])
+async def test_existing_skill_path_is_replaced_or_restored(
+    home: Path, monkeypatch, kind: str, publish_fails: bool
+):
+    """Publish updates existing paths; a failed publish preserves their originals."""
+    skills = home / ".agents" / "skills"
+    skills.mkdir(parents=True)
+    target = skills / "kitaru-investigation"
+    original = home / "original"
+    if kind == "file":
+        target.write_text("original skill", encoding="utf-8")
+    else:
+        if kind == "file_symlink":
+            original.write_text("original skill", encoding="utf-8")
+        elif kind == "directory_symlink":
+            original.mkdir()
+            (original / "SKILL.md").write_text("original skill", encoding="utf-8")
+        target.symlink_to(original)
+
+    if publish_fails:
+        real_replace = os.replace
+
+        def failing_replace(src, dst):
+            if Path(src).name.endswith(".staging") and Path(dst) == target:
+                raise OSError("rename refused")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(os, "replace", failing_replace)
+
+    result = await _run(home, register_mcp=False)
+
+    assert result.item["steps"][0]["status"] == ("failed" if publish_fails else "done")
+    if publish_fails:
+        if kind == "file":
+            assert target.is_file() and not target.is_symlink()
+            assert target.read_text() == "original skill"
+        else:
+            assert target.is_symlink()
+            assert target.readlink() == original
+    else:
+        assert target.is_dir() and not target.is_symlink()
+        assert (target / "SKILL.md").read_text() == _SKILLS[target.name]["SKILL.md"]
+    if kind == "file_symlink":
+        assert original.read_text() == "original skill"
+    elif kind == "directory_symlink":
+        assert (original / "SKILL.md").read_text() == "original skill"
+    elif kind == "dangling_symlink":
+        assert not original.exists()
+    assert not [p for p in skills.iterdir() if p.name.startswith(".")]
+
+
 async def test_nothing_to_do_is_a_warning(home: Path):
     """--no-skills --no-mcp does nothing and says so."""
     result = await _run(home, install_skills=False, register_mcp=False)
