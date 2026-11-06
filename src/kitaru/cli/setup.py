@@ -402,9 +402,7 @@ def _write_skills(destination: Path, skills: dict[str, dict[str, bytes]]) -> Non
                 path.write_bytes(content)
             if not (staging / "SKILL.md").is_file():
                 raise OSError(f"{name}: SKILL.md missing after extraction")
-            if target.is_symlink() or target.is_file():
-                target.unlink()
-            elif target.is_dir():
+            if target.is_symlink() or target.is_file() or target.is_dir():
                 retired = Path(
                     tempfile.mkdtemp(prefix=f".{name}.", suffix=".old", dir=destination)
                 )
@@ -417,7 +415,10 @@ def _write_skills(destination: Path, skills: dict[str, dict[str, bytes]]) -> Non
                     # leaves the skill missing or hidden in the retired copy.
                     os.replace(retired, target)
                     raise
-                shutil.rmtree(retired, ignore_errors=True)
+                if retired.is_symlink() or retired.is_file():
+                    retired.unlink()
+                else:
+                    shutil.rmtree(retired, ignore_errors=True)
                 continue
             os.replace(staging, target)
         except BaseException:
