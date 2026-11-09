@@ -17,7 +17,6 @@ import uuid
 
 import pytest
 
-from conftest import FakeEvaluationRepository, FakeSessionRepository, create_session
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionStatus
@@ -42,6 +41,11 @@ from kitaru.server.domain.session import (
     SessionNotFound,
 )
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    FakeEvaluationRepository,
+    FakeSessionRepository,
+    create_session,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 

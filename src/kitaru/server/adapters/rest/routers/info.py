@@ -25,9 +25,10 @@ from kitaru.server.adapters.rest.dependencies import (
     get_server_id_state,
     get_ui_version_state,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.api.config import APISettings
 
-router = APIRouter()
+router = APIRouter(route_class=KitaruAPIRoute)
 
 KITARU_VERSION = version("kitaru")
 

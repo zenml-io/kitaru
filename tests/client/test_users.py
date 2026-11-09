@@ -18,13 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import (
-    FakeAccountRepository,
-    FakePasswordHasher,
-    asgi_api_client,
-    local_settings,
-    override_idempotency,
-)
+from conftest import asgi_api_client, local_settings
 from kitaru.api_models.v1.account import (
     AccountResponse,
     UserActivationTokenResponse,
@@ -39,6 +33,11 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakePasswordHasher,
+    override_idempotency,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin", is_admin=True))
 

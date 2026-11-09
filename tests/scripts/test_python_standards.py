@@ -1,9 +1,9 @@
-"""Exercise DB syntax diagnostics without importing the database runtime."""
+"""Exercise syntax diagnostics without importing the checked runtime."""
 
 from pathlib import Path
 
 import pytest
-from scripts.check_python_standards import DB_PATH, check_source, main
+from scripts.check_python_standards import DB_PATH, PACKAGE_PATH, check_source, main
 
 
 @pytest.mark.parametrize(
@@ -83,6 +83,58 @@ def test_rules_are_path_scoped() -> None:
         == []
     )
     assert check_source("result.first(); session.commit()", Path("src/other.py")) == []
+
+
+@pytest.mark.parametrize(
+    ("source", "path", "code"),
+    [
+        ("session.refresh(row)", DB_PATH / "repositories/a.py", "KIT005"),
+        ("row.updated = now", DB_PATH / "repositories/a.py", "KIT006"),
+        (
+            "Item.model_validate(row, from_attributes=True)",
+            PACKAGE_PATH / "server/adapters/rest/mapping/a.py",
+            "KIT007",
+        ),
+        (
+            "from kitaru.api_models.v1.tag import TagCreateRequest",
+            PACKAGE_PATH / "server/application/services/a.py",
+            "KIT008",
+        ),
+        (
+            "from kitaru.api_models.v1 import tag, TagResponse",
+            PACKAGE_PATH / "server/domain/a.py",
+            "KIT008",
+        ),
+        ("hasattr(client, 'close')", PACKAGE_PATH / "cli/a.py", "KIT009"),
+    ],
+)
+def test_package_rules(source: str, path: Path, code: str) -> None:
+    """Report each package-wide rule inside its scope."""
+    assert [finding.code for finding in check_source(source, path)] == [code]
+
+
+@pytest.mark.parametrize(
+    ("source", "path"),
+    [
+        ("row.updated = now", PACKAGE_PATH / "server/domain/a.py"),
+        (
+            "ConfigDict(from_attributes=True)",
+            PACKAGE_PATH / "server/adapters/db/orm/a.py",
+        ),
+        (
+            "from kitaru.api_models.v1.tag import TagCreateRequest",
+            PACKAGE_PATH / "server/adapters/rest/routers/a.py",
+        ),
+        (
+            "from kitaru.api_models.v1.task import TaskStatus",
+            PACKAGE_PATH / "server/application/services/a.py",
+        ),
+        ("hasattr(client, 'close')", Path("scripts/a.py")),
+    ],
+)
+def test_package_rules_are_scoped(source: str, path: Path) -> None:
+    """Allow each pattern where its rule does not apply."""
+    assert check_source(source, path) == []
 
 
 def test_cli_reports_all_sorted_findings(

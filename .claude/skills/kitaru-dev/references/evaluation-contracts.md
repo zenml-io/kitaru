@@ -1,6 +1,6 @@
 # Evaluation, Replay, and Experiment Contracts
 
-Use this reference when changing evaluation, replay, or experiment behavior. Cross-check the current DTOs in `src/kitaru/api_models/v1/{evaluation,replay,experiment_run,ui}.py` and CLI specs in `src/kitaru/cli/app.py` before editing these contracts.
+Use this reference when changing evaluation, replay, or experiment behavior. Cross-check the current DTOs in `src/kitaru/api_models/v1/{evaluation,replay,experiment_run,ui}.py` and CLI specs in `src/kitaru/cli/{experiment,session}_commands.py` before editing these contracts.
 
 Evaluator selections carry per-version parameters. On CLI commands that select evaluators, repeat `--evaluator-params 'EVALUATOR@VERSION=JSON_OBJECT'` for each configured evaluator that needs parameters; the token must match one of the exact `--evaluator` tokens. Preserve the parameters in examples and reviewer reproduction steps because evaluator-produced rows record them and baseline reuse compares them.
 

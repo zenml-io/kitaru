@@ -1740,6 +1740,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/experiment-runs/{experiment_run_id}/evaluation-aggregates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Experiment Run Evaluation Aggregates
+         * @description Aggregate the evaluations linked to an experiment run's replays.
+         *
+         *     Groups contain whole-run baseline and result statistics, plus evaluation
+         *     values for the 50 most recent replays, oldest first. Only evaluations
+         *     pinned to the run's replays contribute. Clients observe HTTP 200 on
+         *     success and 404 when no experiment run has this id.
+         *
+         *     Args:
+         *         experiment_run_id: Id of the experiment run.
+         *         service: Experiment run evaluation service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         One aggregate per evaluation name, evaluator version, and data type,
+         *         sorted by name, data type, and evaluator version id.
+         */
+        get: operations["list_experiment_run_evaluation_aggregates_api_v1_experiment_runs__experiment_run_id__evaluation_aggregates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/experiment-runs/{experiment_run_id}/jobs": {
         parameters: {
             query?: never;
@@ -3627,9 +3661,7 @@ export interface paths {
          *
          *     Args:
          *         experiment_run_id: Id of the experiment run.
-         *         run_service: Experiment run service.
-         *         replay_service: Replay service.
-         *         evaluation_service: Evaluation service.
+         *         service: Experiment run evaluation service.
          *         actor: Caller context.
          *
          *     Returns:
@@ -15589,6 +15621,73 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    list_experiment_run_evaluation_aggregates_api_v1_experiment_runs__experiment_run_id__evaluation_aggregates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                experiment_run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvaluationAggregateResponse"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -18,13 +18,6 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeBlobRepository,
-    FakePluginRepository,
-    create_agent,
-    create_blob,
-)
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.plugin import (
@@ -50,6 +43,13 @@ from kitaru.server.domain.plugin import (
     PluginVersionNotFound,
     ReservedPluginName,
     ScriptPluginSource,
+)
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeBlobRepository,
+    FakePluginRepository,
+    create_agent,
+    create_blob,
 )
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))

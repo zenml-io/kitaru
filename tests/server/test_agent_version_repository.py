@@ -18,17 +18,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeExperimentRunRepository,
-    FakeSecretRepository,
-    FakeSessionRepository,
-    FakeTagRepository,
-    pg_session,
-    pg_session_with_engine,
-    postgres_available,
-)
+from conftest import pg_session, pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.tag import TagResourceType
@@ -95,6 +85,14 @@ from kitaru.server.domain.secret import Secret
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.tag import Tag, TagLink
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeExperimentRunRepository,
+    FakeSecretRepository,
+    FakeSessionRepository,
+    FakeTagRepository,
+)
 
 Setup = tuple[
     AgentVersionRepository,

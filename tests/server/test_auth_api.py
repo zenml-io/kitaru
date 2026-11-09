@@ -19,14 +19,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from conftest import (
-    FakeAccountRepository,
-    FakeApiKeyRepository,
-    FakePasswordHasher,
-    create_api_key,
-    local_settings,
-    stub_auth_session,
-)
+from conftest import local_settings, stub_auth_session
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.rest.dependencies import (
@@ -41,6 +34,12 @@ from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakeApiKeyRepository,
+    FakePasswordHasher,
+    create_api_key,
+)
 
 COOKIE_NAME = "kitaru_session"
 

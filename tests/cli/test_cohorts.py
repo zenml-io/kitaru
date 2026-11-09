@@ -35,7 +35,7 @@ from kitaru.api_models.v1.cohort_version import (
 from kitaru.api_models.v1.filter import FilterCondition
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.cli import app as app_module
-from kitaru.cli import cohorts
+from kitaru.cli import cohorts, invocation_context
 from kitaru.cli.output import CLIError
 
 
@@ -639,7 +639,7 @@ def argv_client(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
     return client
 
 

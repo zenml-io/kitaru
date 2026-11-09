@@ -1,0 +1,1 @@
+- Insights can now be filtered by `task_id`, so the `kitaru insight list --filter` command that `kitaru import analyze` suggests no longer fails with HTTP 422.

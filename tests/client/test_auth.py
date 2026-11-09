@@ -17,15 +17,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import (
-    FakeAccountRepository,
-    FakeApiKeyRepository,
-    FakePasswordHasher,
-    asgi_api_client,
-    create_api_key,
-    local_settings,
-    stub_auth_session,
-)
+from conftest import asgi_api_client, local_settings, stub_auth_session
 from kitaru.api_models.v1.auth import (
     API_KEY_PREFIX,
     CONTROL_PLANE_API_KEY_PREFIX,
@@ -38,6 +30,12 @@ from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import get_auth_service, get_auth_session
 from kitaru.server.api.app import create_app
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakeApiKeyRepository,
+    FakePasswordHasher,
+    create_api_key,
+)
 
 
 @pytest.fixture

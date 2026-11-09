@@ -20,6 +20,7 @@ from kitaru.api_models.v1.agent_version import AgentVersionCreateRequest, RunSpe
 from kitaru.api_models.v1.evaluator import EvaluatorCreateRequest
 from kitaru.api_models.v1.importer import ImporterCreateRequest
 from kitaru.cli import app as app_module
+from kitaru.cli import invocation_context
 from kitaru.cli.output import CLIError
 from kitaru.cli.registration import (
     PackageSource,
@@ -326,7 +327,7 @@ def test_cli_evaluator_register_forwards_connection_schema(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert (
         app_module.main(
@@ -389,7 +390,7 @@ def test_cli_agent_register_uses_shared_runner_and_output_contract(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert (
         app_module.main(
@@ -426,7 +427,7 @@ def test_cli_agent_entrypoint_is_rejected_before_api_mutation(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert (
         app_module.main(
@@ -452,7 +453,7 @@ def test_cli_agent_delete_requires_force_before_network_access(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert app_module.main(["agent", "delete", "demo"]) == 2
     error = json.loads(capsys.readouterr().err)
@@ -540,7 +541,7 @@ def test_cli_agent_register_rejects_invalid_env_before_api_mutation(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     exit_code = app_module.main(
         ["agent", "register", "demo", "--command", "run", *args]

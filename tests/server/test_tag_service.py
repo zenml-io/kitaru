@@ -17,7 +17,6 @@ import uuid
 
 import pytest
 
-from conftest import FakeTagRepository, create_tag
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.application.models.auth import AuthContext
@@ -31,6 +30,7 @@ from kitaru.server.domain.tag import (
     TagNotFound,
 )
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import FakeTagRepository, create_tag
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 

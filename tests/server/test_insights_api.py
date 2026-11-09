@@ -20,13 +20,6 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeInsightRepository,
-    FakePluginRepository,
-    create_agent,
-    override_idempotency,
-)
 from kitaru.api_models.v1.insight import MAX_INSIGHT_BATCH_SIZE, TextInsightData
 from kitaru.server.adapters.rest.dependencies import authorize, get_insight_service
 from kitaru.server.api.app import create_app
@@ -36,6 +29,13 @@ from kitaru.server.application.services.insight_service import InsightService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.insight import Insight
 from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeInsightRepository,
+    FakePluginRepository,
+    create_agent,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

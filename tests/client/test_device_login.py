@@ -19,12 +19,7 @@ from pathlib import Path
 import pytest
 from device_fakes import FakeDeviceRepository, build_device_auth_app
 
-from conftest import (
-    FakeAccountRepository,
-    FakeApiKeyRepository,
-    asgi_api_client,
-    create_api_key,
-)
+from conftest import asgi_api_client
 from kitaru.api_models.v1.auth import DeviceAuthorizationResponse
 from kitaru.api_models.v1.device import DeviceStatus, DeviceVerifyRequest
 from kitaru.client.credential_store import CredentialStore
@@ -32,6 +27,11 @@ from kitaru.client.device_auth import device_login
 from kitaru.client.device_grant import DeviceLoginError
 from kitaru.client.exceptions import TokenGrantError
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakeApiKeyRepository,
+    create_api_key,
+)
 
 BASE_URL = "http://test"
 

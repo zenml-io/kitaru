@@ -29,7 +29,7 @@ from kitaru.api_models.v1.experiment import (
     ExperimentUpdateRequest,
 )
 from kitaru.cli import app as app_module
-from kitaru.cli import experiments
+from kitaru.cli import experiments, invocation_context
 from kitaru.cli.output import CLIError
 from kitaru.client.exceptions import APIError
 
@@ -498,7 +498,7 @@ def argv_client(monkeypatch: pytest.MonkeyPatch) -> StubExperimentClient:
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
     return client
 
 

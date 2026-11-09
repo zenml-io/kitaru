@@ -18,18 +18,6 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeCohortRepository,
-    FakeCohortVersionRepository,
-    FakeExperimentRunRepository,
-    FakeSessionRepository,
-    FakeTagRepository,
-    create_agent,
-    create_cohort,
-    create_experiment_run,
-    create_session,
-)
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.tag import TagResourceType
@@ -53,6 +41,18 @@ from kitaru.server.domain.cohort_version import (
 from kitaru.server.domain.names import InvalidName
 from kitaru.server.domain.tag import Tag, TagLink
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeCohortRepository,
+    FakeCohortVersionRepository,
+    FakeExperimentRunRepository,
+    FakeSessionRepository,
+    FakeTagRepository,
+    create_agent,
+    create_cohort,
+    create_experiment_run,
+    create_session,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 

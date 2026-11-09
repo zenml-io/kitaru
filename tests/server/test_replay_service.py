@@ -19,23 +19,6 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    ReplayServices,
-    build_payload_store,
-    build_replay_services,
-    build_session_node,
-    create_agent,
-    create_agent_task,
-    create_agent_version,
-    create_blob,
-    create_cohort,
-    create_cohort_version,
-    create_plugin,
-    create_replay,
-    create_session,
-    create_worker,
-    get_replay_job_id,
-)
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.replay import BaselineEvaluationMode
@@ -83,6 +66,23 @@ from kitaru.server.domain.session import Session
 from kitaru.server.domain.session_node import SessionNode
 from kitaru.server.domain.task import AgentTask
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    ReplayServices,
+    build_payload_store,
+    build_replay_services,
+    build_session_node,
+    create_agent,
+    create_agent_task,
+    create_agent_version,
+    create_blob,
+    create_cohort,
+    create_cohort_version,
+    create_plugin,
+    create_replay,
+    create_session,
+    create_worker,
+    get_replay_job_id,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 

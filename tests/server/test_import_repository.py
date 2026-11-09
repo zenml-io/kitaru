@@ -21,11 +21,7 @@ import pytest
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from conftest import (
-    FakeImportRepository,
-    pg_session_with_engine,
-    postgres_available,
-)
+from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.imports import ImportFailure, ImportStats
 from kitaru.api_models.v1.job import JobKind, JobStatus
@@ -66,6 +62,7 @@ from kitaru.server.domain.plugin import (
 )
 from kitaru.server.domain.session import Session
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import FakeImportRepository
 
 
 class Setup(NamedTuple):

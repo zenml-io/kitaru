@@ -18,7 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import FakeApiKeyRepository, asgi_api_client, override_idempotency
+from conftest import asgi_api_client
 from kitaru.api_models.v1.api_key import (
     ApiKeyCreateRequest,
     ApiKeyIssuedResponse,
@@ -37,6 +37,7 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.api_key import API_KEY_PREFIX
+from kitaru_test_support import FakeApiKeyRepository, override_idempotency
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

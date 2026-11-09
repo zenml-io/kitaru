@@ -240,6 +240,7 @@ def test_model_normalization_keeps_keys_and_supported_scalars() -> None:
             "cached_input_tokens": 3,
             "reasoning_tokens": 4,
         },
+        {"input_tokens": 120.5, "cached_input_tokens": 0.0, "output_tokens": 40.2},
     ],
 )
 def test_numeric_token_usage_is_preserved(usage: Any) -> None:
@@ -267,11 +268,22 @@ def test_secret_bearing_tokens_are_masked(secret: Any) -> None:
 @pytest.mark.parametrize(
     "key", ["input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens"]
 )
-@given(count=st.none() | st.integers())
+@given(count=st.none() | st.integers() | st.floats(allow_nan=False))
 def test_numeric_usage_fields_are_preserved(key: str, count: Any) -> None:
     assert cli_redact({key: count}) == {key: count}
     assert cli_redact({key: "credential-value"}) == {key: "***"}
     assert cli_redact({key: True}) == {key: "***"}
+
+
+def test_mean_token_usage_survives_beside_masked_credentials() -> None:
+    per_call = {"input_tokens": 120.5, "output_tokens": 40.2}
+    out = cli_redact(
+        {
+            "candidates": [{"tokens_per_call": per_call}],
+            "access_token": "credential-value",
+        }
+    )
+    assert out == {"candidates": [{"tokens_per_call": per_call}], "access_token": "***"}
 
 
 def test_credential_status_fields_are_preserved() -> None:

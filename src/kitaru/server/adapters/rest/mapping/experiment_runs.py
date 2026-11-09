@@ -14,11 +14,15 @@
 """Experiment run DTO conversions."""
 
 from kitaru.api_models.v1.experiment_run import (
+    EvaluationAggregateResponse,
+    EvaluationStats,
+    EvaluationValue,
     ExperimentRunCreateRequest,
     ExperimentRunJobsListParams,
     ExperimentRunListParams,
     ExperimentRunProgress,
     ExperimentRunResponse,
+    ReplayEvaluationValues,
 )
 from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
@@ -29,7 +33,85 @@ from kitaru.server.application.models.experiment_run import (
     ExperimentRunJobsFilter,
 )
 from kitaru.server.application.models.replay import ReplayStatusCounts
+from kitaru.server.domain.evaluation import Evaluation
+from kitaru.server.domain.evaluation_aggregate import EvaluationAggregate
+from kitaru.server.domain.evaluation_aggregate import (
+    EvaluationStats as DomainEvaluationStats,
+)
 from kitaru.server.domain.experiment_run import ExperimentRun
+
+
+def _map_evaluation_stats(stats: DomainEvaluationStats) -> EvaluationStats:
+    """Convert evaluation statistics to their response DTO.
+
+    Args:
+        stats: Evaluation statistics.
+
+    Returns:
+        Evaluation statistics response.
+    """
+    return EvaluationStats(
+        count=stats.count,
+        mean=stats.mean,
+        min=stats.min,
+        max=stats.max,
+        pass_rate=stats.pass_rate,
+        value_counts=stats.value_counts,
+        min_score=stats.min_score,
+        max_score=stats.max_score,
+        target_score=stats.target_score,
+    )
+
+
+def _map_evaluation_value(evaluation: Evaluation | None) -> EvaluationValue | None:
+    """Convert an evaluation to its value response, preserving missing values.
+
+    Args:
+        evaluation: Evaluation to convert.
+
+    Returns:
+        Evaluation value response, or None when the evaluation is missing.
+    """
+    if evaluation is None:
+        return None
+    return EvaluationValue(
+        score=evaluation.score,
+        value=evaluation.value,
+        passed=evaluation.passed,
+        min_score=evaluation.min_score,
+        max_score=evaluation.max_score,
+        target_score=evaluation.target_score,
+    )
+
+
+def evaluation_aggregate_to_response(
+    aggregate: EvaluationAggregate,
+) -> EvaluationAggregateResponse:
+    """Convert an evaluation aggregate to its response DTO.
+
+    Args:
+        aggregate: Evaluation aggregate.
+
+    Returns:
+        Evaluation aggregate response.
+    """
+    return EvaluationAggregateResponse(
+        name=aggregate.name,
+        evaluator_version_id=aggregate.evaluator_version_id,
+        evaluator_name=aggregate.evaluator_name,
+        evaluator_version=aggregate.evaluator_version,
+        data_type=aggregate.data_type,
+        baseline=_map_evaluation_stats(aggregate.baseline),
+        result=_map_evaluation_stats(aggregate.result),
+        replays=[
+            ReplayEvaluationValues(
+                replay_id=pair.replay_id,
+                baseline=_map_evaluation_value(pair.baseline),
+                result=_map_evaluation_value(pair.result),
+            )
+            for pair in aggregate.replays
+        ],
+    )
 
 
 def experiment_run_create_to_command(

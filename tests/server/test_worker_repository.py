@@ -19,12 +19,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conftest import (
-    UNSCOPED_WORKER_SCOPE,
-    FakeWorkerRepository,
-    pg_session,
-    postgres_available,
-)
+from conftest import pg_session, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import (
@@ -45,6 +40,10 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.worker import Worker, WorkerNotFound
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    UNSCOPED_WORKER_SCOPE,
+    FakeWorkerRepository,
+)
 
 Setup = tuple[WorkerRepository, uuid.UUID]
 

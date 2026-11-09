@@ -19,11 +19,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conftest import (
-    FakeIdempotencyKeyRepository,
-    pg_session_with_engine,
-    postgres_available,
-)
+from conftest import pg_session_with_engine, postgres_available
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.orm.idempotency_key import IdempotencyKeyORM
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -41,6 +37,7 @@ from kitaru.server.domain.idempotency_key import (
     IdempotencyKeyAlreadyExists,
     IdempotencyKeyResponseUndecryptable,
 )
+from kitaru_test_support import FakeIdempotencyKeyRepository
 
 Setup = tuple[IdempotencyKeyRepository, uuid.UUID, uuid.UUID]
 

@@ -20,12 +20,7 @@ import pytest
 from device_fakes import FakeDeviceRepository, build_device_auth_app
 from fastapi import HTTPException, status
 
-from conftest import (
-    FakeAccountRepository,
-    FakeApiKeyRepository,
-    create_api_key,
-    recording_asgi_api_client,
-)
+from conftest import recording_asgi_api_client
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ApiToken
 from kitaru.client.exceptions import AuthenticationError
@@ -34,6 +29,11 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.device import Device, DeviceStatus
 from kitaru.server.domain.keys import generate_secret, hash_secret
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakeApiKeyRepository,
+    create_api_key,
+)
 
 BASE_URL = "http://test"
 

@@ -320,3 +320,34 @@ export async function invokeTool(
   });
   return actualOutput;
 }
+
+/** The final replay state of every session, in creation order. */
+export function getSessionOutcomes(api: TestApi): string[] {
+  const created = api.calls.filter(
+    (call) => call.method === "POST" && call.path === "/api/v1/sessions",
+  );
+  return api.sessionIds.map((id, index) => {
+    const initial = created[index]?.body?.metadata as
+      | Record<string, unknown>
+      | undefined;
+    // A setup failure reports its own session after the native answer.
+    if (initial?.mastra_replay_state === "ineligible") return "setup-failure";
+    const update = api.calls
+      .filter(
+        (call) =>
+          call.method === "PATCH" &&
+          call.path.endsWith(id) &&
+          call.body?.status !== "in_progress",
+      )
+      .at(-1);
+    if (!update) return "pending";
+    const metadata = update.body?.metadata as
+      | Record<string, unknown>
+      | undefined;
+    const reason =
+      metadata?.mastra_replay_state === "ineligible"
+        ? `/${String(metadata.mastra_replay_reason)}`
+        : "";
+    return `${String(update.body?.status)}/${String(metadata?.mastra_replay_state)}${reason}`;
+  });
+}

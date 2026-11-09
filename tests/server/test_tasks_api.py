@@ -21,18 +21,7 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from conftest import (
-    JobAndTaskServices,
-    build_job_and_task_services,
-    create_agent,
-    create_agent_task,
-    create_agent_version,
-    create_job,
-    create_worker,
-    local_settings,
-    mint_worker_token,
-    stub_auth_session,
-)
+from conftest import local_settings, stub_auth_session
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     get_auth_service,
@@ -43,6 +32,16 @@ from kitaru.server.api.app import create_app
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
+from kitaru_test_support import (
+    JobAndTaskServices,
+    build_job_and_task_services,
+    create_agent,
+    create_agent_task,
+    create_agent_version,
+    create_job,
+    create_worker,
+    mint_worker_token,
+)
 
 
 @pytest.fixture

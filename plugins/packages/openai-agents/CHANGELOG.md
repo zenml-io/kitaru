@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Support OpenAI Agents SDK 0.23 and 0.24.
+
 ## 0.4.0 - 2026-10-08
 
 - Record the configured model, provider, and estimated cost on model-call nodes, and store reasoning items as reasoning on their model-call node instead of as `unsupported_openai_item` spans.

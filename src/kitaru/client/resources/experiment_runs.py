@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.experiment_run import (
+    EvaluationAggregateResponse,
     ExperimentRunJobsListParams,
     ExperimentRunListParams,
     ExperimentRunResponse,
@@ -57,6 +58,32 @@ class ExperimentRunsResource:
             "GET", f"/api/v1/experiment-runs/{experiment_run_id}"
         )
         return ExperimentRunResponse.model_validate(response.json())
+
+    async def get_evaluation_aggregates(
+        self, experiment_run_id: uuid.UUID
+    ) -> list[EvaluationAggregateResponse]:
+        """Get the evaluation aggregates of an experiment run.
+
+        Statistics include all evaluations linked to the run's replays.
+        Per-replay values include only the 50 most recent replays.
+
+        Args:
+            experiment_run_id: Id of the run.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing run.
+
+        Returns:
+            Aggregates grouped by evaluation name, evaluator version, and
+            data type, sorted by name.
+        """
+        response = await self._client.request(
+            "GET",
+            f"/api/v1/experiment-runs/{experiment_run_id}/evaluation-aggregates",
+        )
+        return [
+            EvaluationAggregateResponse.model_validate(item) for item in response.json()
+        ]
 
     async def list(
         self, params: ExperimentRunListParams | None = None

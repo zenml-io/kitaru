@@ -20,18 +20,6 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import (
-    ReplayServices,
-    build_replay_services,
-    build_session_node,
-    create_agent,
-    create_agent_version,
-    create_blob,
-    create_plugin,
-    create_replay,
-    create_session,
-    override_idempotency,
-)
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.server.adapters.rest.dependencies import (
@@ -50,6 +38,18 @@ from kitaru.server.domain.replay_config import (
     PassthroughConfig,
     ReplayConfig,
     ToolPolicy,
+)
+from kitaru_test_support import (
+    ReplayServices,
+    build_replay_services,
+    build_session_node,
+    create_agent,
+    create_agent_version,
+    create_blob,
+    create_plugin,
+    create_replay,
+    create_session,
+    override_idempotency,
 )
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")

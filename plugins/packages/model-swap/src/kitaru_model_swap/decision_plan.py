@@ -83,10 +83,33 @@ def plan_decisions(request: ReplayRequest) -> DecisionPlan:
         "in text?",
         options,
     )
+    questions = [tool_question]
+    fields: dict[tuple[str, str], tuple[str, list[str]]] = {}
+    # Questions must depend only on the offered schemas. Asking about only
+    # the recorded tool's arguments would reveal the tool-choice answer.
+    for name, function in tools.items():
+        parameters = function.get("parameters") or {}
+        required = parameters.get("required") or ()
+        for argument, schema in (parameters.get("properties") or {}).items():
+            values = _decidable_values(
+                schema, parameters, with_null=argument in required
+            )
+            if values is None or len(questions) >= _MAX_QUESTIONS:
+                continue
+            key = f"arg_{len(questions) - 1}_{_KEY.sub('_', argument)[:40]}"
+            questions.append(
+                Question(
+                    key,
+                    f"If the assistant calls {name}, which value should its "
+                    f"argument {argument!r} have?",
+                    dict.fromkeys(values),
+                )
+            )
+            fields[name, argument] = (key, values)
     if not calls:
         return DecisionPlan(
             "partial",
-            (tool_question,),
+            tuple(questions),
             {TOOL_QUESTION: TEXT_ANSWER},
             reason="the text answer needs a generative model",
         )
@@ -94,34 +117,21 @@ def plan_decisions(request: ReplayRequest) -> DecisionPlan:
     if call.name not in tools or not isinstance(call.arguments, dict):
         return DecisionPlan("generative", reason="the recorded call is not offered")
     parameters = tools[call.name].get("parameters") or {}
-    properties = parameters.get("properties") or {}
-    questions = [tool_question]
     expected = {TOOL_QUESTION: call.name}
     arguments: dict[str, str] = {}
     free: list[str] = []
     required = parameters.get("required") or ()
-    for index, (argument, value) in enumerate(call.arguments.items()):
+    for argument, value in call.arguments.items():
         # A null optional argument is the same as leaving it out, but a null
         # required one is a choice the model made, so it is asked about.
         if value is None and argument not in required:
             continue
-        values = _decidable_values(
-            properties.get(argument), parameters, with_null=argument in required
-        )
+        field = fields.get((call.name, argument))
         label = _label(value)
-        if values is None or label not in values or len(questions) >= _MAX_QUESTIONS:
+        if field is None or label not in field[1]:
             free.append(argument)
             continue
-        # The index keeps keys unique after unsafe characters are replaced.
-        key = f"arg_{index}_{_KEY.sub('_', argument)[:40]}"
-        questions.append(
-            Question(
-                key,
-                f"If the assistant calls {call.name}, which value should its "
-                f"argument {argument!r} have?",
-                dict.fromkeys(values),
-            )
-        )
+        key = field[0]
         expected[key] = label
         arguments[key] = argument[:80]
     if free:

@@ -18,16 +18,6 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    FakeExperimentRepository,
-    FakePluginRepository,
-    ReplayServices,
-    build_replay_services,
-    create_agent,
-    create_experiment_run,
-    create_plugin,
-    create_replay,
-)
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
@@ -62,6 +52,16 @@ from kitaru.server.domain.replay_config import (
 )
 from kitaru.server.domain.tag import Tag, TagLink
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    FakeExperimentRepository,
+    FakePluginRepository,
+    ReplayServices,
+    build_replay_services,
+    create_agent,
+    create_experiment_run,
+    create_plugin,
+    create_replay,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 

@@ -19,11 +19,6 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import (
-    FakeBlobDataStore,
-    FakeBlobRepository,
-    create_blob,
-)
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
@@ -37,6 +32,11 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.blob import BlobStorageBackend
+from kitaru_test_support import (
+    FakeBlobDataStore,
+    FakeBlobRepository,
+    create_blob,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

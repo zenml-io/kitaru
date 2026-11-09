@@ -175,6 +175,30 @@ export async function settleBuffering(waitMs = 5_000): Promise<void> {
     ]);
 }
 
+/**
+ * Register a running async buffered observation on THREAD in Mastra's
+ * process-wide buffering map, and return a function that ends it.
+ */
+export async function holdBuffering(memory: Memory): Promise<() => void> {
+  const engine = await memory.omEngine;
+  if (!engine) throw new Error("Missing observational-memory engine");
+  const ops = (
+    engine.buffering.constructor as unknown as {
+      asyncBufferingOps: Map<string, Promise<void>>;
+    }
+  ).asyncBufferingOps;
+  const key = engine.buffering.getObservationBufferKey(
+    engine.buffering.getLockKey(THREAD, RESOURCE),
+  );
+  let release!: () => void;
+  const running = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  ops.set(key, running);
+  void running.then(() => ops.delete(key));
+  return release;
+}
+
 export function createMemoryRuntime(
   options: { observerWait?: () => Promise<void>; messageTokens?: number } = {},
 ) {

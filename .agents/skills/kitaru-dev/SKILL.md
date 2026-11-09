@@ -75,9 +75,9 @@ Treat `tests/mcp/snapshots/metrics.json` and `src/kitaru/mcp/registry.py` as the
 
 ## CLI Structure
 
-The `kitaru` console script is defined in `pyproject.toml` under `[project.scripts]`. `src/kitaru/cli/__init__.py` is the lazy entry point, `src/kitaru/cli/app.py` registers the shared Cyclopts applications, and command implementations live under `src/kitaru/cli/`.
+The `kitaru` console script is defined in `pyproject.toml` under `[project.scripts]`. `src/kitaru/cli/__init__.py` is the lazy entry point, `src/kitaru/cli/app.py` runs one command and converts its errors, `src/kitaru/cli/command_registry.py` defines the shared Cyclopts applications, each `src/kitaru/cli/*_commands.py` module registers one family of leaf commands, and command implementations live under `src/kitaru/cli/`.
 
-Register new leaf commands through the `_spec(...)` and `_register(...)` metadata in `src/kitaru/cli/app.py`. Tests should call `main([...])` with an explicit argument list and assert the returned integer exit code.
+Register new leaf commands with `build_spec(...)` and `register_command(...)` from `src/kitaru/cli/command_registry.py`, in the matching `*_commands.py` module; a new command module must also be imported in `src/kitaru/cli/app.py` so its commands register. Tests should call `main([...])` with an explicit argument list and assert the returned integer exit code.
 
 When changing evaluation, replay, or experiment commands or contracts, read [Evaluation contracts](references/evaluation-contracts.md).
 

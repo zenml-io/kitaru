@@ -23,7 +23,7 @@ from kitaru.api_models.v1.imports import (
 from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskResponse, TaskStatus
 from kitaru.cli import app as app_module
-from kitaru.cli import imports
+from kitaru.cli import imports, invocation_context
 from kitaru.cli.output import CLIError
 
 
@@ -183,7 +183,7 @@ def argv_client(monkeypatch: pytest.MonkeyPatch) -> StubImportClient:
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
     return client
 
 

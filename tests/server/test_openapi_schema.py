@@ -21,7 +21,7 @@ from typing import Any
 import httpx
 from fastapi.openapi.utils import validation_error_definition
 
-from conftest import FakeAccountRepository, FakePasswordHasher, local_settings
+from conftest import local_settings
 from kitaru.api_models.v1.base import ValidationErrorBody, ValidationErrorItem
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.rest.dependencies import authorize, get_account_service
@@ -31,6 +31,7 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.domain.account import Account
+from kitaru_test_support import FakeAccountRepository, FakePasswordHasher
 
 _ACTOR = AuthContext(
     account=Account(

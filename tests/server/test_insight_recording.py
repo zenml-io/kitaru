@@ -19,18 +19,6 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    ReplayServices,
-    build_replay_services,
-    build_task_actor,
-    build_worker_actor,
-    create_agent,
-    create_analysis_task,
-    create_blob,
-    create_job,
-    create_plugin,
-    create_worker,
-)
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.task import TaskStatus
@@ -46,6 +34,18 @@ from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginS
 from kitaru.server.domain.task import AnalysisTask
 from kitaru.server.filtering import FilterCondition
 from kitaru.server.utils import hash_params
+from kitaru_test_support import (
+    ReplayServices,
+    build_replay_services,
+    build_task_actor,
+    build_worker_actor,
+    create_agent,
+    create_analysis_task,
+    create_blob,
+    create_job,
+    create_plugin,
+    create_worker,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 

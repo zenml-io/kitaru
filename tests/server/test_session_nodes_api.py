@@ -22,17 +22,6 @@ from typing import Any
 import httpx
 import pytest
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeImportRepository,
-    FakeReplayRepository,
-    FakeSessionNodeRepository,
-    FakeSessionRepository,
-    FakeTaskRepository,
-    build_payload_store,
-    override_idempotency,
-)
 from kitaru.api_models.v1.session_node import SessionNodeResponse
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -48,6 +37,17 @@ from kitaru.server.application.services.session_node_service import (
 )
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeImportRepository,
+    FakeReplayRepository,
+    FakeSessionNodeRepository,
+    FakeSessionRepository,
+    FakeTaskRepository,
+    build_payload_store,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

@@ -30,6 +30,13 @@ import {
   REPLAY_ID,
 } from "./helpers.js";
 
+// Mastra 1.75 and later replace inline PDF bytes without a `%PDF` header with
+// a placeholder before the model call.
+function withPdfHeader(bytes: Uint8Array): Uint8Array {
+  bytes.set(new TextEncoder().encode("%PDF-1.7\n"));
+  return bytes;
+}
+
 afterEach(async () => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
@@ -69,7 +76,7 @@ it("runs the native file processor with historical bytes, skills and complete re
       ? nativeFetch(input, init)
       : apiFetch(input, init)) as typeof fetch);
   const requests: unknown[] = [];
-  const bytes = new Uint8Array(40000).fill(65);
+  const bytes = withPdfHeader(new Uint8Array(40000).fill(65));
   const fetchFile = vi.fn(async () => ({
     bytes,
     mediaType: "application/pdf",
@@ -669,7 +676,9 @@ it("names inline history bytes of captured files by reference and replays them e
     String(input).startsWith("data:")
       ? nativeFetch(input, init)
       : apiFetch(input, init)) as typeof fetch);
-  const bytes = new Uint8Array(40000).map((_, index) => (index * 7) % 251);
+  const bytes = withPdfHeader(
+    new Uint8Array(40000).map((_, index) => (index * 7) % 251),
+  );
   const base64 = Buffer.from(bytes).toString("base64");
   const reference = fileReference({ bytes, mediaType: "application/pdf" });
   const fetchFile = vi.fn(async () => ({

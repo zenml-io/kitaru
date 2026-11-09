@@ -8,10 +8,10 @@
     "node": ">=22.22.0 <23 || >=24 <25 || >=26 <27"
   },
   "dependencies": {
-    "@ai-sdk/openai": "4.0.83",
+    "@ai-sdk/openai": "4.0.99",
     "@zenml-io/kitaru": "workspace:*",
     "@zenml-io/kitaru-mastra": "workspace:*",
-    "@mastra/core": "1.71.0",
+    "@mastra/core": "1.76.0",
     "zod": "3.25.76"
   },
   "scripts": {

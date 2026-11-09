@@ -18,20 +18,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conftest import (
-    JobAndTaskServices,
-    build_job_and_task_services,
-    build_task_actor,
-    build_worker_actor,
-    create_agent,
-    create_agent_task,
-    create_agent_version,
-    create_evaluation_task,
-    create_job,
-    create_plugin,
-    create_session,
-    create_worker,
-)
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionStatus
@@ -67,6 +53,20 @@ from kitaru.server.domain.task import (
     EvaluationTask,
 )
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    JobAndTaskServices,
+    build_job_and_task_services,
+    build_task_actor,
+    build_worker_actor,
+    create_agent,
+    create_agent_task,
+    create_agent_version,
+    create_evaluation_task,
+    create_job,
+    create_plugin,
+    create_session,
+    create_worker,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 

@@ -23,7 +23,7 @@ from kitaru.api_models.v1.replay import (
 )
 from kitaru.api_models.v1.session import SessionDetailResponse, SessionOrigin
 from kitaru.cli import app as app_module
-from kitaru.cli import replays
+from kitaru.cli import invocation_context, replays
 from kitaru.cli import sessions as cli_sessions
 from kitaru.cli.output import CLIError
 from kitaru.client.exceptions import APIError
@@ -422,7 +422,7 @@ def argv_client(monkeypatch: pytest.MonkeyPatch) -> StubReplayClient:
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
     return client
 
 

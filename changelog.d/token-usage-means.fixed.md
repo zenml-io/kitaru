@@ -1,0 +1,1 @@
+- CLI JSON output and MCP tool results no longer mask averaged token counts (such as `input_tokens: 120.5` under a model-swap insight's `tokens_per_call`) as `"***"`. Credential fields are still masked.

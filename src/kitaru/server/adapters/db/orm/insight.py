@@ -43,6 +43,7 @@ INSIGHT_IMPORT_ID_FOREIGN_KEY = foreign_key_name("insight", ["import_id"])
 INSIGHT_OWNER_ID_INDEX = index_name("insight", ["owner_id"])
 INSIGHT_AGENT_ID_INDEX = index_name("insight", ["agent_id"])
 INSIGHT_ANALYZER_VERSION_ID_INDEX = index_name("insight", ["analyzer_version_id"])
+INSIGHT_TASK_ID_INDEX = index_name("insight", ["task_id"])
 INSIGHT_IMPORT_ID_INDEX = index_name("insight", ["import_id"])
 
 TYPE_LENGTH = 32
@@ -83,6 +84,7 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index(INSIGHT_OWNER_ID_INDEX, "owner_id"),
         Index(INSIGHT_AGENT_ID_INDEX, "agent_id"),
         Index(INSIGHT_ANALYZER_VERSION_ID_INDEX, "analyzer_version_id"),
+        Index(INSIGHT_TASK_ID_INDEX, "task_id"),
         Index(INSIGHT_IMPORT_ID_INDEX, "import_id"),
     )
 

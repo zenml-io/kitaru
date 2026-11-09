@@ -45,7 +45,7 @@ from kitaru.api_models.v1.task import (
     TaskStatus,
 )
 from kitaru.cli import app as app_module
-from kitaru.cli import sessions
+from kitaru.cli import invocation_context, sessions
 from kitaru.cli.output import CLIError
 from kitaru.client.exceptions import APIError
 
@@ -482,7 +482,7 @@ def test_session_list_and_get_argv_use_bounded_resource_calls(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert (
         app_module.main(
@@ -542,7 +542,7 @@ def test_session_nodes_argv_passes_exact_uuid_and_payload_flag(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert (
         app_module.main(
@@ -1336,7 +1336,7 @@ def _run_terminal_import(
         assert args[1] == client.job.id
         return job, tasks
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
     monkeypatch.setattr(
         sessions.receipts, "wait_for_terminal_tasks", wait_for_terminal_tasks
     )
@@ -1500,7 +1500,7 @@ def test_session_import_argv_registers_streaming_created_receipt(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert (
         app_module.main(
@@ -1687,7 +1687,7 @@ def test_session_nodes_rejects_invalid_filter(
     async def fake_open_client():
         yield SimpleNamespace(sessions=resource)
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
     assert (
         app_module.main(
             ["session", "nodes", str(resource.session_id), "--filter", filter_value]

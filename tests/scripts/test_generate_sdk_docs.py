@@ -481,6 +481,17 @@ class TestExtractedPublicApi:
         client = public_api["modules"]["client"]
         assert "KitaruAPIClient" in client["classes"]
 
+        experiment_run = public_api["modules"]["api_models"]["modules"]["v1"][
+            "modules"
+        ]["experiment_run"]
+        for symbol in (
+            "EvaluationAggregateResponse",
+            "EvaluationStats",
+            "EvaluationValue",
+            "ReplayEvaluationValues",
+        ):
+            assert symbol in experiment_run["classes"]
+
         task = public_api["modules"]["task"]
         evaluator = task["modules"]["evaluator"]
         assert "EvaluationResult" in evaluator["classes"]

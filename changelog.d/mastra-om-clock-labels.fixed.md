@@ -1,0 +1,1 @@
+- Mastra memory replay now matches a recorded observational-memory call even when the original turn crossed a minute or day boundary that the replay did not. Mastra only adds a date header or time label to the observer prompt when the day or minute changes, so these replays used to miss the recorded result and give the agent different memory than it had in the original run.

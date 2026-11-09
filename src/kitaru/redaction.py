@@ -111,20 +111,22 @@ def _redact_data(
 
 
 def _is_token_usage(value: Any, *, key: str) -> bool:
-    """Recognize only the numeric token usage fields emitted by the API."""
-    if key not in _TOKEN_USAGE_KEYS and key != "tokens":
+    """Recognize only numeric token usage fields, including per-call means."""
+    if key in _TOKEN_USAGE_KEYS:
+        return _is_token_count(value)
+    if key != "tokens":
         return False
-    if value is None or (isinstance(value, int) and not isinstance(value, bool)):
-        return True
-    return (
-        key == "tokens"
-        and isinstance(value, dict)
-        and all(
-            field in _TOKEN_USAGE_KEYS
-            and (
-                count is None
-                or (isinstance(count, int) and not isinstance(count, bool))
-            )
+    if isinstance(value, dict):
+        return all(
+            field in _TOKEN_USAGE_KEYS and _is_token_count(count)
             for field, count in value.items()
         )
+    # A bare `tokens` total is a raw API count, so a fractional one is suspect.
+    return _is_token_count(value) and not isinstance(value, float)
+
+
+def _is_token_count(value: Any) -> bool:
+    """Recognize a missing, whole, or averaged token count."""
+    return value is None or (
+        isinstance(value, (int, float)) and not isinstance(value, bool)
     )

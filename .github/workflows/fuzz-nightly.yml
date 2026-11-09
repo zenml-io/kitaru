@@ -12,9 +12,6 @@ jobs:
     # Stateless properties use the 2000-example nightly profile. Database-backed
     # state machines use bounded recipe defaults; the limit only catches a wedged run.
     timeout-minutes: 120
-    permissions:
-      contents: read
-      issues: write
     strategy:
       fail-fast: false
       matrix:
@@ -28,9 +25,12 @@ jobs:
           - name: api-models
             sync-command: uv sync --frozen --extra server
             recipe: fuzz-api-models
-          - name: mcp
+          - name: mcp-boundary
             sync-command: uv sync --frozen --extra server --extra cli --extra mcp
-            recipe: fuzz-mcp
+            recipe: fuzz-mcp-boundary
+          - name: mcp-redaction
+            sync-command: uv sync --frozen --extra server --extra cli --extra mcp
+            recipe: fuzz-mcp-redaction
           - name: adapters
             sync-command: uv sync --project plugins --frozen --all-packages
             recipe: fuzz-adapters
@@ -62,6 +62,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Sync dependencies
+        timeout-minutes: 10
         env:
           SYNC_COMMAND: ${{ matrix.sync-command }}
         run: $SYNC_COMMAND
@@ -86,11 +87,32 @@ jobs:
           restore-keys: hypothesis-${{ matrix.name }}-
       - name: Run fuzz recipe
         id: fuzz
+        timeout-minutes: 115
         env:
           HYPOTHESIS_PROFILE: nightly
           KITARU_FUZZ_RANDOM: '1'
+          PYTHONUNBUFFERED: '1'
           RECIPE: ${{ matrix.recipe }}
-        run: uvx --from rust-just just "$RECIPE"
+        shell: bash
+        run: |-
+          set -o pipefail
+          set +e
+          timeout --signal=TERM --kill-after=60s 110m uvx --from rust-just just "$RECIPE" 2>&1 | tee fuzz.log
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          status="${statuses[0]}"
+          if [ "$status" -eq 0 ]; then
+            status="${statuses[1]}"
+          fi
+          case "$status" in
+            0) outcome=passed ;;
+            124|137) outcome=timed_out ;;
+            *) outcome=failed ;;
+          esac
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+          printf '### %s\n\nResult: **%s** (exit %s). Process limit: 110 minutes, with a 60-second termination grace period.\n' \
+            "$RECIPE" "$outcome" "$status" >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
       - name: Save Hypothesis database
         if: always()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
@@ -98,34 +120,62 @@ jobs:
           path: .hypothesis/
           key: hypothesis-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt
             }}
-      - name: Upload failing examples
-        if: failure()
+      - name: Upload fuzz diagnostics
+        if: always() && (failure() || cancelled())
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: hypothesis-examples-${{ matrix.name }}
-          path: .hypothesis/examples
+          path: |-
+            fuzz.log
+            .hypothesis/examples
           include-hidden-files: true
-          if-no-files-found: error
-      - name: Open issue on scheduled failure
-        if: failure() && github.event_name == 'schedule'
+          if-no-files-found: warn
+  report:
+    name: Report scheduled fuzz failures
+    needs: fuzz
+    if: always() && github.event_name == 'schedule' && (needs.fuzz.result == 'failure'
+      || needs.fuzz.result == 'cancelled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - name: Open issues for failed or incomplete jobs
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
-          SURFACE: ${{ matrix.name }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        shell: bash
         run: |-
           run_url="${REPO_URL}/actions/runs/${RUN_ID}"
-          expected_title="Nightly fuzz run failed (${SURFACE})"
-          issue_titles=$(gh issue list --label fuzz-nightly --state open --search "in:title ${SURFACE}" --json title --jq '.[].title')
-          existing=0
-          while IFS= read -r issue_title; do
-            if [ "$issue_title" = "$expected_title" ]; then
-              existing=1
-              break
-            fi
-          done <<< "$issue_titles"
-          if [ "$existing" = "0" ]; then
-            gh issue create --label fuzz-nightly \
-              --title "$expected_title" \
-              --body "Run: ${run_url}. Download the hypothesis-examples-${SURFACE} artifact into .hypothesis/examples and rerun \`just fuzz-${SURFACE}\` to replay."
-          fi
+          jobs=$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" --paginate \
+            --jq '.jobs[] | select(.name | startswith("fuzz (")) | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled") | [.name, .conclusion] | @tsv')
+          while IFS=$'\t' read -r job_name conclusion; do
+            if [ -z "$job_name" ]; then continue; fi
+            surface="${job_name#fuzz (}"
+            surface="${surface%)}"
+            expected_title="Nightly fuzz run failed (${surface})"
+            issue_titles=$(gh issue list --repo "$GH_REPO" --label fuzz-nightly --state open \
+              --search "in:title ${surface}" --limit 100 --json title --jq '.[].title')
+            existing=0
+            while IFS= read -r issue_title; do
+              if [ "$issue_title" = "$expected_title" ]; then
+                existing=1
+                break
+              fi
+            done <<< "$issue_titles"
+            if [ "$existing" = "1" ]; then continue; fi
+            case "$conclusion" in
+              cancelled) result="cancelled/incomplete (job timeout or intentional cancellation)" ;;
+              timed_out) result="timed out" ;;
+              *) result="failed (see the step summary for process timeouts)" ;;
+            esac
+            printf '%s\n' "Run: ${run_url}" '' "Job result: ${result}." '' \
+              "Inspect the job summary and the hypothesis-examples-${surface} artifact for fuzz.log and any saved examples. A timeout may produce no examples." '' \
+              "To replay saved examples, extract the artifact into the repository root so that .hypothesis/examples is restored, then rerun \`just fuzz-${surface}\`." > issue-body.md
+            gh issue create --repo "$GH_REPO" --label fuzz-nightly \
+              --title "$expected_title" --body-file issue-body.md
+          done <<< "$jobs"

@@ -1,4 +1,7 @@
 {
+  "env": {
+    "PYTEST_XDIST_AUTO_NUM_WORKERS": "4"
+  },
   "extraKnownMarketplaces": {
     "astral-sh": {
       "source": {

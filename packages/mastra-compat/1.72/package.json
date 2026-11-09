@@ -1,0 +1,17 @@
+{
+  "name": "@zenml-io/kitaru-mastra-compat-1.72",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Runs the Mastra adapter tests against one tested Mastra release set",
+  "license": "Apache-2.0",
+  "type": "module",
+  "devDependencies": {
+    "@mastra/core": "1.72.0",
+    "@mastra/memory": "1.33.0",
+    "@mastra/pg": "1.28.0",
+    "zod": "3.25.76"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}

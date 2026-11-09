@@ -14,10 +14,14 @@
 """Offline command discovery metadata."""
 
 import inspect
+import json
 import re
+
+import pytest
 
 from kitaru.cli import app as _registered_app
 from kitaru.cli import app as app_module
+from kitaru.cli import command_registry, invocation_context
 from kitaru.cli.schema import ParameterSpec, describe_schema
 
 
@@ -32,8 +36,8 @@ def _normalize_parameter_name(parameter: ParameterSpec) -> str:
 
 def test_handler_parameters_match_command_schema() -> None:
     """Every command-local handler parameter has exactly one schema entry."""
-    for function, spec in app_module._FUNCTION_SPECS.items():
-        local_parameters = spec.parameters[len(app_module._GLOBAL_PARAMETERS) :]
+    for function, spec in command_registry.FUNCTION_SPECS.items():
+        local_parameters = spec.parameters[len(command_registry.GLOBAL_PARAMETERS) :]
         schema_names = [_normalize_parameter_name(item) for item in local_parameters]
         handler_names = list(inspect.signature(function).parameters)
         if "all_sessions" in handler_names:
@@ -452,6 +456,14 @@ def test_experiment_schema_describes_crud_and_run_lifecycle() -> None:
     assert watch["streams"] is True
     assert watch["output_modes"] == ["auto", "text", "json", "jsonl"]
 
+    run_get = commands["experiment.run.get"]
+    assert run_get["read_only"] is True
+    get_parameters = {
+        parameter["name"]: parameter for parameter in run_get["parameters"]
+    }
+    assert get_parameters["--aggregate"]["type"] == "boolean"
+    assert get_parameters["--aggregate"]["required"] is False
+
     cancel = commands["experiment.run.cancel"]
     assert cancel["idempotency"] == "server_rejects_settled_runs"
     assert cancel["side_effects"]["mutates_remote_state"] is True
@@ -494,6 +506,38 @@ def test_help_exposes_only_the_schema_command_surface(capsys) -> None:
 
     [job_get] = describe_schema(("job", "get"))
     assert job_get["side_effects"]["reads_local_file"] is True
+
+
+def test_run_aggregate_help_and_schema_skip_configuration(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Aggregate discovery is available without configuration or API clients."""
+
+    def fail_bootstrap(*args, **kwargs):
+        raise AssertionError("offline discovery attempted bootstrap")
+
+    monkeypatch.setattr(app_module, "read_config", fail_bootstrap)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fail_bootstrap)
+
+    assert app_module.main(["experiment", "run", "get", "--help"]) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "--aggregate" in captured.out
+    assert "pinned baseline and result" in captured.out
+
+    assert (
+        app_module.main(["schema", "experiment", "run", "get", "--output", "json"]) == 0
+    )
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    [command] = json.loads(captured.out)["items"]
+    assert command["command"] == "experiment.run.get"
+    parameters = {item["name"]: item for item in command["parameters"]}
+    assert parameters["--aggregate"]["type"] == "boolean"
+    assert parameters["--aggregate"]["required"] is False
+    assert parameters["--aggregate"]["description"] == (
+        "Include pinned baseline and result evaluation aggregates."
+    )
 
 
 def test_idempotency_key_option_covers_only_single_create_commands() -> None:

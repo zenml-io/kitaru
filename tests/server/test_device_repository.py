@@ -19,11 +19,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conftest import (
-    FakeDeviceRepository,
-    pg_session_with_engine,
-    postgres_available,
-)
+from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -38,6 +34,7 @@ from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.device import Device, DeviceNotFound, DeviceStatus
 from kitaru.server.domain.keys import hash_secret
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import FakeDeviceRepository
 
 Setup = tuple[DeviceRepository, uuid.UUID, uuid.UUID, Callable[[], Awaitable[None]]]
 

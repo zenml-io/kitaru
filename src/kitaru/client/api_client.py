@@ -250,7 +250,7 @@ class KitaruAPIClient:
         Returns:
             Client view authenticating with the given auth flow.
         """
-        view = copy.copy(self)
+        view: KitaruAPIClient = copy.copy(self)
         view._auth = auth
         view._owns_transport = False
         view._owns_auth = True
@@ -273,7 +273,7 @@ class KitaruAPIClient:
         Returns:
             Client view with the options applied.
         """
-        view = copy.copy(self)
+        view: KitaruAPIClient = copy.copy(self)
         if consistency == "strong":
             view._request_headers = {
                 **self._request_headers,

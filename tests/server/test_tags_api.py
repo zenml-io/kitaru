@@ -20,10 +20,6 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import (
-    FakeTagRepository,
-    override_idempotency,
-)
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_tag_service,
@@ -33,6 +29,10 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeTagRepository,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

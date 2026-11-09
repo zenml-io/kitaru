@@ -178,7 +178,8 @@ class Alembic:
         """
 
         def do_stamp(rev: _RevIdType, context: Any) -> list[Any]:
-            return self.script_directory._stamp_revs(
+            # alembic.command drives migrations through the same private step.
+            return self.script_directory._stamp_revs(  # noqa: SLF001
                 revision,
                 rev,  # ty: ignore[invalid-argument-type]
             )
@@ -193,7 +194,8 @@ class Alembic:
         """
 
         def do_upgrade(rev: _RevIdType, context: Any) -> list[Any]:
-            return self.script_directory._upgrade_revs(
+            # alembic.command drives migrations through the same private step.
+            return self.script_directory._upgrade_revs(  # noqa: SLF001
                 revision,
                 rev,  # ty: ignore[invalid-argument-type]
             )
@@ -208,7 +210,8 @@ class Alembic:
         """
 
         def do_downgrade(rev: _RevIdType, context: Any) -> list[Any]:
-            return self.script_directory._downgrade_revs(
+            # alembic.command drives migrations through the same private step.
+            return self.script_directory._downgrade_revs(  # noqa: SLF001
                 revision,
                 rev,  # ty: ignore[invalid-argument-type]
             )

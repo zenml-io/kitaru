@@ -23,7 +23,6 @@ from typing import Any
 import pytest
 from task_fixtures import TaskAppFixture, build_task_app
 
-from conftest import create_agent_task, create_agent_version, create_job
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.insight import InsightInput, TextInsightData
 from kitaru.api_models.v1.session import (
@@ -41,6 +40,7 @@ from kitaru.client.resources.sessions import SessionsResource
 from kitaru.server.domain.agent_version import RunSpec
 from kitaru.task import analyzer as analyzer_module
 from kitaru.task.analyzer import AnalysisError, call_analyzer, run
+from kitaru_test_support import create_agent_task, create_agent_version, create_job
 
 
 @pytest.fixture

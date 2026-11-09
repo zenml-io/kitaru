@@ -22,11 +22,12 @@ import pytest
 from moto.server import ThreadedMotoServer
 from pydantic import SecretStr
 
-from conftest import FakeBlobDataStore, pg_session, postgres_available
+from conftest import pg_session, postgres_available
 from kitaru.server.adapters.db.blob_data_store import DatabaseBlobDataStore
 from kitaru.server.application.interfaces.blob_data_store import BlobDataStore
 from kitaru.server.blob_storage_settings import S3BlobStorageSettings
 from kitaru.server.domain.blob import BlobContentNotFound
+from kitaru_test_support import FakeBlobDataStore
 
 
 @pytest.fixture(scope="module")

@@ -19,13 +19,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import (
-    FakeBlobRepository,
-    build_session_node,
-    pg_session,
-    pg_session_with_engine,
-    postgres_available,
-)
+from conftest import pg_session, pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
@@ -68,6 +62,10 @@ from kitaru.server.domain.plugin import (
 )
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import ImportTask
+from kitaru_test_support import (
+    FakeBlobRepository,
+    build_session_node,
+)
 
 Setup = tuple[BlobRepository, uuid.UUID]
 

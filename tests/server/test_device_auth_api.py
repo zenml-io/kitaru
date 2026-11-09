@@ -21,14 +21,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from conftest import (
-    FakeAccountRepository,
-    FakeApiKeyRepository,
-    FakeDeviceRepository,
-    FakePasswordHasher,
-    local_settings,
-    stub_auth_session,
-)
+from conftest import local_settings, stub_auth_session
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     get_api_key_service,
@@ -42,6 +35,12 @@ from kitaru.server.application.models.device import DevicePolicy
 from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakeApiKeyRepository,
+    FakeDeviceRepository,
+    FakePasswordHasher,
+)
 
 DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
 

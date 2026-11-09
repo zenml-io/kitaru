@@ -18,15 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import (
-    FakePluginRepository,
-    ReplayServices,
-    asgi_api_client,
-    build_replay_services,
-    create_agent,
-    create_plugin,
-    override_idempotency,
-)
+from conftest import asgi_api_client
 from kitaru.api_models.v1.experiment import (
     ExperimentCreateRequest,
     ExperimentListParams,
@@ -47,6 +39,14 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.plugin import PackagePluginSource, PluginKind
+from kitaru_test_support import (
+    FakePluginRepository,
+    ReplayServices,
+    build_replay_services,
+    create_agent,
+    create_plugin,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

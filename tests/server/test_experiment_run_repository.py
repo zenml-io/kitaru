@@ -18,15 +18,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 
 import pytest
 
-from conftest import (
-    FakeCohortRepository,
-    FakeCohortVersionRepository,
-    FakeExperimentRunRepository,
-    FakeSessionRepository,
-    FakeTagRepository,
-    pg_session,
-    postgres_available,
-)
+from conftest import pg_session, postgres_available
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -69,6 +61,13 @@ from kitaru.server.domain.replay_config import (
     ToolPolicy,
 )
 from kitaru.server.filtering import AndExpression, FilterCondition
+from kitaru_test_support import (
+    FakeCohortRepository,
+    FakeCohortVersionRepository,
+    FakeExperimentRunRepository,
+    FakeSessionRepository,
+    FakeTagRepository,
+)
 
 Setup = tuple[
     ExperimentRunRepository,

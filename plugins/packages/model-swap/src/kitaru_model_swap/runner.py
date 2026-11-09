@@ -79,6 +79,9 @@ class _Priced(Protocol):
     @property
     def usage(self) -> Usage: ...
 
+    @property
+    def unmetered_attempts(self) -> int: ...
+
 
 _R = TypeVar("_R", bound=_Priced)
 
@@ -545,9 +548,7 @@ class Runner:
             await self.budget.settle(held, Decimal(0))
             raise
         cost = _price_or_none(price, result.usage) if result.usage.reported else None
-        unmetered = (
-            result.unmetered_attempts if isinstance(result, CandidateReply) else 0
-        )
+        unmetered = result.unmetered_attempts
         self.unmetered_attempts += unmetered
         # A reply without usage is among the unmetered attempts, so it is
         # charged once, as its reservation.

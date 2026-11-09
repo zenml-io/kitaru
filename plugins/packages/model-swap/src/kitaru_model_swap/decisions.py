@@ -63,6 +63,7 @@ class Answers:
     values: dict[str, str | float] = field(default_factory=dict)
     usage: Usage = field(default_factory=Usage)
     failure: str | None = None
+    unmetered_attempts: int = 0
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,7 @@ class Decision:
     probability: float | None
     usage: Usage
     failure: str | None = None
+    unmetered_attempts: int = 0
 
 
 def get_decision_key(model: DecisionModel) -> str:
@@ -163,10 +165,17 @@ async def ask(
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=model.timeout_seconds,
         )
-    except httpx.TimeoutException:
-        return Answers(failure="timeout")
-    except httpx.HTTPError:
-        return Answers(failure="http_error")
+    except httpx.HTTPError as error:
+        unmetered = not isinstance(
+            error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+        )
+        return Answers(
+            usage=Usage(reported=not unmetered),
+            failure="timeout"
+            if isinstance(error, httpx.TimeoutException)
+            else "http_error",
+            unmetered_attempts=int(unmetered),
+        )
     if response.status_code != 200:
         return Answers(
             failure="rate_limited" if response.status_code == 429 else "http_error"
@@ -174,7 +183,9 @@ async def ask(
     try:
         payload = response.json()
     except ValueError:
-        return Answers(failure="http_error")
+        return Answers(
+            usage=Usage(reported=False), failure="http_error", unmetered_attempts=1
+        )
     return read_answers(payload, questions, estimated_tokens=estimated_tokens)
 
 
@@ -186,7 +197,11 @@ def read_answers(
     The request fails as a whole when any answer is missing, refused, or not
     one of the offered options, so partial answers are never compared.
     """
-    if not isinstance(payload, dict) or payload.get("success") is False:
+    if not isinstance(payload, dict):
+        return Answers(
+            usage=Usage(reported=False), failure="http_error", unmetered_attempts=1
+        )
+    if payload.get("success") is False:
         return Answers(failure="http_error")
     # Workers AI wraps the model output in a `result` envelope.
     if "answers" not in payload and isinstance(payload.get("result"), dict):
@@ -265,7 +280,9 @@ def read_decision(payload: Any, *, estimated_tokens: int = 0) -> Decision:
 def _to_decision(answers: Answers) -> Decision:
     value = answers.values.get(QUESTION)
     probability = value if isinstance(value, float) else None
-    return Decision(probability, answers.usage, answers.failure)
+    return Decision(
+        probability, answers.usage, answers.failure, answers.unmetered_attempts
+    )
 
 
 def classify(probability: float | None, equivalent_at: float) -> bool | None:
@@ -319,10 +336,12 @@ def _read_usage(usage: Any, estimated_tokens: int) -> Usage:
         (
             usage[key]
             for key in ("input_tokens", "prompt_tokens", "input")
-            if isinstance(usage.get(key), int) and not isinstance(usage.get(key), bool)
+            if isinstance(usage.get(key), int)
+            and not isinstance(usage.get(key), bool)
+            and usage[key] >= 0
         ),
         None,
     )
     if tokens is None:
         return Usage(input_tokens=estimated_tokens)
-    return Usage(input_tokens=max(tokens, 0))
+    return Usage(input_tokens=tokens)

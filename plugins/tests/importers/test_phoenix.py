@@ -836,6 +836,7 @@ def test_openinference_llm_tools_become_tool_definitions() -> None:
                 "name": "get_weather",
                 "description": "Current weather in a city.",
                 "parameters": WEATHER_SCHEMA,
+                "strict": True,
             },
         },
         {

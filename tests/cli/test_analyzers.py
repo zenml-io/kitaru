@@ -17,6 +17,7 @@ import pytest
 
 from kitaru.api_models.v1.analyzer import AnalyzerCreateRequest
 from kitaru.cli import app as app_module
+from kitaru.cli import invocation_context
 from kitaru.cli.output import CLIError
 from kitaru.cli.registration import plugin_parent_request, resolve_analyzer_configs
 
@@ -240,7 +241,7 @@ def test_cli_analyzer_register_uses_shared_runner_and_output_contract(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert (
         app_module.main(
@@ -284,7 +285,7 @@ def test_cli_analyzer_agent_id_option_is_rejected(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert (
         app_module.main(
@@ -319,7 +320,7 @@ def test_cli_analyzer_list_and_get_return_standard_envelopes(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert app_module.main(["analyzer", "list"]) == 0
     listed = json.loads(capsys.readouterr().out)
@@ -346,7 +347,7 @@ def test_cli_analyzer_version_register_list_and_get(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert (
         app_module.main(

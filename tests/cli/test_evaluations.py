@@ -39,7 +39,7 @@ from kitaru.api_models.v1.task import (
     TaskStatus,
 )
 from kitaru.cli import app as app_module
-from kitaru.cli import evaluations, registration, session_selection
+from kitaru.cli import evaluations, invocation_context, registration, session_selection
 from kitaru.cli.output import CLIError
 from kitaru.client.exceptions import APIError
 
@@ -125,7 +125,7 @@ def test_evaluation_list_argv_uses_shared_list_options(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert (
         app_module.main(
@@ -161,7 +161,7 @@ def test_evaluation_get_argv_uses_exact_uuid(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert app_module.main(["evaluation", "get", str(resource.evaluation.id)]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -913,7 +913,7 @@ def test_session_evaluate_argv_registers_streaming_created_receipt(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert (
         app_module.main(
@@ -955,7 +955,7 @@ def test_session_evaluate_maps_server_pair_limit_without_batching(
     async def fake_open_client():
         yield client
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert (
         app_module.main(

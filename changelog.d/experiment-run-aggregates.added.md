@@ -1,0 +1,1 @@
+- Added public experiment-run evaluation aggregates through the REST API, `client.experiment_runs.get_evaluation_aggregates(...)`, and `kitaru experiment run get RUN --aggregate`.

@@ -18,13 +18,6 @@ import uuid
 import pytest
 from pydantic import SecretStr
 
-from conftest import (
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeSecretRepository,
-    create_agent,
-    create_secret,
-)
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.secret import SecretFilter
@@ -33,6 +26,13 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import AgentVersion, RunSpec
 from kitaru.server.domain.secret import DuplicateSecretName, SecretInUse, SecretNotFound
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeSecretRepository,
+    create_agent,
+    create_secret,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 FOREIGN_ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="bob"))

@@ -20,15 +20,6 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import (
-    FakeExperimentRepository,
-    FakePluginRepository,
-    ReplayServices,
-    build_replay_services,
-    create_agent,
-    create_plugin,
-    override_idempotency,
-)
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_experiment_service,
@@ -38,6 +29,15 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.plugin import PackagePluginSource, PluginKind
+from kitaru_test_support import (
+    FakeExperimentRepository,
+    FakePluginRepository,
+    ReplayServices,
+    build_replay_services,
+    create_agent,
+    create_plugin,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

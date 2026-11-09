@@ -18,14 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import (
-    JobAndTaskServices,
-    asgi_api_client,
-    build_job_and_task_services,
-    create_agent,
-    create_agent_version,
-    override_idempotency,
-)
+from conftest import asgi_api_client
 from kitaru.api_models.v1.job import JobResponse
 from kitaru.api_models.v1.session_run import SessionRunCreateRequest
 from kitaru.client.api_client import KitaruAPIClient
@@ -40,6 +33,13 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
+from kitaru_test_support import (
+    JobAndTaskServices,
+    build_job_and_task_services,
+    create_agent,
+    create_agent_version,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

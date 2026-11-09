@@ -19,7 +19,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conftest import FakeJobRepository, pg_session, postgres_available
+from conftest import pg_session, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -31,6 +31,7 @@ from kitaru.server.application.models.job import JobFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.job import Job, JobNotFound
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import FakeJobRepository
 
 Setup = tuple[JobRepository, uuid.UUID]
 

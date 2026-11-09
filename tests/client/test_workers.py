@@ -19,30 +19,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from conftest import (
-    UNSCOPED_WORKER_SCOPE,
-    FakeAccountRepository,
-    FakeAgentRepository,
-    FakeAgentVersionRepository,
-    FakeApiKeyRepository,
-    FakeBlobRepository,
-    FakeConnectionRepository,
-    FakeImportRepository,
-    FakeJobRepository,
-    FakePasswordHasher,
-    FakePluginRepository,
-    FakeReplayRepository,
-    FakeSecretRepository,
-    FakeSessionRepository,
-    FakeTaskRepository,
-    FakeWorkerRepository,
-    asgi_api_client,
-    create_agent_task,
-    create_job,
-    local_settings,
-    mint_worker_token,
-    stub_auth_session,
-)
+from conftest import asgi_api_client, local_settings, stub_auth_session
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import (
@@ -72,6 +49,27 @@ from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    UNSCOPED_WORKER_SCOPE,
+    FakeAccountRepository,
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeApiKeyRepository,
+    FakeBlobRepository,
+    FakeConnectionRepository,
+    FakeImportRepository,
+    FakeJobRepository,
+    FakePasswordHasher,
+    FakePluginRepository,
+    FakeReplayRepository,
+    FakeSecretRepository,
+    FakeSessionRepository,
+    FakeTaskRepository,
+    FakeWorkerRepository,
+    create_agent_task,
+    create_job,
+    mint_worker_token,
+)
 
 RUNTIME = WorkerRuntime(platform="bare")
 

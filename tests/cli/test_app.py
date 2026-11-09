@@ -27,6 +27,14 @@ import pytest
 
 import kitaru.cli
 from kitaru.cli import app as app_module
+from kitaru.cli import auth as auth_commands
+from kitaru.cli import (
+    command_registry,
+    diagnostics,
+    invocation_context,
+    local_runtime,
+    root_commands,
+)
 from kitaru.cli.output import (
     CLIError,
     CommandResult,
@@ -50,7 +58,7 @@ def test_main_emits_deep_error_as_structured_stderr(monkeypatch, capsys) -> None
     def fail_version() -> str:
         raise CLIError("invalid_arguments", "Invalid input", details=details)
 
-    monkeypatch.setattr(app_module.diagnostics, "package_version", fail_version)
+    monkeypatch.setattr(diagnostics, "package_version", fail_version)
     assert app_module.main(["version", "--output", "json"]) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -429,10 +437,10 @@ async def test_active_interrupt_uses_resolved_output_context(
         raise KeyboardInterrupt
 
     spec = replace(
-        app_module._FUNCTION_SPECS[app_module.version],
+        command_registry.FUNCTION_SPECS[root_commands.version],
         streams=output == "jsonl",
     )
-    monkeypatch.setitem(app_module._FUNCTION_SPECS, interrupt, spec)
+    monkeypatch.setitem(command_registry.FUNCTION_SPECS, interrupt, spec)
     monkeypatch.setattr(
         type(app_module.app),
         "parse_args",
@@ -464,7 +472,7 @@ async def test_active_interrupt_uses_resolved_output_context(
         }
     with pytest.raises(RuntimeError, match="No CLI output context"):
         get_output_context()
-    assert app_module._INVOCATION.get() is None
+    assert invocation_context.INVOCATION.get() is None
 
 
 @pytest.mark.parametrize("output", ["text", "json", "jsonl"])
@@ -527,8 +535,8 @@ async def test_event_broken_pipe_exits_zero(monkeypatch, capsys) -> None:
         emit_event("starting")
         return CommandResult(item={"status": "stopped"})
 
-    spec = replace(app_module._FUNCTION_SPECS[app_module.version], streams=True)
-    monkeypatch.setitem(app_module._FUNCTION_SPECS, stream, spec)
+    spec = replace(command_registry.FUNCTION_SPECS[root_commands.version], streams=True)
+    monkeypatch.setitem(command_registry.FUNCTION_SPECS, stream, spec)
     monkeypatch.setattr(
         type(app_module.app),
         "parse_args",
@@ -547,7 +555,10 @@ async def test_event_broken_pipe_exits_zero(monkeypatch, capsys) -> None:
 
 def test_commands_advertise_interrupted_error() -> None:
     """Executable leaves include the shared invocation-level interrupt outcome."""
-    assert "interrupted" in app_module._FUNCTION_SPECS[app_module.version].error_kinds
+    assert (
+        "interrupted"
+        in command_registry.FUNCTION_SPECS[root_commands.version].error_kinds
+    )
 
 
 def test_http_413_maps_to_invalid_arguments_with_server_detail() -> None:
@@ -643,7 +654,7 @@ def test_bare_login_dispatches_without_a_server(
         captured.update(options)
         return CommandResult(item={"server_url": "https://managed.example.com"})
 
-    monkeypatch.setattr(app_module.auth_commands, "login", fake_login)
+    monkeypatch.setattr(auth_commands, "login", fake_login)
 
     assert app_module.main(["login", "--output", "json"]) == 0
 
@@ -664,7 +675,7 @@ def test_login_network_error_preserves_selected_server_path(
         request = httpx.Request("GET", f"{options['server']}/api/v1/info")
         raise httpx.ConnectError("connection refused", request=request)
 
-    monkeypatch.setattr(app_module.auth_commands, "login", fail_login)
+    monkeypatch.setattr(auth_commands, "login", fail_login)
 
     assert app_module.main(["login", server, "--output", "json"]) == 6
 
@@ -686,7 +697,7 @@ def test_login_timeout_identifies_selected_server(
         request = httpx.Request("GET", f"{options['server']}/api/v1/info")
         raise httpx.ReadTimeout("read timed out", request=request)
 
-    monkeypatch.setattr(app_module.auth_commands, "login", fail_login)
+    monkeypatch.setattr(auth_commands, "login", fail_login)
 
     assert app_module.main(["login", server, "--output", "json"]) == 6
 
@@ -736,7 +747,7 @@ def test_logout_rejects_conflicting_targets(
     async def fail_logout(**options: Any) -> CommandResult:
         raise AssertionError("logout ran with conflicting targets")
 
-    monkeypatch.setattr(app_module.auth_commands, "logout", fail_logout)
+    monkeypatch.setattr(auth_commands, "logout", fail_logout)
 
     assert app_module.main([*argv, "--output", "json"]) == 2
 
@@ -751,7 +762,7 @@ def test_followed_local_logs_reject_single_document_json(monkeypatch, capsys) ->
     async def fail_logs(**options: Any) -> list[str]:
         raise AssertionError("logs were read")
 
-    monkeypatch.setattr(app_module.local_runtime, "get_local_logs", fail_logs)
+    monkeypatch.setattr(local_runtime, "get_local_logs", fail_logs)
 
     assert app_module.main(["local", "logs", "--follow", "--output", "json"]) == 2
 
@@ -812,7 +823,7 @@ def test_bare_value_error_in_a_command_is_an_internal_error(
     async def fake_open_client():
         yield BrokenClient()
 
-    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
     assert app_module.main(["cohort", "get", "x", "--output", "json"]) == 1
 

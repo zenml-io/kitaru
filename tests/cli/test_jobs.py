@@ -26,7 +26,7 @@ import pytest
 
 from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.cli import app as app_module
-from kitaru.cli import jobs
+from kitaru.cli import invocation_context, jobs
 from kitaru.cli.output import (
     CLIError,
     OutputContext,
@@ -398,7 +398,7 @@ def test_watch_ctrl_c_closes_client_without_canceling(
         del args, kwargs
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(app_module, "_open_asset_client", open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", open_client)
     monkeypatch.setattr(jobs, "watch_job", interrupt)
 
     assert (
@@ -442,7 +442,7 @@ async def test_watch_cancellation_propagates_after_client_cleanup(
         started.set()
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(app_module, "_open_asset_client", open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", open_client)
     monkeypatch.setattr(jobs, "watch_job", wait_forever)
     task = asyncio.create_task(
         app_module._launch(
@@ -480,7 +480,7 @@ def test_failed_watch_uses_structured_error_envelope(
     async def open_client():
         yield SimpleNamespace(jobs=StubJobs([_job(job_id, status)]))
 
-    monkeypatch.setattr(app_module, "_open_asset_client", open_client)
+    monkeypatch.setattr(invocation_context, "open_asset_client", open_client)
     assert (
         app_module.main(
             [

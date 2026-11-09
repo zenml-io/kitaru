@@ -18,17 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import (
-    ReplayServices,
-    asgi_api_client,
-    build_replay_services,
-    create_agent,
-    create_agent_version,
-    create_blob,
-    create_plugin,
-    create_session,
-    override_idempotency,
-)
+from conftest import asgi_api_client
 from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.api_models.v1.replay import (
     ReplayCreateRequest,
@@ -50,6 +40,16 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
+from kitaru_test_support import (
+    ReplayServices,
+    build_replay_services,
+    create_agent,
+    create_agent_version,
+    create_blob,
+    create_plugin,
+    create_session,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

@@ -20,13 +20,7 @@ from typing import Any
 
 import pytest
 
-from conftest import (
-    FakeInvestigationRepository,
-    FakeSessionRepository,
-    create_session,
-    pg_session_with_engine,
-    postgres_available,
-)
+from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.investigation import (
@@ -63,6 +57,11 @@ from kitaru.server.domain.investigation import (
 )
 from kitaru.server.domain.session import Session
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    FakeInvestigationRepository,
+    FakeSessionRepository,
+    create_session,
+)
 
 Setup = tuple[
     InvestigationRepository,

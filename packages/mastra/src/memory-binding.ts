@@ -6,6 +6,7 @@ import {
   type MastraReplayEvidence,
   type SecretKeyClassifier,
 } from "@zenml-io/kitaru/adapter";
+import { MEMORY_MUTATIONS } from "./memory-mutations.js";
 import {
   decodeMemoryValue,
   encodeMemoryEvidence,
@@ -566,7 +567,7 @@ export function createRegisteredWriteDomain(
       const value: unknown = Reflect.get(target, property, target);
       if (typeof value !== "function") return value;
       if (methods.has(property)) return methods.get(property);
-      const bound = MUTATIONS.has(property as keyof MemoryStorage)
+      const bound = MEMORY_MUTATIONS.has(property)
         ? async (...args: unknown[]): Promise<unknown> => {
             const registration = await registerWrite();
             try {
@@ -581,40 +582,6 @@ export function createRegisteredWriteDomain(
     },
   });
 }
-
-// The pinned public MemoryStorage mutation inventory. Delegation binds `this` to
-// the original domain, so a native method's own helper calls record only once.
-const MUTATIONS = new Set<keyof MemoryStorage>([
-  "dangerouslyClearAll",
-  "prune",
-  "saveThread",
-  "updateThread",
-  "patchThread",
-  "deleteThread",
-  "saveMessages",
-  "updateMessages",
-  "deleteMessages",
-  "copyThread",
-  "cloneThread",
-  "updateThreadResourceId",
-  "saveResource",
-  "updateResource",
-  "initializeObservationalMemory",
-  "updateActiveObservations",
-  "updateBufferedObservations",
-  "swapBufferedToActive",
-  "createReflectionGeneration",
-  "updateBufferedReflection",
-  "swapBufferedReflectionToActive",
-  "setReflectingFlag",
-  "setObservingFlag",
-  "setBufferingObservationFlag",
-  "setBufferingReflectionFlag",
-  "insertObservationalMemoryRecord",
-  "clearObservationalMemory",
-  "setPendingMessageTokens",
-  "updateObservationalMemoryConfig",
-]);
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -733,7 +700,9 @@ function getAddressedRows(
         records: [],
       };
     case "updateActiveObservations":
+    case "commitActiveObservations":
     case "updateBufferedObservations":
+    case "appendBufferedObservations":
     case "swapBufferedToActive":
     case "updateBufferedReflection":
     case "updateObservationalMemoryConfig":
@@ -1053,7 +1022,7 @@ export function createMemoryCaptureBinding(
       const value: unknown = Reflect.get(target, property, target);
       if (typeof value !== "function") return value;
       if (methods.has(property)) return methods.get(property);
-      if (!MUTATIONS.has(property as keyof MemoryStorage)) {
+      if (!MEMORY_MUTATIONS.has(property)) {
         const bound = value.bind(target);
         methods.set(property, bound);
         return bound;

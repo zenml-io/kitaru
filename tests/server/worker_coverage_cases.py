@@ -17,10 +17,10 @@ import uuid
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
-from conftest import UNSCOPED_WORKER_SCOPE
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import LabelSelector, WorkerClaim, WorkerScope
 from kitaru.server.domain.task import AgentTask, EvaluationTask, ImportTask, Task
+from kitaru_test_support import UNSCOPED_WORKER_SCOPE
 
 
 class CoverageIds(NamedTuple):

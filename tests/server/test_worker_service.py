@@ -20,7 +20,6 @@ from typing import Any
 import pytest
 from worker_coverage_cases import COVERAGE_CASES, CoverageCase, CoverageIds
 
-from conftest import UNSCOPED_WORKER_SCOPE, FakeWorkerRepository, create_worker
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.task import TaskKind
@@ -38,6 +37,11 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.task import AgentTask, AnalysisTask, ImportTask
 from kitaru.server.domain.worker import WorkerAccessDenied, WorkerNotFound
 from kitaru.server.filtering import FilterCondition
+from kitaru_test_support import (
+    UNSCOPED_WORKER_SCOPE,
+    FakeWorkerRepository,
+    create_worker,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 

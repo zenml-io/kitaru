@@ -1,0 +1,3 @@
+- Support `@mastra/core` 1.77 through 1.79 in the Mastra adapter, including recorded and replayed `Agent.stream()` calls, and accept the tested release sets core 1.77.0 with memory 1.37.1, core 1.78.0 with memory 1.38.0, and core 1.79.0 with memory 1.39.0 in the isolated memory replay factory.
+- Capture conflict-aware observational-memory writes and preserve generation retirement, write receipts, cursors, and database record semantics during isolated replay.
+- Close recordings promptly when an earlier turn left memory work running, while keeping the source Memory's background-work join available through its finalization deadline.

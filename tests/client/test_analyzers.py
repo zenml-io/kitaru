@@ -18,12 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import (
-    FakeBlobRepository,
-    FakePluginRepository,
-    asgi_api_client,
-    override_idempotency,
-)
+from conftest import asgi_api_client
 from kitaru.api_models.v1.analyzer import (
     AnalyzerCreateRequest,
     AnalyzerUpdateRequest,
@@ -40,6 +35,11 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.plugin import PluginKind
+from kitaru_test_support import (
+    FakeBlobRepository,
+    FakePluginRepository,
+    override_idempotency,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 

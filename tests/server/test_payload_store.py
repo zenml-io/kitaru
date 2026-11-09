@@ -17,9 +17,9 @@ import uuid
 
 import pytest
 
-from conftest import build_payload_store
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import Session
+from kitaru_test_support import build_payload_store
 
 OWNER_ID = uuid.uuid4()
 

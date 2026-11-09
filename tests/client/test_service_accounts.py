@@ -18,13 +18,7 @@ import uuid
 
 from fastapi import FastAPI
 
-from conftest import (
-    FakeAccountRepository,
-    FakePasswordHasher,
-    local_settings,
-    override_idempotency,
-    recording_asgi_api_client,
-)
+from conftest import local_settings, recording_asgi_api_client
 from kitaru.api_models.v1.account import (
     AccountResponse,
     ServiceAccountCreateRequest,
@@ -37,6 +31,11 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    FakeAccountRepository,
+    FakePasswordHasher,
+    override_idempotency,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin", is_admin=True))
 

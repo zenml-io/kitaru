@@ -100,6 +100,18 @@ describe("the Mastra versions under test", () => {
       ...new Set(MEMORY_REPLAY_TESTED_VERSIONS.map(({ memory }) => memory)),
     ]);
   });
+
+  it("bound the core peer range and streaming support at the newest tested minor", () => {
+    const newest = [...MEMORY_REPLAY_TESTED_VERSIONS].sort(byCore).at(-1);
+    expect(newest).toBeDefined();
+    const minor = Number(newest?.core.split(".")[1]);
+    const peer = readPackageJson(new URL("mastra/", PACKAGES_DIR))
+      .peerDependencies?.["@mastra/core"];
+    expect(peer).toBe(`>=1.51.0 <1.${minor + 1}.0`);
+    expect(isSupportedMastraStreamVersion(`1.${minor}.99`)).toBe(true);
+    expect(isSupportedMastraStreamVersion(`1.${minor}.0-beta.1`)).toBe(false);
+    expect(isSupportedMastraStreamVersion(`1.${minor + 1}.0`)).toBe(false);
+  });
 });
 
 describe("assertMemoryReplayVersions", () => {
@@ -109,7 +121,7 @@ describe("assertMemoryReplayVersions", () => {
   });
 
   it.each([
-    ["an untested core", "1.72.0", "1.32.1"],
+    ["an untested core", "1.80.0", "1.39.0"],
     ["a tested core with another core's memory", "1.68.0", "1.30.0"],
   ])("rejects %s, naming the tested pairs", (_case, core, memory) => {
     expect(() => assertMemoryReplayVersions(core, memory)).toThrow(

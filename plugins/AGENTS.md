@@ -10,7 +10,7 @@ Read `plugins/DEVELOPMENT.md` before you change package metadata, default defini
 - Release one importer distribution when only that provider changes.
 - Release `kitaru-evaluator` when any built-in evaluator changes.
 - Do not bump unrelated plugin distributions.
-- Keep the definitions in `src/kitaru/server/api/bootstrap.py` aligned with their owning wheels.
+- `just release-units-check` fails when the default definitions in `src/kitaru/server/api/bootstrap.py` drift from their owning wheels.
 
 ## Implementation and release preparation
 
@@ -22,7 +22,7 @@ Read `plugins/DEVELOPMENT.md` before you change package metadata, default defini
 - Keep adapter distributions out of the server catalog.
 - Run plugin workspace commands with `--project plugins`; the root workspace contains only Kitaru.
 - Include relevant `plugins/uv.lock` changes in the patch and in any requested commit.
-- Keep `.github/workflows/ci.yml`, `.github/workflows/release-plugins.yml`, and `plugins/packages/` aligned when you add or remove a distribution.
+- Register a new distribution in `release/release-units.toml`. CI and release workflows read their plugin lists from it, and `just release-units-check` fails on a package missing there.
 
 ## Required tests
 

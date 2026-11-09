@@ -19,11 +19,6 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from conftest import (
-    FakeBlobDataStore,
-    FakeBlobRepository,
-    create_blob,
-)
 from kitaru.server.application.interfaces.blob_data_store import BlobDataStores
 from kitaru.server.application.models.auth import (
     AuthContext,
@@ -38,6 +33,11 @@ from kitaru.server.domain.blob import (
     BlobNotFound,
     BlobStorageBackend,
     BlobTooLarge,
+)
+from kitaru_test_support import (
+    FakeBlobDataStore,
+    FakeBlobRepository,
+    create_blob,
 )
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))

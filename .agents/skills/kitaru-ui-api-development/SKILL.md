@@ -32,8 +32,7 @@ Keep frontend-specific DTOs in `src/kitaru/api_models/v1/ui.py` and routes in `s
 
 Follow `src/kitaru/server/adapters/rest/AGENTS.md`:
 
-- use `APIRouter(route_class=KitaruAPIRoute)`
-- require `authorize` and pass the resulting `actor` to every application service
+- pass the `actor` from the route's `authorize` dependency to every application service
 - compose current service and repository interfaces instead of querying the database directly or bypassing application layers
 - use explicit response DTO mappings and let app-level handlers map domain errors
 - state client-visible statuses in route docstrings

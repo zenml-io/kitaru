@@ -330,6 +330,10 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "ExperimentRunResponse",
                 "ExperimentRunProgress",
                 "ExperimentRunStatus",
+                "EvaluationAggregateResponse",
+                "EvaluationStats",
+                "EvaluationValue",
+                "ReplayEvaluationValues",
             }
         ),
     ),

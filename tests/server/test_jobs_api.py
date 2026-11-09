@@ -20,12 +20,6 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import (
-    JobAndTaskServices,
-    build_job_and_task_services,
-    create_agent_task,
-    create_job,
-)
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -37,6 +31,12 @@ from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
+from kitaru_test_support import (
+    JobAndTaskServices,
+    build_job_and_task_services,
+    create_agent_task,
+    create_job,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
