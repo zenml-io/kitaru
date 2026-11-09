@@ -201,6 +201,8 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
             Page of matching tasks and the next cursor.
         """
         statement = select(TaskORM)
+        if task_filter.job_ids is not None:
+            statement = statement.where(TaskORM.job_id.in_(task_filter.job_ids))
         if task_filter.job_id is not None:
             statement = statement.where(TaskORM.job_id == task_filter.job_id)
         if task_filter.stale_before is not None:

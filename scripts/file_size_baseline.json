@@ -32,7 +32,7 @@
   "tests/cli/test_auth.py": 1189,
   "tests/cli/test_local_runtime.py": 1187,
   "tests/cli/test_sessions.py": 1920,
-  "tests/mcp/test_handlers_protocol.py": 1142,
+  "tests/mcp/test_handlers_protocol.py": 1113,
   "tests/mcp/test_review_workflows.py": 2195,
   "tests/server/test_evaluation_repository.py": 1159,
   "tests/server/test_import_service.py": 1008,

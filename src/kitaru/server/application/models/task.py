@@ -46,6 +46,7 @@ class TaskFilter(ListFilter):
     }
 
     job_id: uuid.UUID | None = None
+    job_ids: list[uuid.UUID] | None = None
     stale_before: AwareDatetime | None = None
 
 
