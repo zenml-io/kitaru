@@ -139,7 +139,7 @@ class _MCPJob(JobResponse):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    kind: Literal["session_run", "import", "evaluation", "replay"]
+    kind: Literal["session_run", "import", "evaluation", "replay"]  # ty: ignore[invalid-attribute-override]
 
 
 ActivityItem = (

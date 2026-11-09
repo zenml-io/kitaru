@@ -30,7 +30,13 @@ on:
         default: file
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths: [install.sh, .github/workflows/installer.yml]
+    paths:
+      - install.sh
+      - scripts/test-installer.sh
+      - tests/scripts/test_installer_behavior.py
+      - pyproject.toml
+      - src/kitaru/cli/setup.py
+      - .github/workflows/installer.yml
 permissions: {}
 concurrency:
   group: installer-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
@@ -50,11 +56,154 @@ jobs:
           - macos-15-intel
           - windows-latest
     steps:
+      # Temporary: remove the repair when both macOS images reject these chains
+      # without it. Keep the behavioral checks to catch stale runner images.
+      # https://github.com/actions/runner-images/issues/15228
+      - name: Repair macOS certificate bundles
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 - /etc/ssl/cert.pem \
+            /opt/homebrew/etc/ca-certificates/cert.pem \
+            /usr/local/etc/ca-certificates/cert.pem <<'PY'
+          import base64
+          import hashlib
+          import re
+          import subprocess
+          import sys
+          import tempfile
+          from pathlib import Path
+
+          # SHA-256 certificate fingerprints from the incident's root inventory:
+          # https://emudhra.we-have-a-problem.com/roots.json
+          blocked = {
+              "86A1ECBA089C4A8D3BBE2734C612BA341D813E043CF9E8A862CD5C57A36BBE6B",  # emSign ECC Root CA - G3
+              "D7A7A0FB5D7E2731D771E9484EBCDEF71D5F0C3E0A2948782BC83EE0EA699EF4",  # AAA Certificate Services
+              "7DD78D5F4F13459A83DFF9ABBBA62EDBAF6F2D102BF257FD712F4D9F2746ED8D",  # emSign Root TLS CA - G3
+              "F2EDAAFF3D9B701FB4D14C9F285F8C0BAD90FC3BCC1FA07D47F4718EDABA34A5",  # emSign Root CS CA - G3
+          }
+          for index, name in enumerate(sys.argv[1:]):
+              path = Path(name)
+              if index and not path.exists():
+                  continue
+              certificates = re.findall(
+                  rb"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
+                  path.read_bytes(), re.DOTALL,
+              )
+              retained = []
+              for certificate in certificates:
+                  der = base64.b64decode(b"".join(certificate.splitlines()[1:-1]), validate=True)
+                  if hashlib.sha256(der).hexdigest().upper() not in blocked:
+                      retained.append(certificate)
+              if not retained:
+                  raise SystemExit(f"Refusing to install an empty CA bundle: {path}")
+              with tempfile.NamedTemporaryFile() as output:
+                  output.write(b"\n".join(retained) + b"\n")
+                  output.flush()
+                  subprocess.run(
+                      ["/usr/bin/openssl", "crl2pkcs7", "-nocrl", "-certfile", output.name],
+                      check=True, stdout=subprocess.DEVNULL,
+                  )
+                  if len(retained) != len(certificates):
+                      subprocess.run(
+                          ["sudo", "install", "-m", "0644", "-o", "root", "-g", "wheel",
+                           output.name, str(path.resolve())], check=True,
+                      )
+              print(f"{path}: removed {len(certificates) - len(retained)} roots; retained {len(retained)}")
+          PY
+          mkdir -p "$RUNNER_TEMP/kitaru-empty-certs"
+          # Apple LibreSSL otherwise falls back to stale Keychain trust on Intel.
+          # https://github.com/galadran/we-have-a-problem.com/issues/65
+          {
+            echo 'OPENSSL_X509_TEA_DISABLE=1'
+            echo 'CURL_CA_BUNDLE=/etc/ssl/cert.pem'
+            echo 'SSL_CERT_FILE=/etc/ssl/cert.pem'
+            echo "SSL_CERT_DIR=$RUNNER_TEMP/kitaru-empty-certs"
+            echo 'GIT_SSL_CAINFO=/etc/ssl/cert.pem'
+            echo "GIT_SSL_CAPATH=$RUNNER_TEMP/kitaru-empty-certs"
+            echo 'PIP_CERT=/etc/ssl/cert.pem'
+          } >> "$GITHUB_ENV"
+      - name: Verify macOS curl and Git certificate rejection
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 <<'PY'
+          import re
+          import shutil
+          import subprocess
+          hosts = (
+              "dv-g3b-emudhra.we-have-a-problem.com",
+              "dv-g3b-aaa-emudhra.we-have-a-problem.com",
+              "dv-g3b-noct-emudhra.we-have-a-problem.com",
+              "dv-g3b-aaa-noct-emudhra.we-have-a-problem.com",
+          )
+          for executable in dict.fromkeys(("/usr/bin/curl", shutil.which("curl"))):
+              if executable is None:
+                  raise SystemExit("curl is missing from PATH")
+              command = [executable, "-fsSL", "--connect-timeout", "15", "--max-time", "30", "-o", "/dev/null"]
+              for url in ("https://github.com/", "https://kitaru.ai/install", "https://astral.sh/uv/install.sh", "https://pypi.org/simple/kitaru/"):
+                  subprocess.run([*command, url], check=True, timeout=45)
+              for host in hosts:
+                  result = subprocess.run([*command, f"https://{host}/"], capture_output=True, text=True, timeout=45)
+                  if result.returncode != 60:
+                      raise SystemExit(f"{executable} must reject {host} with certificate error 60; got {result.returncode}: {result.stderr}")
+                  print(f"{executable}: rejected {host} with certificate error 60")
+          subprocess.run(
+              ["git", "ls-remote", "https://github.com/actions/checkout.git", "HEAD"],
+              check=True, timeout=45,
+          )
+          result = subprocess.run(
+              ["git", "ls-remote", "https://git-emudhra.we-have-a-problem.com/check.git"],
+              capture_output=True, text=True, timeout=45,
+          )
+          if result.returncode != 128 or not re.search(
+              r"SSL certificate problem|SSL certificate OpenSSL verify result|certificate verify failed|server certificate verification failed|certificate.*revoked",
+              result.stderr, re.IGNORECASE,
+          ):
+              raise SystemExit(f"Git must reject the compromised chain with a certificate error; got {result.returncode}: {result.stderr}")
+          print("Git: rejected the compromised chain with a certificate error")
+          PY
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
-        if: github.event_name == 'pull_request'
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        if: github.event_name == 'pull_request' || runner.os == 'macOS'
+      - name: Verify macOS uv certificate rejection
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          UV_HTTP_TIMEOUT: '15'
+          UV_HTTP_RETRIES: '0'
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 <<'PY'
+          import re
+          import subprocess
+          version = subprocess.check_output(["uv", "--version"], text=True).split()[1]
+          if tuple(map(int, version.split("."))) < (0, 13, 5):
+              raise SystemExit(f"uv >= 0.13.5 is required; found {version}")
+          command = [
+              "uv", "pip", "compile", "--no-config", "--no-cache", "--no-deps", "--no-build",
+              "--python", "/usr/bin/python3", "-", "--index-url",
+          ]
+          subprocess.run(
+              [*command, "https://pypi.org/simple/"], input="idna\n", text=True,
+              check=True, timeout=45, stdout=subprocess.DEVNULL,
+          )
+          for host in ("dv-g3b-emudhra.we-have-a-problem.com", "dv-g3b-aaa-emudhra.we-have-a-problem.com"):
+              result = subprocess.run(
+                  [*command, f"https://{host}/"], input="idna\n", text=True,
+                  capture_output=True, timeout=45,
+              )
+              if result.returncode == 0 or not re.search(
+                  r"invalid peer certificate|certificate verify failed|certificate verification failed",
+                  result.stderr, re.IGNORECASE,
+              ):
+                  raise SystemExit(f"uv must reject {host} with a certificate error; got {result.returncode}: {result.stderr}")
+              print(f"uv: rejected {host} with a certificate error")
+          PY
       - name: Build local Kitaru wheel
         if: github.event_name == 'pull_request'
         shell: bash
@@ -91,7 +240,7 @@ jobs:
           # which would put the installer into project mode.
           cd "$(mktemp -d)"
           for attempt in 1 2 3 4 5; do
-            get_script | bash -s -- && exit 0
+            get_script | bash -s -- | tee "$RUNNER_TEMP/install.log" && exit 0
             echo "installer attempt $attempt failed; retrying in 30s" >&2
             sleep 30
           done
@@ -117,20 +266,37 @@ jobs:
             || cat doctor.json
           # `set -o pipefail` above would fail the pipe on a missing rc file, so
           # swallow cat's status and let grep decide.
-          { cat "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile" 2>/dev/null || true; } \
+          { cat "$HOME/.bashrc" "$HOME/.zshenv" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile" 2>/dev/null || true; } \
             | grep -q ".local/bin" || { echo "PATH not persisted"; exit 1; }
+      - name: The printed PATH instruction works without restarting the shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          hint="$(grep -E '^ +export PATH=' "$RUNNER_TEMP/install.log" | head -1 || true)"
+          eval "$hint"
+          kitaru --version
       - name: Re-run is an upgrade, not an error
         shell: bash
         run: cd "$(mktemp -d)" && cat "$GITHUB_WORKSPACE/install.sh" | bash -s --
           --no-skills --no-mcp --quiet
       - name: Inside a project, install into that project's environment
         shell: bash
+        # Retry like the first install step: right after a release publish,
+        # some PyPI index mirrors can still miss the new version. Each attempt
+        # starts from a fresh project so a failed attempt leaves nothing behind.
         run: |
           set -euxo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-          cd "$(mktemp -d)"
-          uv init --quiet -p 3.12 --name demo-agent .
-          cat "$GITHUB_WORKSPACE/install.sh" | bash -s -- --no-skills --no-mcp
+          for attempt in 1 2 3 4 5; do
+            cd "$(mktemp -d)"
+            uv init --quiet -p 3.12 --name demo-agent .
+            if cat "$GITHUB_WORKSPACE/install.sh" | bash -s -- --no-skills --no-mcp; then break; fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "project installer failed after $attempt attempts" >&2; exit 1
+            fi
+            echo "project installer attempt $attempt failed; retrying in 30s" >&2
+            sleep 30
+          done
           grep -q 'kitaru\[cli,mcp,worker\]' pyproject.toml
           uv run kitaru --version
           uv run kitaru-mcp --help >/dev/null
@@ -144,3 +310,11 @@ jobs:
             echo "installer exited 0 on a failed install" >&2; exit 1
           fi
           echo "failed install correctly exited nonzero"
+  regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+      - run: bash scripts/test-installer.sh

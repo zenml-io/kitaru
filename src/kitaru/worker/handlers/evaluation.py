@@ -53,7 +53,9 @@ class EvaluationHandler:
         """
         assert isinstance(spec.details, EvaluationTaskDetails)
         plugin = spec.details.plugin
-        env = build_process_env(task_id, {}, spec.env, spec.secret_env, token)
+        env = build_process_env(
+            task_id, {}, spec.env, spec.secret_env, token, spec.unset_env
+        )
         if isinstance(plugin, ScriptPluginSpec):
             path = await materialize_blob(
                 ctx, ctx.blob_cache, plugin.blob_id, plugin.sha256

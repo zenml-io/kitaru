@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+## 0.3.0 - 2026-11-02
+
+- Recognize the Google `gemini-3-flash-preview` / `models/gemini-3-flash-preview` identifier pair in LLM signals and requested-model policies. Preserve unresolved name differences as numeric findings with bounded evidence and an inconclusive policy verdict; exact model and provider allowlists remain unchanged.
+- Include bounded node-specific evidence in diagnostic finding explanations while preserving numeric scores and scales.
+- Add configured numeric rules to `tool-policy` for recorded tool inputs and outputs, with decimal comparisons, optional conditions on the same call, and inconclusive results when required evidence is unavailable.
+
 ## 0.2.1 - 2026-10-08
 
 - Report priced call costs when ordinary tool calls have no cost metadata, while retaining aggregate fallback behavior.

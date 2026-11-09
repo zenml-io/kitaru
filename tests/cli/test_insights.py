@@ -17,6 +17,7 @@ import json
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -215,6 +216,90 @@ async def test_create_rejects_malformed_insight_json(
     assert client.create_calls == []
 
 
+_TEXT_INSIGHT = {
+    "name": "latency-regressed",
+    "title": "Latency regressed",
+    "data": {"type": "text", "content": "It got slower."},
+}
+
+
+def _write_insight_file(tmp_path: Path, content: str) -> Path:
+    """Write ``content`` to a UTF-8 insight file under ``tmp_path``."""
+    insight_file = tmp_path / "cards.json"
+    insight_file.write_text(content, encoding="utf-8")
+    return insight_file
+
+
+@pytest.mark.parametrize(
+    ("content", "names"),
+    [
+        (_TEXT_INSIGHT, ["latency-regressed"]),
+        (
+            [_TEXT_INSIGHT, {**_TEXT_INSIGHT, "name": "latency-again"}],
+            ["latency-regressed", "latency-again"],
+        ),
+    ],
+    ids=["object", "array"],
+)
+async def test_create_reads_one_insight_or_an_array_from_insight_file(
+    tmp_path: Path, content: object, names: list[str]
+) -> None:
+    """--insight-file accepts one insight object or an array, in file order."""
+    client = StubInsightClient()
+    insight_file = _write_insight_file(tmp_path, json.dumps(content))
+
+    await insights.create_insights(client, agent="assistant", insight_file=insight_file)
+
+    [(agent_id, insight_inputs)] = client.create_calls
+    assert agent_id == client.agent.id
+    assert [item.name for item in insight_inputs] == names
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ("not-json", "--insight-file is not valid JSON"),
+        ("[]", "Provide at least one --insight or a nonempty --insight-file"),
+        ("null", "--insight-file must contain a JSON object or an array"),
+        ("[1]", "--insight-file item 1 must be a JSON object"),
+        (
+            json.dumps([_TEXT_INSIGHT, {"name": "missing-title"}]),
+            "--insight-file item 2 has invalid title: Field required",
+        ),
+    ],
+)
+async def test_create_rejects_bad_insight_files(
+    tmp_path: Path, content: str, message: str
+) -> None:
+    """Bad --insight-file content fails before resolving the agent."""
+    client = StubInsightClient()
+    insight_file = _write_insight_file(tmp_path, content)
+
+    with pytest.raises(CLIError, match=message):
+        await insights.create_insights(
+            client, agent="assistant", insight_file=insight_file
+        )
+
+    assert client.agent_lookups == 0
+    assert client.create_calls == []
+
+
+async def test_create_rejects_insight_with_insight_file(tmp_path: Path) -> None:
+    """One batch comes from either --insight or --insight-file, never both."""
+    client = StubInsightClient()
+    insight_file = _write_insight_file(tmp_path, json.dumps(_TEXT_INSIGHT))
+
+    with pytest.raises(CLIError, match="either --insight or --insight-file"):
+        await insights.create_insights(
+            client,
+            agent="assistant",
+            insight=[json.dumps(_TEXT_INSIGHT)],
+            insight_file=insight_file,
+        )
+
+    assert client.create_calls == []
+
+
 async def test_list_combines_agent_and_type_filters_with_the_generic_filter() -> None:
     """List folds --agent, --name, --type, and --filter into one AND expression."""
     client = StubInsightClient()
@@ -399,3 +484,19 @@ def test_public_argv_and_schema_cover_insight_lifecycle(
     }
     assert specs["insight.delete"]["side_effects"]["deletes_remote_state"]
     assert specs["insight.create"]["side_effects"]["creates_remote_state"]
+
+
+def test_public_argv_creates_insights_from_insight_file(
+    argv_client: StubInsightClient,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """The public --insight-file option sends the file's batch to the SDK."""
+    insight_file = _write_insight_file(tmp_path, json.dumps([_TEXT_INSIGHT]))
+
+    argv = ["insight", "create", "--agent", "assistant"]
+    assert app_module.main([*argv, "--insight-file", str(insight_file)]) == 0
+
+    assert json.loads(capsys.readouterr().out)["command"] == "insight.create"
+    [(_, insight_inputs)] = argv_client.create_calls
+    assert [item.name for item in insight_inputs] == ["latency-regressed"]
