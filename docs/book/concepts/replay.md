@@ -19,7 +19,7 @@ For a one-off replay, the CLI exposes the same create, list, and get flow:
 kitaru replay create <baseline-session-id> \
   --evaluator refund-check@1 \
   --tool-policy '{"default":{"type":"history","scope":"baseline","on_miss":"fail"}}' \
-  --evaluate-baselines --output json
+  --baseline-evaluation-mode if_missing --output json
 kitaru replay list --output json
 kitaru replay get <replay-id> --output json
 ```
@@ -34,7 +34,7 @@ Creation returns immediately with the replay and its job. Use `kitaru job watch 
 import asyncio
 from kitaru.client import KitaruAPIClient
 from kitaru.api_models.v1.plugin import EvaluatorConfig
-from kitaru.api_models.v1.replay import ReplayCreateRequest
+from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayCreateRequest
 from kitaru.api_models.v1.replay_config import (
     HistoryConfig,
     ToolPolicy,
@@ -50,7 +50,7 @@ async def main() -> None:
             tool_policy=ToolPolicy(
                 default=HistoryConfig(scope="baseline", on_miss="fail")
             ),
-            evaluate_baselines=True,
+            baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
         )
     )
     print(replay.id, replay.job_id, replay.status)
@@ -59,7 +59,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`evaluate_baselines=True` evaluates the baseline session with the same evaluators, so the comparison you want, baseline evaluations next to replay evaluations, exists as soon as the replay settles. Watch the job with `kitaru job watch <job-id>`, then read `result_session_id` off the replay.
+`baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING` reuses the latest baseline evaluation with the same evaluator version and parameters, or schedules one if no match exists. Result sessions receive fresh evaluations, so baseline and replay measurements are available when the replay completes. Use `FORCE` to rerun baseline evaluations or `NONE` to skip them. Watch the job with `kitaru job watch <job-id>`, then read `result_session_id` off the replay.
 
 A replay moves `pending → evaluating → completed` (or `failed` / `canceled`). Its output is intentionally plain: the result session plus its evaluation rows. You compare baseline and result by reading both sessions' evaluations, cost, and tokens. See [Replay a failure and fork it](../guides/replay-and-overrides.md) for the full loop.
 
