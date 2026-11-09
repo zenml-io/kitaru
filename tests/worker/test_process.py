@@ -231,6 +231,27 @@ def test_build_process_env_layers_and_strips_contract_variables(
     assert "KITARU_API_KEY" not in env
 
 
+def test_build_process_env_drops_unset_inherited_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unset variables leave the inherited env, and spec values still apply."""
+    monkeypatch.setenv("KITARU_API_URL", "https://api.example.com")
+    monkeypatch.setenv("OPENAI_API_KEY", "worker-key")
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "https://worker")
+
+    env = build_process_env(
+        uuid.uuid4(),
+        run_env={},
+        extra_env={"LANGFUSE_BASE_URL": "https://connection"},
+        secret_env={},
+        token="task-token",
+        unset_env=["OPENAI_API_KEY", "LANGFUSE_BASE_URL"],
+    )
+
+    assert "OPENAI_API_KEY" not in env
+    assert env["LANGFUSE_BASE_URL"] == "https://connection"
+
+
 def test_build_process_env_extras_cannot_override_contract_variables(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

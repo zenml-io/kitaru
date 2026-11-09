@@ -8,26 +8,33 @@ const { createScorer } = createRequire(
   new URL("../packages/mastra/package.json", import.meta.url),
 )("@mastra/core/evals");
 
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+const isRecord = (value) => typeof value === "object" && value !== null;
+
 await runEvaluator(
   createMastraEvaluator({
     mapInput(view) {
+      const { inputs, outputs } = view.session;
       if (
-        !Array.isArray(view.session.inputs?.messages) ||
-        typeof view.session.outputs?.text !== "string"
+        !isRecord(inputs) ||
+        !Array.isArray(inputs.messages) ||
+        !isRecord(outputs) ||
+        typeof outputs.text !== "string"
       ) {
         throw new Error("Fixture requires a complete recorded conversation");
       }
       return {
         input: {
           messages: [
-            ...view.session.inputs.messages,
-            { role: "assistant", content: view.session.outputs.text },
+            ...inputs.messages,
+            { role: "assistant", content: outputs.text },
           ],
-          tools: view.nodes
-            .filter((node) => node.node_type === "tool_call")
-            .sort((a, b) => a.index - b.index),
+          tools: view.nodes.filter((node) => node.node_type === "tool_call"),
         },
-        output: view.session.outputs,
+        output: outputs,
       };
     },
     scorers(params) {

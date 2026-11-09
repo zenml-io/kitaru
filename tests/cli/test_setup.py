@@ -252,7 +252,7 @@ async def test_claude_and_codex_clients_register_through_their_clis(
 
     result = await _run(home, server="http://localhost:9000", mode="read-only")
 
-    for directory in (".agents", ".claude", ".codex"):
+    for directory in (".agents", ".claude"):
         assert (
             home / directory / "skills" / "kitaru-investigation" / "SKILL.md"
         ).is_file()
@@ -627,15 +627,15 @@ async def test_unwritable_destination_leaves_previous_skill_intact(
     home: Path, monkeypatch
 ):
     """A write failure in one destination neither destroys its old skill nor others."""
-    _clis(monkeypatch, codex="/bin/codex")
+    _clis(monkeypatch, claude="/bin/claude")
     await _run(home, register_mcp=False)
-    codex_skill = home / ".codex" / "skills" / "kitaru-investigation"
-    assert codex_skill.is_dir()
+    claude_skill = home / ".claude" / "skills" / "kitaru-investigation"
+    assert claude_skill.is_dir()
 
     real_mkdtemp = setup_cli.tempfile.mkdtemp
 
     def failing_mkdtemp(*args, **kwargs):
-        if str(kwargs.get("dir", "")).startswith(str(home / ".codex")):
+        if str(kwargs.get("dir", "")).startswith(str(home / ".claude")):
             raise OSError("disk full")
         return real_mkdtemp(*args, **kwargs)
 
@@ -645,23 +645,23 @@ async def test_unwritable_destination_leaves_previous_skill_intact(
 
     statuses = {s["target"]: s["status"] for s in result.item["steps"]}
     assert statuses[str(home / ".agents" / "skills")] == "done"
-    assert statuses[str(home / ".codex" / "skills")] == "failed"
-    assert (codex_skill / "SKILL.md").is_file()
+    assert statuses[str(home / ".claude" / "skills")] == "failed"
+    assert (claude_skill / "SKILL.md").is_file()
     assert result.exit_code == 0
 
 
 async def test_failed_skill_swap_restores_the_previous_skill(home: Path, monkeypatch):
     """When the final rename fails, the old skill is put back, not left retired."""
-    _clis(monkeypatch, codex="/bin/codex")
+    _clis(monkeypatch, claude="/bin/claude")
     await _run(home, register_mcp=False)
-    codex_skills = home / ".codex" / "skills"
-    codex_skill = codex_skills / "kitaru-investigation"
-    before = (codex_skill / "SKILL.md").read_bytes()
+    claude_skills = home / ".claude" / "skills"
+    claude_skill = claude_skills / "kitaru-investigation"
+    before = (claude_skill / "SKILL.md").read_bytes()
 
     real_replace = setup_cli.os.replace
 
     def failing_replace(src, dst):
-        if ".staging" in str(src) and Path(dst) == codex_skill:
+        if ".staging" in str(src) and Path(dst) == claude_skill:
             raise OSError("rename refused")
         return real_replace(src, dst)
 
@@ -670,10 +670,64 @@ async def test_failed_skill_swap_restores_the_previous_skill(home: Path, monkeyp
     result = await _run(home, register_mcp=False)
 
     statuses = {s["target"]: s["status"] for s in result.item["steps"]}
-    assert statuses[str(codex_skills)] == "failed"
+    assert statuses[str(claude_skills)] == "failed"
     assert statuses[str(home / ".agents" / "skills")] == "done"
-    assert (codex_skill / "SKILL.md").read_bytes() == before
-    assert [p.name for p in codex_skills.iterdir() if p.name.startswith(".")] == []
+    assert (claude_skill / "SKILL.md").read_bytes() == before
+    assert [p.name for p in claude_skills.iterdir() if p.name.startswith(".")] == []
+
+
+@pytest.mark.parametrize(
+    "kind", ["file", "file_symlink", "directory_symlink", "dangling_symlink"]
+)
+@pytest.mark.parametrize("publish_fails", [False, True], ids=["success", "rollback"])
+async def test_existing_skill_path_is_replaced_or_restored(
+    home: Path, monkeypatch, kind: str, publish_fails: bool
+):
+    """Publish updates existing paths; a failed publish preserves their originals."""
+    skills = home / ".agents" / "skills"
+    skills.mkdir(parents=True)
+    target = skills / "kitaru-investigation"
+    original = home / "original"
+    if kind == "file":
+        target.write_text("original skill", encoding="utf-8")
+    else:
+        if kind == "file_symlink":
+            original.write_text("original skill", encoding="utf-8")
+        elif kind == "directory_symlink":
+            original.mkdir()
+            (original / "SKILL.md").write_text("original skill", encoding="utf-8")
+        target.symlink_to(original)
+
+    if publish_fails:
+        real_replace = os.replace
+
+        def failing_replace(src, dst):
+            if Path(src).name.endswith(".staging") and Path(dst) == target:
+                raise OSError("rename refused")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(os, "replace", failing_replace)
+
+    result = await _run(home, register_mcp=False)
+
+    assert result.item["steps"][0]["status"] == ("failed" if publish_fails else "done")
+    if publish_fails:
+        if kind == "file":
+            assert target.is_file() and not target.is_symlink()
+            assert target.read_text() == "original skill"
+        else:
+            assert target.is_symlink()
+            assert target.readlink() == original
+    else:
+        assert target.is_dir() and not target.is_symlink()
+        assert (target / "SKILL.md").read_text() == _SKILLS[target.name]["SKILL.md"]
+    if kind == "file_symlink":
+        assert original.read_text() == "original skill"
+    elif kind == "directory_symlink":
+        assert (original / "SKILL.md").read_text() == "original skill"
+    elif kind == "dangling_symlink":
+        assert not original.exists()
+    assert not [p for p in skills.iterdir() if p.name.startswith(".")]
 
 
 async def test_nothing_to_do_is_a_warning(home: Path):
@@ -758,3 +812,20 @@ def test_resolve_mcp_launch_user_mode_uses_sibling_executable(
     assert launch.command == str(mcp)
     assert launch.args == ()
     assert os.access(launch.command, os.X_OK)
+
+
+async def test_codex_uses_cross_agent_skills_without_changing_legacy_copy(
+    home: Path, monkeypatch
+):
+    """Codex shares .agents; an existing user copy in .codex is preserved."""
+    _clis(monkeypatch, codex="/bin/codex")
+    legacy = home / ".codex" / "skills" / "kitaru-investigation" / "SKILL.md"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("User copy")
+
+    result = await _run(home, register_mcp=False)
+
+    assert result.exit_code == 0
+    assert legacy.read_text() == "User copy"
+    assert not (legacy.parent.parent / "kitaru-replay-experiment").exists()
+    assert (home / ".agents" / "skills" / "kitaru-investigation" / "SKILL.md").is_file()

@@ -26,7 +26,7 @@ from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
-from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.orm.session import SessionORM
 from kitaru.server.adapters.db.pagination import (
@@ -110,6 +110,7 @@ from kitaru.server.domain.session import (
     SessionInUse,
     SessionNotFound,
     SessionRollups,
+    SessionUsage,
 )
 from kitaru.server.domain.tag import Tag, TagLink
 from kitaru.server.filtering import (
@@ -609,8 +610,12 @@ async def test_query_filters_by_cost_bounds(setup: Setup) -> None:
             origin=SessionOrigin.RECORDED,
         )
     )
-    await repository.apply_rollups(cheap.id, SessionRollups(), cost=Decimal("1.00"))
-    await repository.apply_rollups(pricey.id, SessionRollups(), cost=Decimal("9.00"))
+    await repository.apply_rollups(
+        cheap.id, SessionRollups(), usage=SessionUsage(cost=Decimal("1.00"))
+    )
+    await repository.apply_rollups(
+        pricey.id, SessionRollups(), usage=SessionUsage(cost=Decimal("9.00"))
+    )
 
     sessions, _ = await repository.query(
         SessionFilter(
@@ -938,7 +943,7 @@ async def test_delete_restricted_by_replay_result(replay_setup: ReplaySetup) -> 
 
 
 async def test_apply_rollups_accumulates_deltas(setup: Setup) -> None:
-    """Set absolute cost while accumulating token and call-count deltas."""
+    """Set absolute usage while accumulating call-count deltas."""
     repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
         Session(
@@ -948,19 +953,14 @@ async def test_apply_rollups_accumulates_deltas(setup: Setup) -> None:
             origin=SessionOrigin.RECORDED,
         )
     )
-    await repository.apply_rollups(
-        created.id,
-        SessionRollups(
-            input_tokens=10,
-            output_tokens=5,
-            llm_call_count=1,
-        ),
-        cost=Decimal("1.50"),
+    usage = SessionUsage(
+        cost=Decimal("1.50"), tokens=TokenUsage(input_tokens=10, output_tokens=5)
     )
+    await repository.apply_rollups(created.id, SessionRollups(llm_call_count=1), usage)
     await repository.apply_rollups(
         created.id,
         SessionRollups(tool_call_count=1),
-        cost=Decimal("2.00"),
+        usage.model_copy(update={"cost": Decimal("2.00")}),
     )
     loaded = await repository.get(created.id, include_payloads=True)
     assert loaded.cost == Decimal("2.00")
@@ -984,7 +984,7 @@ async def test_apply_rollups_can_clear_incomplete_cost(setup: Setup) -> None:
         )
     )
     await repository.apply_rollups(
-        created.id, SessionRollups(llm_call_count=1), cost=None
+        created.id, SessionRollups(llm_call_count=1), usage=SessionUsage()
     )
     loaded = await repository.get(created.id, include_payloads=True)
     assert loaded.cost is None
@@ -996,7 +996,7 @@ async def test_apply_rollups_not_found(setup: Setup) -> None:
     repository, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(SessionNotFound):
-        await repository.apply_rollups(missing_id, SessionRollups(), cost=None)
+        await repository.apply_rollups(missing_id, SessionRollups(), SessionUsage())
 
 
 async def test_query_filters_by_tag(setup: Setup) -> None:

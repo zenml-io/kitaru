@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+## 0.1.2 - 2026-11-02
+
+- Set `output_text_selector` on model-call nodes to the turn's text block when the turn has exactly one, so the dashboard shows Claude's reply instead of the raw output JSON.
+
 ## 0.1.1 - 2026-10-08
 
 - Simplify internal return syntax without changing recording behavior.

@@ -337,13 +337,16 @@ def mastra_replay_stored_files(inputs: Any) -> list[MastraStoredFile]:
     return stored
 
 
-class SessionRollups(FrozenModel):
-    """Session rollup deltas."""
+class SessionUsage(FrozenModel):
+    """Measured session totals, with incomplete measurements left unknown."""
 
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cached_input_tokens: int = 0
-    reasoning_tokens: int = 0
+    cost: Decimal | None = None
+    tokens: TokenUsage = Field(default_factory=TokenUsage)
+
+
+class SessionRollups(FrozenModel):
+    """Session call-count deltas."""
+
     llm_call_count: int = 0
     tool_call_count: int = 0
 
@@ -354,24 +357,12 @@ def combine_rollups(deltas: Iterable[SessionRollups]) -> SessionRollups:
     Returns:
         Combined rollup delta.
     """
-    input_tokens = 0
-    output_tokens = 0
-    cached_input_tokens = 0
-    reasoning_tokens = 0
     llm_call_count = 0
     tool_call_count = 0
     for delta in deltas:
-        input_tokens += delta.input_tokens
-        output_tokens += delta.output_tokens
-        cached_input_tokens += delta.cached_input_tokens
-        reasoning_tokens += delta.reasoning_tokens
         llm_call_count += delta.llm_call_count
         tool_call_count += delta.tool_call_count
     return SessionRollups(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        cached_input_tokens=cached_input_tokens,
-        reasoning_tokens=reasoning_tokens,
         llm_call_count=llm_call_count,
         tool_call_count=tool_call_count,
     )
@@ -384,10 +375,6 @@ def rollup_delta(old: SessionRollups, new: SessionRollups) -> SessionRollups:
         Rollup delta from ``old`` to ``new``.
     """
     return SessionRollups(
-        input_tokens=new.input_tokens - old.input_tokens,
-        output_tokens=new.output_tokens - old.output_tokens,
-        cached_input_tokens=new.cached_input_tokens - old.cached_input_tokens,
-        reasoning_tokens=new.reasoning_tokens - old.reasoning_tokens,
         llm_call_count=new.llm_call_count - old.llm_call_count,
         tool_call_count=new.tool_call_count - old.tool_call_count,
     )
