@@ -84,6 +84,7 @@ class ModalEphemeralWorkers:
             timeout=self._timeout_seconds,
             cpu=self._modal_settings.cpu,
             memory=self._modal_settings.memory_mb,
+            region=self._modal_settings.region,
             client=client,
             environment_name=self._modal_settings.environment,
         )

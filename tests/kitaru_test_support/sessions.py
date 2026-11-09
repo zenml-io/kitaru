@@ -16,11 +16,10 @@
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
+from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.models.tag import TagFilter
@@ -31,6 +30,7 @@ from kitaru.server.domain.session import (
     SessionInUse,
     SessionNotFound,
     SessionRollups,
+    SessionUsage,
 )
 from kitaru.server.domain.tag import (
     DuplicateTagLink,
@@ -663,14 +663,14 @@ class FakeSessionRepository:
             self._tasks._unlink_session(session_id)
 
     async def apply_rollups(
-        self, session_id: uuid.UUID, deltas: SessionRollups, cost: Decimal | None
+        self, session_id: uuid.UUID, deltas: SessionRollups, usage: SessionUsage
     ) -> None:
-        """Set session cost and apply token and call-count deltas.
+        """Set measured session totals and apply call-count deltas.
 
         Args:
             session_id: Id of the session.
             deltas: Rollup deltas to add.
-            cost: Total cost, or ``None`` when pricing is incomplete.
+            usage: Measured totals, with incomplete fields left unknown.
 
         Raises:
             SessionNotFound: No session has this id.
@@ -678,19 +678,16 @@ class FakeSessionRepository:
         stored = self._sessions.get(session_id)
         if stored is None:
             raise SessionNotFound(session_id)
-        tokens = stored.tokens if stored.tokens is not None else TokenUsage()
-        new_tokens = TokenUsage(
-            input_tokens=(tokens.input_tokens or 0) + deltas.input_tokens,
-            output_tokens=(tokens.output_tokens or 0) + deltas.output_tokens,
-            cached_input_tokens=(tokens.cached_input_tokens or 0)
-            + deltas.cached_input_tokens,
-            reasoning_tokens=(tokens.reasoning_tokens or 0) + deltas.reasoning_tokens,
+        tokens = (
+            usage.tokens
+            if any(value is not None for value in usage.tokens.model_dump().values())
+            else None
         )
         now = _renewed_timestamp(stored.updated)
         updated = stored.model_copy(
             update={
-                "cost": cost,
-                "tokens": new_tokens,
+                "cost": usage.cost,
+                "tokens": tokens,
                 "llm_call_count": stored.llm_call_count + deltas.llm_call_count,
                 "tool_call_count": stored.tool_call_count + deltas.tool_call_count,
                 "updated": now,

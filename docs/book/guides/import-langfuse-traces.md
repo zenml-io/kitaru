@@ -58,6 +58,8 @@ Identity values are trimmed strings. Conflicting embedded project IDs fail the a
 
 ## Fetch traces from the Langfuse API
 
+API imports and the importer-backed adapter use Langfuse Python SDK 5 and require Langfuse Cloud or self-hosted Langfuse 4.59.0 or later. File-only imports do not require the SDK or a running Langfuse server.
+
 Skip the export and upload, and let the import task fetch traces from Langfuse directly:
 
 ```bash

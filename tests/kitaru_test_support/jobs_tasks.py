@@ -421,6 +421,8 @@ class FakeTaskRepository:
             Page of matching tasks and the next cursor.
         """
         tasks = list(self._tasks.values())
+        if task_filter.job_ids is not None:
+            tasks = [task for task in tasks if task.job_id in task_filter.job_ids]
         if task_filter.job_id is not None:
             tasks = [task for task in tasks if task.job_id == task_filter.job_id]
         if task_filter.stale_before is not None:

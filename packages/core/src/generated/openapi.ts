@@ -3165,6 +3165,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Session
+         * @description Create a session and all its initial nodes atomically.
+         *
+         *     Clients observe HTTP 201 on success, 409 for an existing source identity,
+         *     and 422 on invalid input. A node failure rolls back the session and all
+         *     initial nodes.
+         *
+         *     Args:
+         *         body: Session and complete initial nodes.
+         *         service: Session ingestion service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Created session with its node rollups.
+         */
+        post: operations["ingest_session_api_v1_sessions_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{session_id}": {
         parameters: {
             query?: never;
@@ -3555,6 +3587,38 @@ export interface paths {
          *         Claimed tasks with their execution specs and a task token each.
          */
         post: operations["claim_tasks_api_v1_tasks_claim_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tasks/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Task Diagnostics
+         * @description Read pending-task coverage.
+         *
+         *     Clients observe HTTP 200 on success, 404 for a missing job, and 422
+         *     when both scope filters are supplied.
+         *
+         *     Args:
+         *         service: Task service.
+         *         actor: Caller context.
+         *         job_id: Restrict to one job.
+         *         experiment_run_id: Restrict to one experiment run.
+         *
+         *     Returns:
+         *         Current heartbeat-based coverage snapshot.
+         */
+        get: operations["get_task_diagnostics_api_v1_tasks_diagnostics_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -8834,6 +8898,19 @@ export interface components {
             evaluations: components["schemas"]["EvaluationResult"][];
         };
         /**
+         * SessionIngestRequest
+         * @description Session creation with all initial nodes in one transaction.
+         */
+        SessionIngestRequest: {
+            /**
+             * Nodes
+             * @description Complete initial nodes, in any order.
+             */
+            nodes: components["schemas"]["SessionNodeCreateRequest"][];
+            /** @description Session to create. */
+            session: components["schemas"]["SessionCreateRequest"];
+        };
+        /**
          * SessionNodeBatchRequest
          * @description Session node batch request.
          */
@@ -9547,6 +9624,72 @@ export interface components {
             tasks: components["schemas"]["TaskWithSpec"][];
         };
         /**
+         * TaskDiagnosticResponse
+         * @description Pending tasks sharing worker requirements and coverage.
+         */
+        TaskDiagnosticResponse: {
+            /**
+             * Agent Version Id
+             * @description Required agent version.
+             */
+            agent_version_id?: string | null;
+            /**
+             * Job Ids
+             * @description Up to three example job ids.
+             */
+            job_ids: string[];
+            /** @description Task kind. */
+            kind: components["schemas"]["TaskKind"];
+            /**
+             * Labels
+             * @description Required task labels.
+             */
+            labels: {
+                [key: string]: string;
+            };
+            /**
+             * Reasons
+             * @description Coverage mismatches; empty when a compatible worker exists.
+             */
+            reasons: components["schemas"]["TaskWaitReason"][];
+            /**
+             * Task Count
+             * @description Pending tasks in this group.
+             */
+            task_count: number;
+            /**
+             * Task Ids
+             * @description Up to three example task ids.
+             */
+            task_ids: string[];
+        };
+        /**
+         * TaskDiagnosticsResponse
+         * @description Heartbeat-based coverage snapshot of pending work.
+         */
+        TaskDiagnosticsResponse: {
+            /**
+             * Groups
+             * @description Up to 100 groups of pending work.
+             */
+            groups: components["schemas"]["TaskDiagnosticResponse"][];
+            /**
+             * Live Worker Count
+             * @description Workers with recent heartbeats.
+             */
+            live_worker_count: number;
+            /**
+             * Pending Task Count
+             * @description Pending tasks examined.
+             */
+            pending_task_count: number;
+            /**
+             * Truncated
+             * @description Whether additional groups were omitted.
+             */
+            truncated: boolean;
+        };
+        /**
          * TaskKind
          * @description Kind of work a task runs.
          * @enum {string}
@@ -9737,6 +9880,11 @@ export interface components {
              * @description Process timeout.
              */
             timeout_seconds: number;
+            /**
+             * Unset Env
+             * @description Inherited variables removed before the spec's values apply.
+             */
+            unset_env?: string[];
         };
         /**
          * TaskStatus
@@ -9762,6 +9910,12 @@ export interface components {
             /** @description New task status. */
             status?: components["schemas"]["TaskStatus"] | null;
         };
+        /**
+         * TaskWaitReason
+         * @description Why no live worker covers a pending task.
+         * @enum {string}
+         */
+        TaskWaitReason: "no_live_workers" | "claim_mismatch" | "job_mismatch" | "selector_mismatch" | "credential_mismatch";
         /**
          * TaskWithSpec
          * @description Task with spec.
@@ -19639,6 +19793,95 @@ export interface operations {
             };
         };
     };
+    ingest_session_api_v1_sessions_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionIngestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     get_session_api_v1_sessions__session_id__get: {
         parameters: {
             query?: never;
@@ -20687,6 +20930,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskClaimResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    get_task_diagnostics_api_v1_tasks_diagnostics_get: {
+        parameters: {
+            query?: {
+                job_id?: string | null;
+                experiment_run_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDiagnosticsResponse"];
                 };
             };
             /** @description Unauthorized */

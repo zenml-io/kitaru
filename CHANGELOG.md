@@ -5,6 +5,88 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.27.6] - 2026-11-04
+
+### Changed
+
+- Self-hosted installations must upgrade both the server and workers to receive the connection credential-isolation fix. Connections must contain all required credentials; partial connections no longer fall back to the worker's environment.
+
+### Security
+
+- A task that uses a connection no longer takes any of the plugin's connection keys from the worker's environment. Keys in the plugin's `connection_schema` that the connection does not set are removed from the task environment, so a credential the worker holds cannot run with a connection's values.
+
+## [0.27.5] - 2026-11-03
+
+### Added
+
+- Register the `kitaru/openai-session-findings` analyzer in the default plugin catalog. It reads imported sessions with OpenAI, verifies each problem it finds on every session with the Decisions API, and stores one insight per verified finding. It needs an OpenAI connection with Decisions API access and sends session content to OpenAI.
+
+### Changed
+
+- Document that LangGraph 1.2.19 and later no longer apply middleware trace policies to Kitaru's LangGraph callback, so middleware span nodes record the state each hook received.
+
+## [0.27.4] - 2026-11-02
+
+### Added
+
+- Added `kitaru insight create --insight-file PATH`, which reads one insight JSON object or an array of them from a UTF-8 file, so a whole batch can be created without passing each insight as a shell argument.
+- Add configured numeric rules to the built-in `tool-policy` evaluator for recorded tool inputs and outputs, including decimal comparisons, optional conditions on the same call, and inconclusive results when required evidence is unavailable.
+- `kitaru-claude-agent-sdk` now sets `output_text_selector` on model-call nodes whose turn has exactly one text block, so the dashboard and evaluators read Claude's reply text instead of the raw output JSON.
+- `kitaru-langgraph` now sets `output_text_selector` on model-call nodes that returned exactly one generation with text, pointing at LangChain's joined reply text.
+- `@zenml-io/kitaru-mastra` now sets `output_text_selector` on agent step and structured-output model-call nodes, and on processor classifier calls whose reply is a single text part.
+- `kitaru-openai-agents` now sets `output_text_selector` on model-call nodes whose response has exactly one output text or refusal part. Reply and reasoning selectors on strings that were shortened for recording now point at the kept text inside the truncation wrapper.
+- `@zenml-io/kitaru-vercel-ai` now sets `output_text_selector` on model-call nodes to the step's joined reply text. Adapter authors can set the same field through `NormalizedModelStep.outputTextSelector` and the new `replyTextSelector()` helper in `@zenml-io/kitaru/adapter`.
+
+### Changed
+
+- Bundle Kitaru UI `0.5.2`, including the companion frontend changes for insights without an import and unknown token totals.
+- Update the default post-import insights analyzers to `0.3.0` and built-in evaluators to `0.3.0`. Post-import analysis uses ordered bounded session fetching and faster payload profiling while preserving analysis order.
+
+### Fixed
+
+- Registration receipts refresh the parent after creating an agent or plugin version, and preserve a successful result with a warning if that refresh fails.
+- `kitaru status` resolves bundled dashboard URLs consistently with investigation review links.
+- Plain-text root help summarizes installed skills instead of dumping local discovery paths, and investigation create/update help explains the allowed name syntax.
+- Avoid uninformative post-import insight recommendations for uniform activity and single-model inventories, and keep unknown tool activity distinct from recorded zero counts.
+- Recognize an explicitly supported Google model-name alias pair in LLM signals and requested-model policies, preserve evidence for unresolved name differences, and leave their model-match verdict inconclusive instead of reporting a model failure.
+- A request whose rejected input holds an infinite or NaN number, such as `filter=Infinity` on a list endpoint or `1e999` in a JSON body, now gets HTTP 422 instead of HTTP 500.
+- Fixed failed session imports blocking later retries by committing each imported session and its initial nodes atomically.
+- The bundled sample sessions now select every thinking part of a model output as reasoning, instead of only the last one.
+- Preserve unknown or incomplete token usage in session totals instead of reporting zero, including historical sessions and replacements of recorded nodes.
+
+## [0.27.3] - 2026-10-30
+
+### Added
+
+- Added public experiment-run evaluation aggregates through the REST API, `client.experiment_runs.get_evaluation_aggregates(...)`, and `kitaru experiment run get RUN --aggregate`.
+- Added a PydanticAI adapter option to keep the caller's prompt and history while recording task inputs, with guidance for attaching benchmark grades after completion.
+
+### Changed
+
+- Update the Langfuse integration and quickstart trace generation to Python SDK 5 and the observations API. API access requires Langfuse Cloud or self-hosted Langfuse 4.59.0 or later; existing file exports remain supported.
+- Support `@mastra/core` 1.72 through 1.76 in the Mastra adapter, including recorded and replayed `Agent.stream()` calls, and accept the tested release sets core 1.72.0 with memory 1.33.0, core 1.73.0 with memory 1.34.0, core 1.74.0 with memory 1.35.0, core 1.75.0 with memory 1.36.0, and core 1.76.0 with memory 1.37.0 in the isolated memory replay factory.
+- Support `@mastra/core` 1.77 through 1.79 in the Mastra adapter, including recorded and replayed `Agent.stream()` calls, and accept the tested release sets core 1.77.0 with memory 1.37.1, core 1.78.0 with memory 1.38.0, and core 1.79.0 with memory 1.39.0 in the isolated memory replay factory.
+- Capture conflict-aware observational-memory writes and preserve generation retirement, write receipts, cursors, and database record semantics during isolated replay.
+- Close recordings promptly when an earlier turn left memory work running, while keeping the source Memory's background-work join available through its finalization deadline.
+- `kitaru-openai-agents` now supports the OpenAI Agents SDK 0.23 and 0.24 minor lines in addition to 0.19.3+.
+- `kitaru-pydantic-ai` now supports the PydanticAI 2.52 through 2.61 minor lines in addition to 2.14.1+.
+
+### Fixed
+
+- Corrected worker scope display and added live workers' scopes to `kitaru status`, with troubleshooting guidance for replays waiting on agent or evaluator workers.
+- `kitaru worker start --help` and the CLI schema now list `analyzer` as a valid `--claim` value.
+- Insights can now be filtered by `task_id`, so the `kitaru insight list --filter` command that `kitaru import analyze` suggests no longer fails with HTTP 422.
+- Corrected import documentation to describe deduplication per destination agent across agent versions, including the global-key behavior in Kitaru 0.23.0.
+- Mastra memory replay now matches a recorded observational-memory call even when the original turn crossed a minute or day boundary that the replay did not. Mastra only adds a date header or time label to the observer prompt when the day or minute changes, so these replays used to miss the recorded result and give the agent different memory than it had in the original run.
+- Mastra replays with buffered observational memory no longer diverge when the replay runs slower than production, for example under CI load. A recorded buffered observer or reflector result now stays held until the actor reaches the step where production received it, or until Mastra waits on the buffer round or the turn ends. Before, the result was released once production's call duration had passed.
+- The default post-import insights analyzers now count embedded tool requests when sessions have no separate tool nodes, distinguish literal correction markers from user corrections, and label model identifiers as recorded.
+- CLI JSON output and MCP tool results no longer mask averaged token counts (such as `input_tokens: 120.5` under a model-swap insight's `tokens_per_call`) as `"***"`. Credential fields are still masked.
+- Keep session cost unknown when any model call is unpriced, including across batches and node replacements, and repair previously stored incomplete totals during database upgrades.
+
+### Security
+
+- Updated locked OpenTelemetry API, SDK, and instrumentation packages to patch CVE-2026-114603.
+
 ## [0.27.2] - 2026-10-08
 
 ### Added

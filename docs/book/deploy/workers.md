@@ -27,7 +27,7 @@ kitaru worker start
 | `KITARU_WORKER_NAME` | hostname-pid | Label shown in worker listings. Every start registers a new worker, names need not be unique. |
 | `KITARU_WORKER_CONCURRENCY` | 10 | Tasks run in parallel |
 | `KITARU_WORKER_SCOPE__CLAIMS` | all | JSON list of claims, such as `{"kind":"agent"}` or `{"kind":"agent","agent_version_id":"<UUID>"}` |
-| `KITARU_WORKER_SCOPE__SELECTORS` | none | JSON label selectors (e.g. limit to one agent version's environment, or name the providers whose [credentials](../guides/provider-connections.md#worker-credentials) the environment holds) |
+| `KITARU_WORKER_SCOPE__SELECTORS` | none | JSON label selectors (e.g. limit to one agent version's environment, or name the providers whose [credentials](../guides/provider-connections.md) the environment holds) |
 | `KITARU_WORKER_SCOPE__JOB_ID` | none | Claim one job's tasks, drain, exit |
 | `KITARU_WORKER_TIMEOUT` | none | Wall-clock lifetime; unset runs until stopped |
 | `KITARU_WORKER_POLL_INTERVAL` | 2s | Sleep after an empty claim |

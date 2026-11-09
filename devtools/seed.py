@@ -38,9 +38,9 @@ from kitaru.api_models.v1.experiment_run import (
 from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
 from kitaru.api_models.v1.imports import ImportCreateRequest, ImportStats
 from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.plugin import EvaluatorConfig
 from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.api_models.v1.replay_config import (
-    EvaluatorConfig,
     HistoryConfig,
     HistoryScope,
     ReplayOverride,
@@ -108,12 +108,14 @@ async def run_import(
     blob = await client.blobs.upload(
         payload, media_type="application/x-ndjson", filename="traces.jsonl"
     )
-    job = await client.imports.create(
+    created = await client.imports.create(
         ImportCreateRequest(
             importer=importer, agent_id=agent_id, payload_blob_id=blob.id
         )
     )
-    job = await await_job(client, job.id, "import", timeout)
+    if created.job_id is None:
+        raise RuntimeError(f"Import {created.id} started no job")
+    job = await await_job(client, created.job_id, "import", timeout)
     tasks = await client.jobs.list_tasks(job.id)
     if not tasks.items or tasks.items[0].result is None:
         task = tasks.items[0] if tasks.items else None

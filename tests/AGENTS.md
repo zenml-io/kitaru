@@ -6,22 +6,12 @@ Ordinary async tests and fixtures are plain `async def`. pytest-asyncio runs in 
 
 Cover all four surfaces below for a new persistent public API resource. For changes to an existing resource, select the surfaces that prove the affected behavior. Transaction, locking, migration, and cross-request changes need PostgreSQL coverage; an in-memory fake cannot prove those contracts.
 
-1. Service tests against the in-memory fake repository
-   (`tests/server/test_<x>_service.py`).
-2. REST tests over `httpx.ASGITransport` with the service dependency
-   overridden to the fake (`tests/server/test_<x>s_api.py`).
-3. Repository contract tests parametrized over the in-memory fake and the SQL
-   implementation (`tests/server/test_<x>_repository.py`). One shared suite
-   runs against both backends so the fake cannot drift from the real
-   repository. The postgres parameter skips when the local database is
-   unreachable.
-4. An end-to-end PostgreSQL test that runs the app through its lifespan, which
-   also executes the Alembic migrations
-   (`tests/server/test_<x>s_api_pg.py`). Cross-request visibility proves the
-   per-request commit.
+1. Service tests against the in-memory fake repository (`tests/server/test_<x>_service.py`).
+2. REST tests over `httpx.ASGITransport` with the service dependency overridden to the fake (`tests/server/test_<x>s_api.py`).
+3. Repository contract tests parametrized over the in-memory fake and the SQL implementation (`tests/server/test_<x>_repository.py`). One shared suite runs against both backends so the fake cannot drift from the real repository. The postgres parameter skips when the local database is unreachable.
+4. An end-to-end PostgreSQL test that runs the app through its lifespan, which also executes the Alembic migrations (`tests/server/test_<x>s_api_pg.py`). Cross-request visibility proves the per-request commit.
 
-The SDK gets a round-trip test in `tests/client/` routing the client through
-`httpx.ASGITransport`.
+The SDK gets a round-trip test in `tests/client/` routing the client through `httpx.ASGITransport`.
 
 ## Fakes
 
@@ -29,12 +19,7 @@ Fake repositories live in the `tests/kitaru_test_support/` package, one module p
 
 ## PostgreSQL
 
-Tests point at `localhost:5433` (override with `KITARU_TEST_DB_HOST` and
-`KITARU_TEST_DB_PORT`) and expect `docker compose up -d db`. Each pg test
-creates a uniquely named database and drops it on teardown, so tests stay
-independent and concurrent runs never share state. A session-scoped fixture
-reaps databases left behind by a killed run, age-gated on the timestamp in
-the database name so it never drops a concurrent run's live databases.
+Tests point at `localhost:5433` (override with `KITARU_TEST_DB_HOST` and `KITARU_TEST_DB_PORT`) and expect `docker compose up -d db`. Each pg test creates a uniquely named database and drops it on teardown, so tests stay independent and concurrent runs never share state. A session-scoped fixture reaps databases left behind by a killed run, age-gated on the timestamp in the database name so it never drops a concurrent run's live databases.
 
 Set `KITARU_TEST_REQUIRE_POSTGRES=1` to fail before collection if PostgreSQL is unavailable. CI enables this for both Python 3.14 base jobs; local runs and the other Python versions keep optional database skips.
 
@@ -60,7 +45,7 @@ Three profiles are registered in each root's `conftest.py` and selected with `HY
 
 Known bugs are pinned with `@pytest.mark.xfail(raises=..., reason="<issue>")` example tests, where `raises=` names the specific failure (a `pytest.RaisesExc` matcher when the exception type alone cannot tell it apart) so that a different failure still fails the run, and the generators exclude the matching input class with a comment naming the same issue. Fixing the bug makes the xfail fail because `xfail_strict` is on; remove the marker and the generator exclusion in the same PR. Failing examples are saved under `.hypothesis/examples` and replayed first on the next run.
 
-Mark generated-input MCP tests with `mcp_fuzz`. PR CI runs those properties on Python 3.14 only; fixed MCP regression tests continue on every supported Python version. Nightly MCP boundary and redaction jobs run separately on Python 3.12, retaining 2,000 examples per property. `just fuzz-mcp` runs their combined selection locally; `just fuzz-mcp-boundary` and `just fuzz-mcp-redaction` reproduce each job. The recipes print test names, durations, and a stack dump after five minutes in one test. Nightly processes stop before the job deadline so logs and saved examples can be uploaded; a separate reporting job includes failed and cancelled matrix jobs. Cancelling the entire workflow or losing a runner can still prevent diagnostics and reporting.
+Mark generated-input MCP tests with `mcp_fuzz`. PR CI runs those properties on Python 3.14 only; fixed MCP regression tests continue on every supported Python version. Nightly MCP boundary and redaction jobs run separately on Python 3.12, retaining 2,000 examples per property. `just fuzz-mcp` runs their combined selection locally; `just fuzz-mcp-boundary` and `just fuzz-mcp-redaction` reproduce each job. The recipes print test names and durations. The nightly workflow runs each MCP job with four pytest workers through `PYTEST_ADDOPTS`, because serial runs exceed the process limit; local recipe runs stay serial. Do not add `faulthandler_timeout`: its watchdog stack dump segfaulted the nightly MCP jobs. Nightly processes stop before the job deadline so logs and saved examples can be uploaded; a separate reporting job includes failed and cancelled matrix jobs. Cancelling the entire workflow or losing a runner can still prevent diagnostics and reporting.
 
 The CI and nightly profiles omit Hypothesis's explanation phase only for the known-failing invalid-input MCP property. They still generate and shrink examples; the local development profile retains explanation.
 

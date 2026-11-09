@@ -83,8 +83,16 @@ _INVESTIGATION_SESSION_VERDICT_PARAMETERS = (
                 "--insight",
                 "JSON[]",
                 "option",
-                True,
+                False,
                 "Insight JSON object; repeat for each created insight.",
+            ),
+            ParameterSpec(
+                "--insight-file",
+                "path",
+                "option",
+                False,
+                "UTF-8 JSON file with one insight object or an array of them; "
+                "replaces --insight.",
             ),
             IDEMPOTENCY_KEY_PARAMETER,
         ),
@@ -97,7 +105,8 @@ _INVESTIGATION_SESSION_VERDICT_PARAMETERS = (
 async def insight_create(
     *,
     agent: str,
-    insight: list[str],
+    insight: list[str] | None = None,
+    insight_file: Path | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create a batch of insights for one agent."""
@@ -106,6 +115,7 @@ async def insight_create(
             client,
             agent=agent,
             insight=insight,
+            insight_file=insight_file,
             idempotency_key=idempotency_key,
         )
 
@@ -292,7 +302,13 @@ async def insight_report_command(
         "Create an investigation with linked sessions.",
         parameters=(
             ParameterSpec(
-                "NAME", "string", "argument", True, "New investigation name."
+                "NAME",
+                "string",
+                "argument",
+                True,
+                "Name of 1-255 ASCII letters or digits with internal hyphens or "
+                "underscores, for example extraction-review. Start and end with a "
+                "letter or digit.",
             ),
             ParameterSpec(
                 "--agent",
@@ -409,7 +425,15 @@ async def investigation_get(investigation: uuid.UUID, /) -> CommandResult:
             ParameterSpec(
                 "INVESTIGATION", "UUID", "argument", True, "Investigation ID."
             ),
-            ParameterSpec("--name", "string", "option", False, "New name."),
+            ParameterSpec(
+                "--name",
+                "string",
+                "option",
+                False,
+                "New name of 1-255 ASCII letters or digits with internal hyphens or "
+                "underscores, for example extraction-review. Start and end with a "
+                "letter or digit.",
+            ),
             ParameterSpec(
                 "--description", "string", "option", False, "New curator rationale."
             ),

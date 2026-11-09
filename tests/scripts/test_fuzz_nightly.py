@@ -15,12 +15,17 @@ import yaml
 REPO_ROOT = Path(__file__).parents[2]
 
 
-def _get_workflow_step(job: str, name: str) -> dict[str, Any]:
-    workflow = yaml.safe_load(
+def _load_workflow() -> dict[str, Any]:
+    return yaml.safe_load(
         (REPO_ROOT / ".github/workflows/fuzz-nightly.yml").read_text()
     )
+
+
+def _get_workflow_step(job: str, name: str) -> dict[str, Any]:
     return next(
-        step for step in workflow["jobs"][job]["steps"] if step.get("name") == name
+        step
+        for step in _load_workflow()["jobs"][job]["steps"]
+        if step.get("name") == name
     )
 
 
@@ -200,9 +205,7 @@ def test_reporter_selects_failed_timed_out_and_cancelled_matrix_jobs() -> None:
 
 
 def test_timeout_leaves_time_for_diagnostics_and_cancelled_job_reporting() -> None:
-    workflow = yaml.safe_load(
-        (REPO_ROOT / ".github/workflows/fuzz-nightly.yml").read_text()
-    )
+    workflow = _load_workflow()
     fuzz = workflow["jobs"]["fuzz"]
     run = _get_workflow_step("fuzz", "Run fuzz recipe")
     assert run["timeout-minutes"] < fuzz["timeout-minutes"]
@@ -213,3 +216,20 @@ def test_timeout_leaves_time_for_diagnostics_and_cancelled_job_reporting() -> No
     upload = _get_workflow_step("fuzz", "Upload fuzz diagnostics")
     assert "cancelled()" in upload["if"]
     assert "fuzz.log" in upload["with"]["path"]
+
+
+def test_mcp_jobs_run_in_parallel_without_watchdog_stack_dumps() -> None:
+    workflow = _load_workflow()
+    run = next(
+        step
+        for step in workflow["jobs"]["fuzz"]["steps"]
+        if step.get("name") == "Run fuzz recipe"
+    )
+    assert run["env"]["PYTEST_ADDOPTS"] == "${{ matrix.pytest-addopts }}"
+    addopts = {
+        job["recipe"]: job.get("pytest-addopts")
+        for job in workflow["jobs"]["fuzz"]["strategy"]["matrix"]["include"]
+    }
+    assert addopts["fuzz-mcp-boundary"] == addopts["fuzz-mcp-redaction"] == "-n 4"
+    # Its watchdog stack dump segfaulted the nightly MCP jobs (issues #1400, #1401).
+    assert "faulthandler_timeout" not in (REPO_ROOT / "Justfile").read_text()

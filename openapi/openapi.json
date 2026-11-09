@@ -8322,7 +8322,6 @@
           "cost": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -8601,6 +8600,30 @@
         "title": "SessionEvaluationsRequest",
         "type": "object"
       },
+      "SessionIngestRequest": {
+        "additionalProperties": false,
+        "description": "Session creation with all initial nodes in one transaction.",
+        "properties": {
+          "nodes": {
+            "description": "Complete initial nodes, in any order.",
+            "items": {
+              "$ref": "#/components/schemas/SessionNodeCreateRequest"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionCreateRequest",
+            "description": "Session to create."
+          }
+        },
+        "required": [
+          "nodes",
+          "session"
+        ],
+        "title": "SessionIngestRequest",
+        "type": "object"
+      },
       "SessionNodeBatchRequest": {
         "additionalProperties": false,
         "description": "Session node batch request.",
@@ -8635,7 +8658,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -8911,7 +8933,6 @@
           "cost": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -9224,7 +9245,6 @@
           "cost": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -9891,6 +9911,113 @@
         "title": "TaskClaimResponse",
         "type": "object"
       },
+      "TaskDiagnosticResponse": {
+        "description": "Pending tasks sharing worker requirements and coverage.",
+        "properties": {
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required agent version.",
+            "title": "Agent Version Id"
+          },
+          "job_ids": {
+            "description": "Up to three example job ids.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Job Ids",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskKind",
+            "description": "Task kind."
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Required task labels.",
+            "title": "Labels",
+            "type": "object"
+          },
+          "reasons": {
+            "description": "Coverage mismatches; empty when a compatible worker exists.",
+            "items": {
+              "$ref": "#/components/schemas/TaskWaitReason"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "task_count": {
+            "description": "Pending tasks in this group.",
+            "title": "Task Count",
+            "type": "integer"
+          },
+          "task_ids": {
+            "description": "Up to three example task ids.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Task Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "kind",
+          "labels",
+          "reasons",
+          "task_count",
+          "task_ids",
+          "job_ids"
+        ],
+        "title": "TaskDiagnosticResponse",
+        "type": "object"
+      },
+      "TaskDiagnosticsResponse": {
+        "description": "Heartbeat-based coverage snapshot of pending work.",
+        "properties": {
+          "groups": {
+            "description": "Up to 100 groups of pending work.",
+            "items": {
+              "$ref": "#/components/schemas/TaskDiagnosticResponse"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "live_worker_count": {
+            "description": "Workers with recent heartbeats.",
+            "title": "Live Worker Count",
+            "type": "integer"
+          },
+          "pending_task_count": {
+            "description": "Pending tasks examined.",
+            "title": "Pending Task Count",
+            "type": "integer"
+          },
+          "truncated": {
+            "description": "Whether additional groups were omitted.",
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "live_worker_count",
+          "pending_task_count",
+          "groups",
+          "truncated"
+        ],
+        "title": "TaskDiagnosticsResponse",
+        "type": "object"
+      },
       "TaskKind": {
         "description": "Kind of work a task runs.",
         "enum": [
@@ -10271,6 +10398,14 @@
             "description": "Process timeout.",
             "title": "Timeout Seconds",
             "type": "integer"
+          },
+          "unset_env": {
+            "description": "Inherited variables removed before the spec's values apply.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Unset Env",
+            "type": "array"
           }
         },
         "required": [
@@ -10340,6 +10475,18 @@
         },
         "title": "TaskUpdateRequest",
         "type": "object"
+      },
+      "TaskWaitReason": {
+        "description": "Why no live worker covers a pending task.",
+        "enum": [
+          "no_live_workers",
+          "claim_mismatch",
+          "job_mismatch",
+          "selector_mismatch",
+          "credential_mismatch"
+        ],
+        "title": "TaskWaitReason",
+        "type": "string"
       },
       "TaskWithSpec": {
         "description": "Task with spec.",
@@ -11375,7 +11522,7 @@
   },
   "info": {
     "title": "Kitaru",
-    "version": "0.27.2+dev"
+    "version": "0.27.6+dev"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -24754,6 +24901,126 @@
         ]
       }
     },
+    "/api/v1/sessions/ingest": {
+      "post": {
+        "description": "Create a session and all its initial nodes atomically.\n\nClients observe HTTP 201 on success, 409 for an existing source identity,\nand 422 on invalid input. A node failure rolls back the session and all\ninitial nodes.\n\nArgs:\n    body: Session and complete initial nodes.\n    service: Session ingestion service.\n    actor: Caller context.\n\nReturns:\n    Created session with its node rollups.",
+        "operationId": "ingest_session_api_v1_sessions_ingest_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Ingest Session",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
     "/api/v1/sessions/{session_id}": {
       "delete": {
         "description": "Delete a session.\n\nDeleting a session cascades its nodes. Clients observe HTTP 204 on\nsuccess, 404 when no session has this id, and 409 when the session is\nreferenced by a cohort version, investigation, or replay.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
@@ -26326,6 +26593,114 @@
           }
         },
         "summary": "Claim Tasks",
+        "tags": [
+          "tasks"
+        ]
+      }
+    },
+    "/api/v1/tasks/diagnostics": {
+      "get": {
+        "description": "Read pending-task coverage.\n\nClients observe HTTP 200 on success, 404 for a missing job, and 422\nwhen both scope filters are supplied.\n\nArgs:\n    service: Task service.\n    actor: Caller context.\n    job_id: Restrict to one job.\n    experiment_run_id: Restrict to one experiment run.\n\nReturns:\n    Current heartbeat-based coverage snapshot.",
+        "operationId": "get_task_diagnostics_api_v1_tasks_diagnostics_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "experiment_run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experiment Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskDiagnosticsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Get Task Diagnostics",
         "tags": [
           "tasks"
         ]

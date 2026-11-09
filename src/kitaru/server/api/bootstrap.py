@@ -178,8 +178,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Generate deterministic insights from imported sessions.",
         provider=None,
         entrypoint="kitaru_post_import_insights.analyzer:analyze_post_import_sessions",
-        requirement="kitaru-post-import-insights==0.1.2",
-        display_version="0.1.2",
+        requirement="kitaru-post-import-insights==0.4.0",
+        display_version="0.4.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.ANALYZER,
@@ -189,8 +189,23 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         ),
         provider="openai",
         entrypoint="kitaru_post_import_insights.analyzer:analyze_openai_post_import_sessions",
-        requirement="kitaru-post-import-insights[openai]==0.1.2",
-        display_version="0.1.2",
+        requirement="kitaru-post-import-insights[openai]==0.4.0",
+        display_version="0.4.0",
+        connection_schema=OpenAIConnection,
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.ANALYZER,
+        name="kitaru/openai-session-findings",
+        description=(
+            "Find problems in imported sessions with OpenAI and verify each one "
+            "on every session."
+        ),
+        provider="openai",
+        entrypoint=(
+            "kitaru_post_import_insights.session_findings:analyze_session_findings"
+        ),
+        requirement="kitaru-post-import-insights[openai]==0.4.0",
+        display_version="0.4.0",
         connection_schema=OpenAIConnection,
     ),
     DefaultPluginDefinition(
@@ -232,8 +247,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import Langfuse JSON and JSONL trace exports.",
         provider="langfuse",
         entrypoint="kitaru_langfuse_importer.importer:importer",
-        requirement="kitaru-langfuse-importer==0.4.1",
-        display_version="0.4.1",
+        requirement="kitaru-langfuse-importer==0.5.0",
+        display_version="0.5.0",
         connection_schema=LangfuseConnection,
     ),
     DefaultPluginDefinition(
@@ -282,8 +297,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Report the total recorded session cost.",
         provider=None,
         entrypoint="kitaru_evaluator.basic:cost",
-        requirement="kitaru-evaluator==0.2.1",
-        display_version="0.2.1",
+        requirement="kitaru-evaluator==0.3.0",
+        display_version="0.3.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -291,8 +306,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Measure session wall-clock duration.",
         provider=None,
         entrypoint="kitaru_evaluator.basic:latency",
-        requirement="kitaru-evaluator==0.2.1",
-        display_version="0.2.1",
+        requirement="kitaru-evaluator==0.3.0",
+        display_version="0.3.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -300,8 +315,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Count repeated calls to the same tool.",
         provider=None,
         entrypoint="kitaru_evaluator.basic:tool_call_patterns",
-        requirement="kitaru-evaluator==0.2.1",
-        display_version="0.2.1",
+        requirement="kitaru-evaluator==0.3.0",
+        display_version="0.3.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -309,8 +324,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Check session completeness and internal consistency.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:session_diagnostics",
-        requirement="kitaru-evaluator==0.2.1",
-        display_version="0.2.1",
+        requirement="kitaru-evaluator==0.3.0",
+        display_version="0.3.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -318,8 +333,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Check output against exact and structural rules.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:output_contract",
-        requirement="kitaru-evaluator==0.2.1",
-        display_version="0.2.1",
+        requirement="kitaru-evaluator==0.3.0",
+        display_version="0.3.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -327,8 +342,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Report repetition, failed retries, and short tool cycles.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:trajectory_signals",
-        requirement="kitaru-evaluator==0.2.1",
-        display_version="0.2.1",
+        requirement="kitaru-evaluator==0.3.0",
+        display_version="0.3.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -336,8 +351,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Report recorded tool failures and result anomalies.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:tool_health",
-        requirement="kitaru-evaluator==0.2.1",
-        display_version="0.2.1",
+        requirement="kitaru-evaluator==0.3.0",
+        display_version="0.3.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -345,8 +360,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Report recorded wall-clock and node timing.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:timing_profile",
-        requirement="kitaru-evaluator==0.2.1",
-        display_version="0.2.1",
+        requirement="kitaru-evaluator==0.3.0",
+        display_version="0.3.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -354,8 +369,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Apply configured ceilings to recorded resource use.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:resource_budget",
-        requirement="kitaru-evaluator==0.2.1",
-        display_version="0.2.1",
+        requirement="kitaru-evaluator==0.3.0",
+        display_version="0.3.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -363,8 +378,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Apply exact tool requirements, prohibitions, and limits.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:tool_policy",
-        requirement="kitaru-evaluator==0.2.1",
-        display_version="0.2.1",
+        requirement="kitaru-evaluator==0.3.0",
+        display_version="0.3.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -372,8 +387,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Report LLM failures, repetition, and metadata coverage.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:llm_call_signals",
-        requirement="kitaru-evaluator==0.2.1",
-        display_version="0.2.1",
+        requirement="kitaru-evaluator==0.3.0",
+        display_version="0.3.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -381,8 +396,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Apply exact model and provider rules.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:model_policy",
-        requirement="kitaru-evaluator==0.2.1",
-        display_version="0.2.1",
+        requirement="kitaru-evaluator==0.3.0",
+        display_version="0.3.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -390,8 +405,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Compare recorded tool order with a configured workflow.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:workflow_conformance",
-        requirement="kitaru-evaluator==0.2.1",
-        display_version="0.2.1",
+        requirement="kitaru-evaluator==0.3.0",
+        display_version="0.3.0",
     ),
 )
 

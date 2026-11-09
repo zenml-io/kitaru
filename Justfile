@@ -27,6 +27,8 @@ check:
     @just file-size-check
     @printf '\n─── Release Units ──────────────────────────────\n'
     @just release-units-check
+    @printf '\n─── Markdown ───────────────────────────────────\n'
+    @just markdown-check
     @printf '\n─── MCP Schema ─────────────────────────────────\n'
     @just mcp-schema-check
     @printf '\n─── Example Coverage ───────────────────────────\n'
@@ -80,6 +82,10 @@ file-size-check:
 # Validate the release-unit inventory against package manifests and default plugins, as CI does
 release-units-check:
     uv run --no-project --with packaging==26.2 python scripts/release_units.py validate
+
+# Check Markdown wrapping and GitBook page rules (KMD codes)
+markdown-check:
+    uv run python scripts/check_markdown.py
 
 # Check plugin formatting, lint, and types in the frozen plugin workspace
 plugin-check:
@@ -142,6 +148,7 @@ fix:
     uv run ruff format .
     uv run ruff check . --fix
     find .github -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name dependabot.yml -print0 | xargs -0 uv run yamlfix
+    uv run python scripts/check_markdown.py --fix
 
 # Run tests (e.g., `just test`, `just test -x`, `just test tests/test_foo.py`)
 test *ARGS:
@@ -171,15 +178,15 @@ fuzz-api-models:
 
 # Heavy property-test run for the core tree (MCP tool boundary, credential redaction)
 fuzz-mcp:
-    HYPOTHESIS_PROFILE=nightly PYTHONUNBUFFERED=1 uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py tests/cli/test_redaction_properties.py -vv -s --durations=20 -o faulthandler_timeout=300 --hypothesis-show-statistics
+    HYPOTHESIS_PROFILE=nightly PYTHONUNBUFFERED=1 uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py tests/cli/test_redaction_properties.py -vv -s --durations=20 --hypothesis-show-statistics
 
 # Heavy property-test run for MCP request and response boundaries
 fuzz-mcp-boundary:
-    HYPOTHESIS_PROFILE=nightly PYTHONUNBUFFERED=1 uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py -k 'not test_schema_valid_request_with_marker_never_leaks' -vv -s --durations=20 -o faulthandler_timeout=300 --hypothesis-show-statistics
+    HYPOTHESIS_PROFILE=nightly PYTHONUNBUFFERED=1 uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py -k 'not test_schema_valid_request_with_marker_never_leaks' -vv -s --durations=20 --hypothesis-show-statistics
 
 # Heavy property-test run for MCP and CLI credential redaction
 fuzz-mcp-redaction:
-    HYPOTHESIS_PROFILE=nightly PYTHONUNBUFFERED=1 uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py::test_schema_valid_request_with_marker_never_leaks tests/cli/test_redaction_properties.py -vv -s --durations=20 -o faulthandler_timeout=300 --hypothesis-show-statistics
+    HYPOTHESIS_PROFILE=nightly PYTHONUNBUFFERED=1 uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py::test_schema_valid_request_with_marker_never_leaks tests/cli/test_redaction_properties.py -vv -s --durations=20 --hypothesis-show-statistics
 
 # Heavy property-test run for adapter capture, codec, and record/replay contracts
 fuzz-adapters:

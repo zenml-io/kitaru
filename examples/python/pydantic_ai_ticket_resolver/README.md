@@ -21,6 +21,8 @@ Want to see the complete Kitaru loop without setting anything up first? [Watch t
 
 No model-provider or Langfuse credentials are needed for the checked-in import.
 
+To generate fresh traces with `generate.sh`, use Langfuse Cloud or a self-hosted Langfuse instance running version 4.59.0 or later. The example uses Langfuse Python SDK 5 and exports complete observation graphs through the observations API.
+
 ## Prepare the example
 
 Clone Kitaru, enter the example directory, and install its frozen environment:

@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from tests.cli.task_diagnostic_fakes import EmptyTaskDiagnostics
 
 from kitaru.api_models.v1.replay import (
     BaselineEvaluationMode,
@@ -71,6 +72,7 @@ class StubReplayClient:
         self.create_idempotency_keys: list[str | None] = []
         self.list_calls: list[ReplayListParams] = []
         self.get_calls: list[uuid.UUID] = []
+        self.tasks = EmptyTaskDiagnostics()
         self.agents = self._Agents(self)
         self.evaluators = self._Evaluators(self)
         self.replays = self._Replays(self)
@@ -508,3 +510,28 @@ def test_public_invalid_create_is_structured_and_does_not_mutate(
     assert error["command"] == "replay.create"
     assert error["error"]["kind"] == "invalid_arguments"
     assert client.create_calls == []
+
+
+async def test_replay_creation_succeeds_when_diagnostics_are_unavailable() -> None:
+    """A failed advisory read must not repeat or invalidate replay submission."""
+    import httpx
+
+    class UnavailableDiagnostics(EmptyTaskDiagnostics):
+        async def diagnostics(self, **kwargs):
+            raise httpx.ConnectError("offline")
+
+    client = StubReplayClient()
+    client.tasks = UnavailableDiagnostics()
+    result = await replays.create_replay(
+        client,
+        client.baseline_id,
+        evaluators=["quality@3"],
+        evaluator_params=None,
+        agent=None,
+        override=None,
+        tool_policy=None,
+        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+    )
+    assert result.event == "created"
+    assert len(client.create_calls) == 1
+    assert "unavailable" in result.warnings[0]

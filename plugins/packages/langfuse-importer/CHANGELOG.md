@@ -7,6 +7,10 @@
 - Keep a tool's `strict` flag and functions declared without parameters (with an empty schema) in `kitaru.tool_definitions`.
 - Keep generation tool definitions under the `kitaru.tool_definitions` node metadata key, normalized to the OpenAI chat-completions form, from `input.tools`, PydanticAI `model_request_parameters` function and output tools, or `gen_ai.tool.definitions`.
 
+## 0.5.0 - 2026-10-30
+
+- Use Langfuse Python SDK 5 and the observations API for direct imports and the importer-backed adapter. API access requires Langfuse Cloud or self-hosted Langfuse 4.59.0 or later; file-only parsing does not require the SDK.
+
 ## 0.4.1 - 2026-10-08
 
 - Simplify internal event-type matching without changing import behavior.

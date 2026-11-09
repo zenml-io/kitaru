@@ -19,9 +19,7 @@ cd docs
 pnpm install
 ```
 
-> **Note:** SDK reference generation requires `fumapy` (bundled in the
-> `fumadocs-python` npm package). `just generate-docs` auto-installs it from
-> `docs/node_modules/fumadocs-python` — no manual step needed.
+> **Note:** SDK reference generation requires `fumapy` (bundled in the `fumadocs-python` npm package). `just generate-docs` auto-installs it from `docs/node_modules/fumadocs-python` — no manual step needed.
 
 ## Development
 

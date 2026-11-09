@@ -756,9 +756,9 @@ class InvocationRecorder:
             ended_at=turn.ended_at,
             inputs=None,
             outputs={"text": list(turn.texts), "thinking": list(turn.thoughts)},
-            reasoning_selectors=[
-                f"/thinking/{index}" for index in range(len(turn.thoughts))
-            ],
+            # One pointer cannot select a reply split over several text blocks.
+            output_text_selector="/text/0" if len(turn.texts) == 1 else None,
+            reasoning_selectors=[f"/thinking/{i}" for i in range(len(turn.thoughts))],
             model=turn.model,
             model_provider="anthropic",
             tokens=_get_token_usage(turn.usage),

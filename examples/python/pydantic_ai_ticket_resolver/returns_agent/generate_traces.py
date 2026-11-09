@@ -54,23 +54,104 @@ def _sanitize_export(value: Any) -> Any:
     return value
 
 
-def _get_trace(client: Any, trace_id: str) -> Any:
+def _get_observations(client: Any, trace_id: str) -> list[dict[str, Any]]:
+    """Read every observation page, expanding the metadata keys on each page."""
+    observations = {}
+    cursor = None
+    while True:
+        options = {
+            "trace_id": trace_id,
+            "fields": "core,basic,time,io,metadata,model,usage,prompt,trace_context",
+            "limit": 1000,
+            "cursor": cursor,
+            "request_options": REQUEST_OPTIONS,
+        }
+        page = client.api.observations.get_many(**options)
+        metadata_keys = sorted(
+            {key for item in page.data for key in item.metadata or {}}
+        )
+        if metadata_keys:
+            page = client.api.observations.get_many(
+                **options, expand_metadata=",".join(metadata_keys)
+            )
+        for item in page.data:
+            document = item.model_dump(mode="json", by_alias=True, exclude_none=True)
+            for field in ("input", "output"):
+                if isinstance(document.get(field), str):
+                    try:
+                        decoded = json.loads(document[field])
+                    except json.JSONDecodeError:
+                        pass
+                    else:
+                        # Keep quoted source text for the importer's JSON
+                        # decoder, so JSON-looking strings are decoded once.
+                        if not isinstance(decoded, str):
+                            document[field] = decoded
+            observations[item.id] = document
+        cursor = page.meta.cursor
+        if not cursor:
+            return list(observations.values())
+
+
+def _get_root(observations: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Find a completed root whose descendants form one connected graph."""
+    by_id = {item["id"]: item for item in observations}
+    roots = [
+        item
+        for item in observations
+        if not item.get("parentObservationId")
+        or (
+            item.get("isRootObservation")
+            and item.get("parentObservationId") not in by_id
+        )
+    ]
+    if len(roots) != 1:
+        return None
+    root = roots[0]
+    for item in observations:
+        if item["type"] != "EVENT" and not item.get("endTime"):
+            return None
+        visited = set()
+        while item["id"] != root["id"]:
+            if item["id"] in visited:
+                return None
+            visited.add(item["id"])
+            parent = by_id.get(item.get("parentObservationId"))
+            if parent is None:
+                return None
+            item = parent
+    return root
+
+
+def _get_trace(client: Any, trace_id: str) -> dict[str, Any]:
     """Wait until one flushed trace has a complete observation graph."""
     deadline = time.monotonic() + 180
     while True:
         try:
-            trace = client.api.trace.get(trace_id, request_options=REQUEST_OPTIONS)
-            observation_ids = {item.id for item in trace.observations}
-            root_count = sum(
-                item.parent_observation_id is None for item in trace.observations
-            )
-            parents_available = all(
-                item.parent_observation_id is None
-                or item.parent_observation_id in observation_ids
-                for item in trace.observations
-            )
-            if trace.observations and root_count == 1 and parents_available:
-                return trace
+            observations = _get_observations(client, trace_id)
+            root = _get_root(observations)
+            if root is not None:
+                return {
+                    "id": trace_id,
+                    "name": root.get("traceName") or root.get("name"),
+                    "timestamp": root["startTime"],
+                    **{
+                        key: root[key]
+                        for key in (
+                            "sessionId",
+                            "userId",
+                            "tags",
+                            "release",
+                            "version",
+                            "environment",
+                            "metadata",
+                            "input",
+                            "output",
+                        )
+                        if key in root
+                    },
+                    "observations": observations,
+                }
         except Exception:
             if time.monotonic() >= deadline:
                 raise
@@ -124,8 +205,7 @@ async def generate_traces(export_path: Path) -> Path:
     traces = []
     for session_id in sorted(trace_data):
         trace_id, trace_input, output = trace_data[session_id]
-        trace = await asyncio.to_thread(_get_trace, langfuse, trace_id)
-        document = trace.model_dump(mode="json", by_alias=True)
+        document = await asyncio.to_thread(_get_trace, langfuse, trace_id)
         document["input"] = trace_input
         document["output"] = output
         traces.append(document)

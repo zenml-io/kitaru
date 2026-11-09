@@ -1,7 +1,6 @@
 # Docker Architecture
 
-This directory contains the Kitaru development and release Dockerfiles. The
-main project `CLAUDE.md` links here for Docker-specific guidance.
+This directory contains the Kitaru development and release Dockerfiles. The main project `CLAUDE.md` links here for Docker-specific guidance.
 
 ## Images
 
@@ -15,39 +14,21 @@ main project `CLAUDE.md` links here for Docker-specific guidance.
 | `release-worker.Dockerfile` | Release worker | Published PyPI wheel |
 | `onboarding-sandbox.Dockerfile` | Onboarding sandbox | Published worker image |
 
-`onboarding-sandbox.Dockerfile` extends the published worker image with
-Node.js, npm, npx, Git, curl, jq, the `cli` and `mcp` extras, the Pydantic AI
-adapter with OpenAI support in `/app/.venv`, the Kitaru repository cloned at the
-release tag to `/opt/kitaru`, and the published Kitaru skills.
-Releases publish it to the private Amazon ECR registry as
-`kitaru-onboarding-sandbox` alongside the managed server image.
+`onboarding-sandbox.Dockerfile` extends the published worker image with Node.js, npm, npx, Git, curl, jq, the `cli` and `mcp` extras, the Pydantic AI adapter with OpenAI support in `/app/.venv`, the Kitaru repository cloned at the release tag to `/opt/kitaru`, and the published Kitaru skills. Releases publish it to the private Amazon ECR registry as `kitaru-onboarding-sandbox` alongside the managed server image.
 
-The adapter is pinned to the version validated for the hosted tour. Install it
-alongside the exact worker Kitaru version so dependency resolution cannot silently
-upgrade Kitaru away from the workspace version. Provider credentials are not baked
-into this image; installing the adapter does not enable funded model inference.
+The adapter is pinned to the version validated for the hosted tour. Install it alongside the exact worker Kitaru version so dependency resolution cannot silently upgrade Kitaru away from the workspace version. Provider credentials are not baked into this image; installing the adapter does not enable funded model inference.
 
 The image bakes in the published `kitaru-skills` release. To refresh that baked copy during a manual build, use `--no-cache` so Docker reruns the remote skill installation. Newly created sandboxes also install the published skills at startup, so a skills-only release does not need an image rebuild; dependency and bundled-example changes do. The frontend selects the ECR tag from the workspace version, and existing Modal sandboxes do not update when an image or skill release is published.
 
-The development and release client, server, and worker builds resolve dependencies
-from the committed `uv.lock`. The release
-builds then install the matching published Kitaru wheel without resolving its
-dependencies again. This keeps container releases reproducible while allowing
-the Python package and container publishing processes to be recovered or run
-independently.
+The development and release client, server, and worker builds resolve dependencies from the committed `uv.lock`. The release builds then install the matching published Kitaru wheel without resolving its dependencies again. This keeps container releases reproducible while allowing the Python package and container publishing processes to be recovered or run independently.
 
-The release builders fail when `KITARU_VERSION` is missing, differs from the
-version in `pyproject.toml`, is unavailable on PyPI, or declares dependencies
-that are incompatible with the lockfile.
+The release builders fail when `KITARU_VERSION` is missing, differs from the version in `pyproject.toml`, is unavailable on PyPI, or declares dependencies that are incompatible with the lockfile.
 
 ## Stages
 
-`dev-client.Dockerfile` installs the locked local project non-editably and
-produces the `client` target. `dev-worker.Dockerfile` does the same with the
-`worker` extra and produces the `worker` target.
+`dev-client.Dockerfile` installs the locked local project non-editably and produces the `client` target. `dev-worker.Dockerfile` does the same with the `worker` extra and produces the `worker` target.
 
-`dev-server.Dockerfile` separates dependency installation from the two server
-runtime modes:
+`dev-server.Dockerfile` separates dependency installation from the two server runtime modes:
 
 | Stage | Purpose |
 |---|---|
@@ -57,11 +38,7 @@ runtime modes:
 | `builder` | Installs local source non-editably for the self-contained image |
 | `runtime` | Runs the self-contained development server without copied sources |
 
-Set `INSTALL_DEBUG_TOOLS=true` when building the server to add curl, Git,
-network diagnostics, and the PostgreSQL client. Debug tools are omitted by
-default. Every development server runtime sets
-`KITARU_SERVER_ANALYTICS_DEBUG=true` so opted-in development events use the
-analytics debug service instead of polluting the production analytics namespace.
+Set `INSTALL_DEBUG_TOOLS=true` when building the server to add curl, Git, network diagnostics, and the PostgreSQL client. Debug tools are omitted by default. Every development server runtime sets `KITARU_SERVER_ANALYTICS_DEBUG=true` so opted-in development events use the analytics debug service instead of polluting the production analytics namespace.
 
 The release Dockerfiles use these stages:
 
@@ -72,14 +49,11 @@ The release Dockerfiles use these stages:
 | `builder` | Creates the locked virtual environment and installs the published wheel |
 | `client`, `worker`, or `server` | Copies only the virtual environment and dependency snapshot into the runtime image |
 
-The release runtime images do not contain pip, setuptools, or wheel. The worker
-images include uv. The resolved environment is recorded at
-`/app/requirements.txt` for inspection.
+The release runtime images do not contain pip, setuptools, or wheel. The worker images include uv. The resolved environment is recorded at `/app/requirements.txt` for inspection.
 
 ## Build and run
 
-Build from the repository root. A release build must use a repository checkout
-whose version and lockfile match the published package version.
+Build from the repository root. A release build must use a repository checkout whose version and lockfile match the published package version.
 
 ```bash
 # Development client from local source
@@ -122,9 +96,7 @@ docker build -f docker/onboarding-sandbox.Dockerfile --target worker \
   -t kitaru-onboarding-sandbox .
 ```
 
-The release server listens on port 8000 and starts the FastAPI application
-factory with uvicorn. Run it against a PostgreSQL instance with the appropriate
-`KITARU_SERVER_` environment variables:
+The release server listens on port 8000 and starts the FastAPI application factory with uvicorn. Run it against a PostgreSQL instance with the appropriate `KITARU_SERVER_` environment variables:
 
 ```bash
 docker run -p 8000:8000 \
