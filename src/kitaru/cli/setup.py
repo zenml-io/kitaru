@@ -320,13 +320,12 @@ def skill_destinations(home: Path) -> list[Path]:
     """Return every skill directory a detected client reads.
 
     `~/.agents/skills` is the cross-agent location and always included.
-    Client-specific directories are added when that client's CLI is on PATH
-    or its home directory already exists.
+    Claude Code also needs its client-specific directory when its CLI is on
+    PATH or its home directory exists. Codex reads the cross-agent location.
     """
     destinations = [home / ".agents" / "skills"]
-    for executable, directory in (("claude", ".claude"), ("codex", ".codex")):
-        if shutil.which(executable) or (home / directory).is_dir():
-            destinations.append(home / directory / "skills")
+    if shutil.which("claude") or (home / ".claude").is_dir():
+        destinations.append(home / ".claude" / "skills")
     return destinations
 
 
@@ -402,9 +401,7 @@ def _write_skills(destination: Path, skills: dict[str, dict[str, bytes]]) -> Non
                 path.write_bytes(content)
             if not (staging / "SKILL.md").is_file():
                 raise OSError(f"{name}: SKILL.md missing after extraction")
-            if target.is_symlink() or target.is_file():
-                target.unlink()
-            elif target.is_dir():
+            if target.is_symlink() or target.is_file() or target.is_dir():
                 retired = Path(
                     tempfile.mkdtemp(prefix=f".{name}.", suffix=".old", dir=destination)
                 )
@@ -417,7 +414,10 @@ def _write_skills(destination: Path, skills: dict[str, dict[str, bytes]]) -> Non
                     # leaves the skill missing or hidden in the retired copy.
                     os.replace(retired, target)
                     raise
-                shutil.rmtree(retired, ignore_errors=True)
+                if retired.is_symlink() or retired.is_file():
+                    retired.unlink()
+                else:
+                    shutil.rmtree(retired, ignore_errors=True)
                 continue
             os.replace(staging, target)
         except BaseException:
