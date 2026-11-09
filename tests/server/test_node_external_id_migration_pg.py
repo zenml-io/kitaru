@@ -20,7 +20,12 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from conftest import db_settings, drop_test_database, postgres_available
+from conftest import (
+    add_missing_orm_columns,
+    db_settings,
+    drop_test_database,
+    postgres_available,
+)
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -66,6 +71,9 @@ async def test_upgrade_backfills_identity_and_downgrade_rebuilds_indexes() -> No
     try:
         alembic = Alembic(engine)
         await alembic.upgrade(PREVIOUS_REVISION)
+        # The session repository writes every ORM column, including those
+        # later revisions add.
+        await add_missing_orm_columns(engine, "session")
         factory = async_sessionmaker(
             bind=engine, class_=AsyncSession, expire_on_commit=False
         )

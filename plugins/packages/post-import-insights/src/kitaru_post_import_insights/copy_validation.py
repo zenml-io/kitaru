@@ -21,7 +21,8 @@ _NUMERIC_TOKEN = re.compile(rf"(?<![\w.]){_NUMBER_PATTERN}(?:%|[A-Za-z]+)?")
 _UNIT_WORD = re.compile(r"\s*(%|[A-Za-z]+)")
 _CURRENCY_PREFIX = re.compile(r"[$€£]\s*$")
 _PERCENT_UNITS = {"%", "percent", "percentage", "pct", "share"}
-# Written units that name something the profiler never measures.
+# Written units that name something a card does not measure unless its chart
+# unit or a fact name such as "median_input_tokens" declares the unit.
 _NON_COUNT_UNITS = {
     "x",
     "times",
@@ -534,7 +535,7 @@ def _is_grounded_number(
     preceding: str,
     following: str,
     grounded: dict[str, set[float]],
-    chart_unit: str | None,
+    declared_units: set[str],
     label_values: dict[str, float],
 ) -> bool:
     """Accept a written number that equals or rounds a grounded quantity.
@@ -542,9 +543,10 @@ def _is_grounded_number(
     A percent sign or time unit, attached to the token or as the next word,
     selects the kind the number must ground on; a bare number may ground on
     a count or a time value but never on a percentage. A currency prefix, a
-    letter suffix outside the known units, or a unit word the profiler never
-    measures rejects the number outright. A number followed by a chart label
-    or its outcome word must equal that label's own value.
+    letter suffix outside the known units, or a unit word the candidate does
+    not declare in its chart unit or fact names rejects the number outright. A
+    number followed by a chart label or its outcome word must equal that
+    label's own value.
     """
     match = _NUMBER.match(token)
     if match is None:
@@ -562,7 +564,7 @@ def _is_grounded_number(
     unit = attached
     if not unit and (next_word := _UNIT_WORD.match(following)):
         unit = next_word.group(1).lower()
-    if unit in _NON_COUNT_UNITS and unit != (chart_unit or "").lower():
+    if unit in _NON_COUNT_UNITS and not {unit, f"{unit}s"} & declared_units:
         return False
     if (
         not attached
@@ -588,6 +590,13 @@ def _is_grounded_number(
     return _matches_grounded(value, decimals, grounded["count"]) or _matches_grounded(
         value, decimals, grounded["seconds"]
     )
+
+
+def _get_declared_units(candidate: CandidateFinding) -> set[str]:
+    """Return the chart unit and the unit suffix of each fact name, lowercased."""
+    return {(candidate.data.unit or "").lower()} | {
+        fact.name.lower().rsplit("_", 1)[-1] for fact in candidate.facts
+    }
 
 
 def _negates_candidate_phrase(value: str, candidate: CandidateFinding) -> bool:
@@ -631,13 +640,14 @@ def validate_card_copy(value: str, candidate: CandidateFinding) -> None:
         raise ValueError("editor card copy contains a negated outcome claim")
     grounded = _get_grounded_numbers(candidate)
     label_values = _get_label_values(candidate)
+    declared_units = _get_declared_units(candidate)
     for match in _NUMERIC_TOKEN.finditer(remaining):
         if not _is_grounded_number(
             match.group(0),
             preceding=remaining[: match.start()],
             following=remaining[match.end() :],
             grounded=grounded,
-            chart_unit=candidate.data.unit,
+            declared_units=declared_units,
             label_values=label_values,
         ):
             raise ValueError(

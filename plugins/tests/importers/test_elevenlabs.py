@@ -319,6 +319,7 @@ def test_cached_token_counts_preserve_zero_and_do_not_invent_reasoning_tokens() 
     )
     assert node.tokens is not None
     assert node.tokens.cached_input_tokens == 25
+    assert node.tokens.cache_write_input_tokens == 31
     assert node.tokens.reasoning_tokens is None
     assert node.tokens.input_tokens == 1218
 

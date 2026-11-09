@@ -126,7 +126,7 @@ Per node, the importer preserves:
 
 - **Inputs and outputs** from `input` / `output`, falling back to OpenInference's `metadata["input.value"]` and `metadata["output.value"]`, JSON-decoded when those hold encoded JSON strings.
 - **Model identity**: requested model from `gen_ai.request.model` or `model`, resolved model from `gen_ai.response.model` or `model`, provider from `gen_ai.provider.name` or `provider`.
-- **Token usage** from `metrics.prompt_tokens`, `metrics.completion_tokens`, and `metrics.prompt_cached_tokens`. A non-integer value there fails that session and is reported as an import failure; other sessions in the file still import.
+- **Token usage** from `metrics.prompt_tokens`, `metrics.completion_tokens`, `metrics.prompt_cached_tokens`, and `metrics.prompt_cache_creation_tokens` for cache writes. When Braintrust reports only `metrics.prompt_cache_creation_5m_tokens` and `metrics.prompt_cache_creation_1h_tokens`, their sum is the cache-write count. Braintrust's prompt count already includes cache reads and writes. A non-integer value there fails that session and is reported as an import failure; other sessions in the file still import.
 - **Cost** from `metrics.estimated_cost`.
 - **Timings** from `metrics.start` / `metrics.end`, with `created` as a start fallback. Both ISO 8601 strings and Unix timestamps parse.
 - **Status**: a record with a non-empty `error` becomes a failed node carrying that error.

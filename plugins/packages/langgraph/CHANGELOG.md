@@ -2,7 +2,12 @@
 
 ## Unreleased
 
+- Record LangChain's `input_token_details.cache_creation`, plus the `ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens` split that langchain-anthropic reports instead, as `cache_write_input_tokens`, and include cache writes in genai-prices cost estimates.
 - Document that LangGraph 1.2.19 and later deliver middleware hook state to Kitaru's callback even when a trace policy omits it from LangChain tracers.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
 
 ## 0.3.1 - 2026-11-02
 
