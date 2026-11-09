@@ -2,6 +2,8 @@
 
 Kitaru is a mixed Python + docs repo. It produces the Python package (SDK and server) and the SDK reference docs app. The public marketing site and `kitaru.ai` runtime live in the sibling `zenml-io-v2` repository, not here.
 
+Positioning surfaces (README, docs leads, PyPI description) lead with insights, in the Kitaru product page's four steps: bring your traces, get insights across every session, turn findings into checks, and replay a fix before it ships. Replay is how a fix gets tested, not the headline.
+
 ## Project Map
 
 - `src/kitaru/`: Python package (`src` layout); see `src/kitaru/AGENTS.md`

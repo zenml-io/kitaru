@@ -844,5 +844,6 @@ class TaskSpec(FrozenModel):
     run_spec: TaskRunSpec | None = None
     env: dict[str, str] = Field(default_factory=dict)
     secret_env: dict[str, str] = Field(default_factory=dict)
+    unset_env: list[str] = Field(default_factory=list)
     hooks: list[TaskHook] = Field(default_factory=list)
     details: TaskDetails
