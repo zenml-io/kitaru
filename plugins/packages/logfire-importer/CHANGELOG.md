@@ -6,7 +6,7 @@
 
 ### Release context
 
-- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.3+dev` with the selected compatible published core version before releasing.
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
 
 ## 0.4.1 - 2026-10-08
 

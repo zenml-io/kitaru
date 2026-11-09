@@ -492,8 +492,11 @@ class InvocationRecorder:
                 output = capture_value(outputs, self.policy).value
         else:
             output = capture_value(outputs, self.policy).value
-        model_fields = (
-            _describe_model_call(pending, outputs)
+        model_fields: dict[str, Any] = (
+            {
+                **_describe_model_call(pending, outputs),
+                "output_text_selector": _get_output_text_selector(output),
+            }
             if pending.node_type is NodeType.LLM_CALL
             else {}
         )
@@ -713,6 +716,19 @@ def _get_cache_write_tokens(details: Mapping[str, Any]) -> int | None:
     counts = [details.get(key) for key in _CACHE_WRITE_DETAIL_KEYS]
     present = [count for count in counts if isinstance(count, int)]
     return sum(present) if present else None
+
+
+def _get_output_text_selector(output: Any) -> str | None:
+    """Select the reply text of a captured ``LLMResult`` with one generation.
+
+    LangChain joins a message's text content blocks into ``generation.text``
+    and leaves reasoning and tool-call blocks out. A call that returned several
+    generations has no single reply to point at.
+    """
+    match output:
+        case {"generations": [[{"text": str(text)}]]} if text:
+            return "/generations/0/0/text"
+    return None
 
 
 def _describe_model_call(pending: PendingRun, response: Any) -> dict[str, Any]:

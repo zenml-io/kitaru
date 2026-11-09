@@ -6,7 +6,11 @@
 
 ### Release context
 
-- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.3+dev` with the selected compatible published core version before releasing.
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
+
+## 0.4.2 - 2026-11-02
+
+- Set `output_text_selector` on model-call nodes to the response's output text or refusal part when it has exactly one, and point text and reasoning selectors inside the truncation wrapper of shortened strings so they still resolve to text.
 
 ## 0.4.1 - 2026-10-30
 

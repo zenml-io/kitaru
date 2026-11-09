@@ -8,15 +8,16 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, Mock
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
 from kitaru.api_models.v1.imports import ImportFailure
-from kitaru.api_models.v1.session import SessionCreateRequest, SessionResponse
-from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.api_models.v1.session import SessionResponse
+from kitaru.api_models.v1.session_node import NodeStatus, NodeType, SessionIngestRequest
 from kitaru.cache_keys import compute_tool_cache_key
 from kitaru.client.api_client import KitaruAPIClient
+from kitaru.client.exceptions import APIError
 from kitaru.json_pointer import resolve_json_pointer
 from kitaru.task.importer import ImportedSession, flatten_nodes, ingest_session
 from kitaru_mastra_importer.importer import InvalidImport, parse
@@ -166,47 +167,41 @@ def test_namespace_changes_identity_without_changing_source_trace(
     assert namespaced.nodes == original.nodes
 
 
-async def _ingest(
-    client: KitaruAPIClient, session: ImportedSession, agent_id: UUID
-) -> SessionResponse:
-    """Ingest one parsed session and require it to be stored."""
-    stored = await ingest_session(client, session, agent_id, "mastra")
-    assert stored is not None
-    return stored
-
-
-async def test_reimport_ingests_nodes_into_the_existing_session(
+async def test_reimport_skips_existing_sessions(
     traces: list[dict[str, Any]],
 ) -> None:
     client = Mock(spec=KitaruAPIClient)
     stored: dict[tuple[str | None, str | None], SessionResponse] = {}
+    ingested: list[SessionIngestRequest] = []
 
-    async def create(request: SessionCreateRequest) -> SessionResponse:
-        key = (request.imported_from, request.external_id)
+    async def ingest(request: SessionIngestRequest) -> SessionResponse:
+        key = (request.session.imported_from, request.session.external_id)
         if key in stored:
-            return stored[key]
+            raise APIError(409, "source identity already imported")
         session = Mock(spec=SessionResponse)
         session.id = uuid4()
         stored[key] = session
+        ingested.append(request)
         return session
 
     client.sessions = Mock()
-    client.sessions.create = AsyncMock(side_effect=create)
+    client.sessions.ingest = AsyncMock(side_effect=ingest)
     client.sessions.ingest_nodes = AsyncMock()
     agent_id = uuid4()
-    first = [await _ingest(client, s, agent_id) for s in _get_sessions(traces)]
-    second = [await _ingest(client, s, agent_id) for s in _get_sessions(traces)]
-    assert [session.id for session in second] == [session.id for session in first]
-    assert len(stored) == 2
-    assert client.sessions.ingest_nodes.await_count == 4
-    batches = client.sessions.ingest_nodes.await_args_list
-    assert [call.args[0] for call in batches] == [
-        first[0].id,
-        first[1].id,
-        first[0].id,
-        first[1].id,
+    first = [
+        await ingest_session(client, session, agent_id, "mastra")
+        for session in _get_sessions(traces)
     ]
-    assert [len(call.args[1].nodes) for call in batches] == [10, 5, 10, 5]
+    second = [
+        await ingest_session(client, session, agent_id, "mastra")
+        for session in _get_sessions(traces)
+    ]
+    assert all(session is not None for session in first)
+    assert second == [None, None]
+    assert len(stored) == 2
+    assert client.sessions.ingest.await_count == 4
+    client.sessions.ingest_nodes.assert_not_awaited()
+    assert [len(request.nodes) for request in ingested] == [10, 5]
 
 
 @pytest.mark.parametrize(

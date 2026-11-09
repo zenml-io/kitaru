@@ -20,6 +20,8 @@ const [{ InMemoryStore }, { Memory }, { z }] = await Promise.all([
   nativeImport("zod/v4"),
 ]);
 const directory = process.env.CHECK_DIRECTORY;
+const agentId = process.env.CHECK_AGENT_ID;
+assert(directory && agentId, "Expected CHECK_DIRECTORY and CHECK_AGENT_ID");
 const replayId = process.env.KITARU_REPLAY_ID;
 const thread = "historical-thread";
 const resource = "historical-resource";
@@ -256,7 +258,7 @@ const agent = createMemoryReplayAgent(
     ],
   }),
   {
-    agentId: process.env.CHECK_AGENT_ID,
+    agentId,
     requestedModelId: "fixture/actor",
     allowedReplayModels: ["fixture/replacement"],
     sourceMemory: () => {
@@ -271,7 +273,7 @@ const agent = createMemoryReplayAgent(
       };
     },
     resolveModel: (id) => {
-      const model = models[id.split("/").at(-1)];
+      const model = models[id.slice(id.lastIndexOf("/") + 1)];
       assert(model, `Unexpected model ${id}`);
       return model;
     },

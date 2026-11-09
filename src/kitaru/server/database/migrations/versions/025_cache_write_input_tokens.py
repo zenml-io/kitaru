@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Add prompt-cache write token columns.
 
-Revision ID: 024_cache_write_input_tokens
-Revises: 023_insight_task_id_index
+Revision ID: 025_cache_write_input_tokens
+Revises: 024_token_completeness
 Create Date: 2026-10-30 15:17:08.084887
 
 """
@@ -23,8 +23,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "024_cache_write_input_tokens"
-down_revision = "023_insight_task_id_index"
+revision = "025_cache_write_input_tokens"
+down_revision = "024_token_completeness"
 branch_labels = None
 depends_on = None
 

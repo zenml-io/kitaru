@@ -360,7 +360,7 @@ async def test_cost_completeness_persists_across_node_upserts(
 async def test_cache_write_tokens_persist_and_roll_up(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
-    """Store cache-write counts per node and sum them like cache reads."""
+    """Store cache-write counts per node and sum them once every call reports them."""
     response = await client.post("/api/v1/sessions", json=_session_body(agent_id))
     session_url = f"/api/v1/sessions/{response.json()['id']}"
 
@@ -392,11 +392,11 @@ async def test_cache_write_tokens_persist_and_roll_up(
 
     session = (await client.get(session_url)).json()
     assert session["tokens"] == {
-        "input_tokens": 1500,
-        "output_tokens": 0,
-        "cached_input_tokens": 800,
+        "input_tokens": None,
+        "output_tokens": None,
+        "cached_input_tokens": None,
         "cache_write_input_tokens": 250,
-        "reasoning_tokens": 0,
+        "reasoning_tokens": None,
     }
     items = (await client.get(f"{session_url}/nodes")).json()["items"]
     assert [item["tokens"]["cache_write_input_tokens"] for item in items] == [200, 50]
