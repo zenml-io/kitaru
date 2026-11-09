@@ -7,6 +7,10 @@
 - Let editor copy restate a number with a unit that the card's chart unit or fact names declare, such as tokens on a card with token facts.
 - Bump the analysis version to `2026-11-09.1` because new candidates change each profile's content hash. Existing candidates are unchanged; the deterministic analyzer ranks the new cards after outcome and language cards and before the activity, duration, and model-mix distributions, so those can drop out of a full six-card page.
 
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
+
 ## 0.4.0 - 2026-11-03
 
 - Add the `kitaru/openai-session-findings` analyzer, which reads imported sessions, writes each problem it notices as a yes/no check, verifies every check on every session with the OpenAI Decisions API, and stores one insight per verified finding with its session count, harm, example, and session IDs. It sends session content to OpenAI and accepts optional `context`, `model`, and `decisions_model` parameters.
