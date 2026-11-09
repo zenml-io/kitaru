@@ -776,7 +776,7 @@ def _session_with_tool_requests(
 def test_tool_distribution_counts_output_requests_without_tool_nodes(
     output_shape: str,
 ) -> None:
-    sessions = [_session_with_tool_requests(number, [2]) for number in (1, 2)]
+    sessions = [_session_with_tool_requests(number, [number + 1]) for number in (1, 2)]
     for session in sessions:
         node = session.nodes[0]
         if output_shape == "messages":
@@ -786,14 +786,14 @@ def test_tool_distribution_counts_output_requests_without_tool_nodes(
 
     candidate = _candidate(profile_sessions(sessions), "tool-call-distribution")
 
-    assert candidate.title == "All recorded observations have 2 requests"
+    assert candidate.title == "Tool requests per session have a measurable spread"
     assert candidate.eyebrow == "TOOL-REQUEST DISTRIBUTION"
     assert candidate.data.unit == "requests"
     assert "may not have executed" in candidate.caveat
     assert {fact.name: fact.value for fact in candidate.facts} == {
         "observations": 2,
         "minimum": 2,
-        "maximum": 2,
+        "maximum": 3,
     }
 
 
@@ -803,9 +803,15 @@ def test_tool_request_fallback_preserves_real_tool_counts_and_health() -> None:
     for session in (first, second):
         session.nodes.append(_node(10, session_id=session.session.id, outputs="ok"))
 
+    second.nodes.append(_node(11, session_id=second.session.id, outputs="ok"))
     candidate = _candidate(profile_sessions([first, second]), "tool-call-distribution")
 
-    assert candidate.title == "All recorded observations have 1 call"
+    assert candidate.title == "Tool calls per session have a measurable spread"
+    assert {fact.name: fact.value for fact in candidate.facts} == {
+        "observations": 2,
+        "minimum": 1,
+        "maximum": 2,
+    }
     assert candidate.data.unit == "calls"
 
 
@@ -825,7 +831,9 @@ def test_mixed_recorded_tools_and_output_requests_share_request_distribution() -
 
 
 def test_tool_requests_do_not_invent_execution_health_or_count_input_history() -> None:
-    sessions = [_session_with_tool_requests(number, [0, 2]) for number in (1, 2)]
+    sessions = [
+        _session_with_tool_requests(number, [0, number + 1]) for number in (1, 2)
+    ]
     for session in sessions:
         session.nodes[0].outputs[0]["parts"] = [
             {"type": "text", "content": "tool_call"},
@@ -836,20 +844,20 @@ def test_tool_requests_do_not_invent_execution_health_or_count_input_history() -
     result = profile_sessions(sessions)
 
     candidate = _candidate(result, "tool-call-distribution")
-    assert candidate.title == "All recorded observations have 2 requests"
+    assert candidate.title == "Tool requests per session have a measurable spread"
     assert not any(item.family == "tool_health" for item in result.candidates)
 
 
 def test_truncated_tool_requests_are_excluded_from_distribution() -> None:
     partial = _session_with_tool_requests(1, [100])
-    complete = [_session_with_tool_requests(number, [2]) for number in (2, 3)]
+    complete = [_session_with_tool_requests(number, [number]) for number in (2, 3)]
 
     result = profile_sessions(
         [partial, *complete], config=ProfilingConfig(max_payload_items=30)
     )
 
     candidate = _candidate(result, "tool-call-distribution")
-    assert candidate.title == "All recorded observations have 2 requests"
+    assert candidate.title == "Tool requests per session have a measurable spread"
     assert candidate.coverage.sessions_analyzed == 2
     assert candidate.contributing_session_ids == [item.session.id for item in complete]
     assert "payload" in " ".join(result.coverage.caveats).lower()
@@ -858,39 +866,32 @@ def test_truncated_tool_requests_are_excluded_from_distribution() -> None:
 def test_tool_request_scan_bounds_nested_scalar_arrays() -> None:
     partial = _session_with_tool_requests(1, [0])
     partial.nodes[0].outputs = [[0] * 40 for _ in range(40)]
-    complete = [_session_with_tool_requests(number, [2]) for number in (2, 3)]
+    complete = [_session_with_tool_requests(number, [number]) for number in (2, 3)]
 
     result = profile_sessions(
         [partial, *complete], config=ProfilingConfig(max_payload_items=100)
     )
 
     candidate = _candidate(result, "tool-call-distribution")
-    assert candidate.title == "All recorded observations have 2 requests"
+    assert candidate.title == "Tool requests per session have a measurable spread"
     assert candidate.coverage.sessions_analyzed == 2
     assert candidate.contributing_session_ids == [item.session.id for item in complete]
 
 
-@pytest.mark.parametrize("model_count", [1, 2])
-def test_model_mix_counts_identifiers_without_normalizing_aliases(
-    model_count: int,
-) -> None:
+def test_model_mix_counts_identifiers_without_normalizing_aliases() -> None:
     names = ["claude-opus-4-5", "global.anthropic.claude-opus-4-5-20251101-v1:0"]
     nodes = [
         _node(index, session_id=_id(101), node_type=NodeType.LLM_CALL, model=name)
-        for index, name in enumerate(names[:model_count])
+        for index, name in enumerate(names)
     ]
     for node in nodes:
         node.requested_model = names[0]
 
     candidate = _candidate(profile_sessions([_session(1, nodes)]), "model-mix")
 
-    assert candidate.title == (
-        "1 recorded model identifier appears in these sessions"
-        if model_count == 1
-        else "2 recorded model identifiers appear in these sessions"
-    )
+    assert candidate.title == "2 recorded model identifiers appear in these sessions"
     assert isinstance(candidate.data, CategoricalInsightData)
-    assert {item.label for item in candidate.data.values} == set(names[:model_count])
+    assert {item.label for item in candidate.data.values} == set(names)
     assert "same model" in candidate.caveat
 
 
@@ -914,6 +915,12 @@ def test_profiles_status_tool_model_activity_and_duration_charts() -> None:
     )
     second = _session(
         2,
+        [
+            _node(0, session_id=_id(102)),
+            _node(1, session_id=_id(102)),
+            _node(2, session_id=_id(102), node_type=NodeType.LLM_CALL, model="gpt-5"),
+            _node(3, session_id=_id(102), node_type=NodeType.LLM_CALL, model="gpt-5"),
+        ],
         status=SessionStatus.FAILED,
         ended_at=NOW + timedelta(seconds=65),
     )
@@ -1004,28 +1011,12 @@ def test_all_failed_outcome_copy_does_not_claim_completed_comparison() -> None:
     assert "comparison group" in candidate.fallback_description.lower()
 
 
-def test_uniform_distribution_copy_does_not_claim_spread_or_variation() -> None:
-    sessions = [
-        _session(1, ended_at=NOW + timedelta(seconds=5)),
-        _session(2, ended_at=NOW + timedelta(seconds=5)),
-    ]
+def test_uniform_distributions_do_not_produce_candidates() -> None:
+    sessions = [_session_with_tool_requests(number, [2]) for number in (1, 2)]
+    for session in sessions:
+        session.session.ended_at = NOW + timedelta(seconds=5)
 
-    candidates = {
-        candidate.id: candidate for candidate in profile_sessions(sessions).candidates
-    }
-
-    for candidate_id in (
-        "tool-call-distribution",
-        "model-call-distribution",
-        "total-activity-distribution",
-        "recorded-duration-distribution",
-    ):
-        candidate = candidates[candidate_id]
-        copy = f"{candidate.title} {candidate.fallback_description}".lower()
-        assert candidate.title.startswith("All recorded observations have")
-        assert "spread" not in copy
-        assert "varies" not in copy
-        assert "uniform baseline" in copy
+    assert profile_sessions(sessions).candidates == []
 
 
 def test_tool_errors_use_safe_exact_names_and_hide_credentials() -> None:
@@ -1531,7 +1522,7 @@ def test_bounds_text_evidence_candidates_and_projection() -> None:
     assert not {"sessions", "nodes"} & dimensions
 
 
-def test_node_distributions_include_all_complete_node_lists() -> None:
+def test_tool_distribution_excludes_sessions_without_known_counts() -> None:
     complete = _calls(
         1,
         [("complete_tool", {"id": 1}, NodeStatus.COMPLETED, "ok")],
@@ -1553,11 +1544,10 @@ def test_node_distributions_include_all_complete_node_lists() -> None:
     assert distribution.contributing_session_ids == [
         complete.session.id,
         truncated.session.id,
-        empty_but_complete.session.id,
     ]
-    assert distribution.coverage.sessions_analyzed == 3
-    assert distribution.coverage.occurrences == 3
-    assert sum(bin_.count for bin_ in distribution.data.bins) == 3
+    assert distribution.coverage.sessions_analyzed == 2
+    assert distribution.coverage.occurrences == 2
+    assert sum(bin_.count for bin_ in distribution.data.bins) == 2
     assert "tool-error-mix" in {candidate.id for candidate in result.candidates}
     assert result.coverage.nodes_available == 3
     assert result.coverage.nodes_analyzed == 3
@@ -2116,12 +2106,14 @@ def test_distribution_briefing_points_at_the_top_bin(
         _session(4, ended_at=NOW + timedelta(seconds=9)),
     ]
     sessions[0].session.ended_at = NOW + timedelta(seconds=70)
+    for number, session in enumerate(sessions[1:], start=1):
+        session.nodes = _calls(number + 1, busy[:number]).nodes
 
     candidate = _candidate(profile_sessions(sessions), candidate_id)
     sections = _briefing_sections(candidate.investigation_prompt)
 
     if candidate_id == "tool-call-distribution":
-        assert sections["What is odd"].startswith("4 sessions range from 0 to 7 calls.")
+        assert sections["What is odd"].startswith("4 sessions range from 1 to 7 calls.")
         assert (
             "1 session sits in the highest occupied bin "
             "(at least 6 and less than 10 calls)" in sections["What is odd"]
@@ -2141,24 +2133,6 @@ def test_distribution_briefing_points_at_the_top_bin(
     assert "evidence_scope" in sections["Where to look first"]
     assert "lower occupied bins" in sections["Where to look first"]
     assert sections["Candidate cohort"] == cohort
-
-
-def test_uniform_distribution_briefing_describes_a_baseline() -> None:
-    sessions = [
-        _session(1, ended_at=NOW + timedelta(seconds=5)),
-        _session(2, ended_at=NOW + timedelta(seconds=5)),
-    ]
-
-    candidate = _candidate(profile_sessions(sessions), "recorded-duration-distribution")
-    sections = _briefing_sections(candidate.investigation_prompt)
-
-    assert sections["What is odd"].startswith(
-        "All 2 observations have exactly 5 seconds; there is no tail"
-    )
-    assert sections["Candidate cohort"] == (
-        "every session with a recorded duration (the 2 listed)."
-    )
-    assert "baseline" in sections["One hypothesis to test"]
 
 
 def test_model_mix_briefing_states_label_counts_without_naming_labels() -> None:
@@ -2237,7 +2211,7 @@ def test_distribution_evidence_uses_each_metrics_own_maximum() -> None:
         )
     config = ProfilingConfig(max_contributing_sessions=1)
     result = profile_sessions(sessions, config=config)
-    assert result.analysis_version == "2026-10-22.1"
+    assert result.analysis_version == "2026-10-31.1"
     assert profile_sessions(reversed(sessions), config=config) == result
     for candidate_id, number in [
         ("tool-call-distribution", 1),
@@ -2250,7 +2224,9 @@ def test_distribution_evidence_uses_each_metrics_own_maximum() -> None:
         assert candidate.evidence[0].signal == DISTRIBUTION_TOP_BIN_SIGNAL
         assert candidate.evidence[0].node_id is None
         assert candidate.contributing_session_ids == [_id(100 + number)]
-        assert candidate.coverage.contributing_sessions_available == 4
+        assert candidate.coverage.contributing_sessions_available == (
+            2 if candidate_id == "tool-call-distribution" else 4
+        )
         assert candidate.coverage.evidence_retained == 1
 
 
@@ -2334,19 +2310,3 @@ def test_nonuniform_single_bin_briefing_compares_actual_values(
     assert "below" not in sections["The hypothesis held if"]
     assert "recorded baseline" in sections["The hypothesis held if"]
     assert [item.session_id for item in candidate.evidence] == [_id(102), _id(101)]
-
-
-def test_uniform_distribution_retains_baseline_without_ranked_evidence() -> None:
-    candidate = _candidate(
-        profile_sessions(
-            [
-                _session(1, ended_at=NOW),
-                _session(2, ended_at=NOW),
-            ]
-        ),
-        "recorded-duration-distribution",
-    )
-    assert candidate.evidence == []
-    assert candidate.coverage.evidence_available == 2
-    assert "evidence_scope" not in candidate.investigation_prompt
-    assert "baseline" in candidate.investigation_prompt

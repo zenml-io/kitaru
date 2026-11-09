@@ -8,6 +8,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from importer import parse_record
 from simulation import (
     BASE_STARTED_AT,
     FRAMEWORK,
@@ -17,7 +18,7 @@ from simulation import (
     simulate_session,
 )
 
-from kitaru.task.importer import ImportedSession
+from kitaru.api_models.v1.session_node import SessionNodeCreateRequest
 
 MALFORMED_LINES = (
     '{"external_id": "trace-bad-json", "inputs": {"question": ',
@@ -30,6 +31,23 @@ MALFORMED_LINES = (
 def malformed_line_count(requested: int) -> int:
     """Return how many malformed lines a request actually yields."""
     return min(requested, len(MALFORMED_LINES))
+
+
+def to_indexed_nodes(nodes: list[SessionNodeCreateRequest]) -> list[dict[str, Any]]:
+    """Convert node requests to the flat indexed Kitaru JSONL representation."""
+    indexes = {node.external_id: index for index, node in enumerate(nodes)}
+    return [
+        {
+            "index": index,
+            "parent_index": (
+                None
+                if node.parent_external_id is None
+                else indexes[node.parent_external_id]
+            ),
+            **node.model_dump(mode="json", exclude={"parent_external_id"}),
+        }
+        for index, node in enumerate(nodes)
+    ]
 
 
 async def build_trace(config: SimulationConfig, index: int) -> dict[str, Any]:
@@ -51,10 +69,10 @@ async def build_trace(config: SimulationConfig, index: int) -> dict[str, Any]:
         "ended_at": simulated.ended_at.isoformat(),
         "metadata": metadata,
         "framework": FRAMEWORK,
-        "nodes": [node.model_dump(mode="json") for node in simulated.nodes],
+        "nodes": to_indexed_nodes(simulated.nodes),
     }
     # Reject schema drift at generation time instead of at import time.
-    ImportedSession.model_validate(record)
+    parse_record(record)
     return record
 
 

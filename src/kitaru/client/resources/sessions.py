@@ -28,6 +28,7 @@ from kitaru.api_models.v1.session import (
     SessionUpdateRequest,
 )
 from kitaru.api_models.v1.session_node import (
+    SessionIngestRequest,
     SessionNodeBatchRequest,
     SessionNodeListParams,
     SessionNodeResponse,
@@ -70,6 +71,31 @@ class SessionsResource:
         response = await self._client.request(
             "POST",
             "/api/v1/sessions",
+            json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
+        )
+        return SessionResponse.model_validate(response.json())
+
+    async def ingest(
+        self, request: SessionIngestRequest, idempotency_key: str | None = None
+    ) -> SessionResponse:
+        """Create a session and all its initial nodes atomically.
+
+        Args:
+            request: Session and initial nodes.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
+
+        Raises:
+            APIError: The request failed, including 409 for a duplicate
+                imported_from and external id pair.
+
+        Returns:
+            Created session with its node rollups.
+        """
+        response = await self._client.request(
+            "POST",
+            "/api/v1/sessions/ingest",
             json=request.model_dump(mode="json", exclude_unset=True),
             idempotency_key=idempotency_key,
         )

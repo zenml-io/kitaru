@@ -8322,7 +8322,6 @@
           "cost": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -8601,6 +8600,30 @@
         "title": "SessionEvaluationsRequest",
         "type": "object"
       },
+      "SessionIngestRequest": {
+        "additionalProperties": false,
+        "description": "Session creation with all initial nodes in one transaction.",
+        "properties": {
+          "nodes": {
+            "description": "Complete initial nodes, in any order.",
+            "items": {
+              "$ref": "#/components/schemas/SessionNodeCreateRequest"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionCreateRequest",
+            "description": "Session to create."
+          }
+        },
+        "required": [
+          "nodes",
+          "session"
+        ],
+        "title": "SessionIngestRequest",
+        "type": "object"
+      },
       "SessionNodeBatchRequest": {
         "additionalProperties": false,
         "description": "Session node batch request.",
@@ -8635,7 +8658,6 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -8911,7 +8933,6 @@
           "cost": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -9224,7 +9245,6 @@
           "cost": {
             "anyOf": [
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
                 "type": "string"
               },
               {
@@ -10271,6 +10291,14 @@
             "description": "Process timeout.",
             "title": "Timeout Seconds",
             "type": "integer"
+          },
+          "unset_env": {
+            "description": "Inherited variables removed before the spec's values apply.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Unset Env",
+            "type": "array"
           }
         },
         "required": [
@@ -11375,7 +11403,7 @@
   },
   "info": {
     "title": "Kitaru",
-    "version": "0.27.3+dev"
+    "version": "0.27.6+dev"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -24749,6 +24777,126 @@
           }
         },
         "summary": "Create Session",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/api/v1/sessions/ingest": {
+      "post": {
+        "description": "Create a session and all its initial nodes atomically.\n\nClients observe HTTP 201 on success, 409 for an existing source identity,\nand 422 on invalid input. A node failure rolls back the session and all\ninitial nodes.\n\nArgs:\n    body: Session and complete initial nodes.\n    service: Session ingestion service.\n    actor: Caller context.\n\nReturns:\n    Created session with its node rollups.",
+        "operationId": "ingest_session_api_v1_sessions_ingest_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorBody"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Ingest Session",
         "tags": [
           "sessions"
         ]

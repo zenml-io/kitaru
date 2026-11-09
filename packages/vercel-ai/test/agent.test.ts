@@ -121,6 +121,48 @@ describe("createKitaruToolLoopAgent", () => {
     expect(modelNodes.map((node) => node.reasoning_selectors)).toEqual([[]]);
   });
 
+  it("selects the joined reply text of a step that replies", async () => {
+    const client = new FakeClient();
+    const reply = textResponse("Looking it up. ");
+    const agent = createKitaruToolLoopAgent(
+      {
+        model: new MockLanguageModelV4({
+          doGenerate: [
+            toolResponse([{ id: "call-1", name: "work" }]),
+            {
+              ...reply,
+              content: [...reply.content, { text: "Done.", type: "text" }],
+            },
+          ],
+        }),
+        tools: {
+          work: tool({
+            execute: async () => "done",
+            inputSchema: jsonSchema<Record<never, never>>({
+              additionalProperties: false,
+              properties: {},
+              type: "object",
+            }),
+          }),
+        },
+      },
+      { agentId: AGENT_ID, client, environment: {} },
+    );
+
+    await agent.generate({ prompt: "Work" });
+
+    const modelNodes = client.nodeBatches.flatMap((batch) =>
+      batch.nodes.filter((node) => node.node_type === "llm_call"),
+    );
+    expect(modelNodes.map((node) => node.output_text_selector)).toEqual([
+      null,
+      "/text",
+    ]);
+    expect(modelNodes[1]?.outputs).toMatchObject({
+      text: "Looking it up. Done.",
+    });
+  });
+
   it("records caller model settings without applying replay bounds", async () => {
     const client = new FakeClient();
     const onLanguageModelCallStart = vi.fn();
