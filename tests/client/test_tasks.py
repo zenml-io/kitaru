@@ -283,3 +283,18 @@ async def test_update_requires_a_status(
 
     with pytest.raises(ValidationError):
         await task_client.tasks.update(task.id, TaskUpdateRequest())
+
+
+async def test_task_diagnostics_roundtrip(
+    api_client: KitaruAPIClient, services: JobAndTaskServices, account: Account
+) -> None:
+    job = await create_job(services.jobs, account.id)
+    task = await create_agent_task(services.tasks, job.id)
+    result = await api_client.tasks.diagnostics(job_id=job.id)
+    assert result.pending_task_count == 1
+    assert result.groups[0].task_ids == [task.id]
+    assert result.groups[0].reasons == ["no_live_workers"]
+    with pytest.raises(ValidationError):
+        await api_client.tasks.diagnostics(
+            job_id=job.id, experiment_run_id=uuid.uuid4()
+        )

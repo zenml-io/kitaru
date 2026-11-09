@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from typing import Any, Literal
 
 import pytest
+from tests.cli.task_diagnostic_fakes import EmptyTaskDiagnostics
 
 from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.cli import app as app_module
@@ -106,7 +107,9 @@ async def test_get_can_include_complete_task_snapshot() -> None:
     job_id = uuid.uuid4()
     resource = StubJobs([_job(job_id, JobStatus.RUNNING)])
 
-    result = await jobs.get_job(SimpleNamespace(jobs=resource), job_id, tasks=True)
+    result = await jobs.get_job(
+        SimpleNamespace(tasks=EmptyTaskDiagnostics(), jobs=resource), job_id, tasks=True
+    )
 
     assert result.item["id"] == str(job_id)
     assert result.item["tasks"] == [{"id": "task-1"}]
@@ -127,7 +130,7 @@ async def test_poll_returns_every_terminal_status_without_mapping(
     token = set_output_context(_output_context("json", stdout))
     try:
         result = await jobs.poll_job(
-            SimpleNamespace(jobs=StubJobs([terminal])),
+            SimpleNamespace(tasks=EmptyTaskDiagnostics(), jobs=StubJobs([terminal])),
             job_id,
             interval=1,
             timeout=None,
@@ -156,7 +159,10 @@ async def test_poll_validates_interval_and_timeout(
 
     with pytest.raises(CLIError, match=message) as error:
         await jobs.poll_job(
-            SimpleNamespace(jobs=StubJobs([_job(job_id, JobStatus.RUNNING)])),
+            SimpleNamespace(
+                tasks=EmptyTaskDiagnostics(),
+                jobs=StubJobs([_job(job_id, JobStatus.RUNNING)]),
+            ),
             job_id,
             interval=interval,
             timeout=timeout,
@@ -184,7 +190,7 @@ async def test_poll_suppresses_unchanged_created_snapshot() -> None:
     token = set_output_context(_output_context("jsonl", stdout))
     try:
         result = await jobs.poll_job(
-            SimpleNamespace(jobs=resource),
+            SimpleNamespace(tasks=EmptyTaskDiagnostics(), jobs=resource),
             job_id,
             interval=1,
             timeout=None,
@@ -221,7 +227,7 @@ async def test_watch_jsonl_suppresses_updated_only_changes_and_emits_terminal() 
     token = set_output_context(_output_context("jsonl", stdout))
     try:
         result = await jobs.watch_job(
-            SimpleNamespace(jobs=resource),
+            SimpleNamespace(tasks=EmptyTaskDiagnostics(), jobs=resource),
             job_id,
             interval=0.25,
             timeout=None,
@@ -259,7 +265,7 @@ async def test_watch_json_emits_only_final_document() -> None:
     token = set_output_context(_output_context("json", stdout))
     try:
         result = await jobs.watch_job(
-            SimpleNamespace(jobs=resource),
+            SimpleNamespace(tasks=EmptyTaskDiagnostics(), jobs=resource),
             job_id,
             interval=1,
             timeout=None,
@@ -293,7 +299,9 @@ async def test_watch_maps_remote_terminal_states(
     try:
         with pytest.raises(CLIError) as error:
             await jobs.watch_job(
-                SimpleNamespace(jobs=StubJobs([_job(job_id, status)])),
+                SimpleNamespace(
+                    tasks=EmptyTaskDiagnostics(), jobs=StubJobs([_job(job_id, status)])
+                ),
                 job_id,
                 interval=1,
                 timeout=None,
@@ -322,7 +330,7 @@ async def test_watch_timeout_does_not_cancel_remote_work() -> None:
     try:
         with pytest.raises(CLIError) as error:
             await jobs.watch_job(
-                SimpleNamespace(jobs=resource),
+                SimpleNamespace(tasks=EmptyTaskDiagnostics(), jobs=resource),
                 job_id,
                 interval=2,
                 timeout=1,
@@ -353,7 +361,7 @@ async def test_watch_timeout_bounds_an_in_flight_poll() -> None:
     try:
         with pytest.raises(CLIError) as error:
             await jobs.watch_job(
-                SimpleNamespace(jobs=SlowJobs()),
+                SimpleNamespace(tasks=EmptyTaskDiagnostics(), jobs=SlowJobs()),
                 job_id,
                 interval=1,
                 timeout=0.05,
@@ -369,7 +377,9 @@ async def test_cancel_calls_endpoint_once_and_does_not_wait() -> None:
     job_id = uuid.uuid4()
     resource = StubJobs([_job(job_id, JobStatus.RUNNING)])
 
-    result = await jobs.cancel_job(SimpleNamespace(jobs=resource), job_id)
+    result = await jobs.cancel_job(
+        SimpleNamespace(tasks=EmptyTaskDiagnostics(), jobs=resource), job_id
+    )
 
     assert resource.cancel_calls == 1
     assert resource.get_calls == 0
@@ -390,7 +400,7 @@ def test_watch_ctrl_c_closes_client_without_canceling(
     async def open_client():
         nonlocal closed
         try:
-            yield SimpleNamespace(jobs=resource)
+            yield SimpleNamespace(tasks=EmptyTaskDiagnostics(), jobs=resource)
         finally:
             closed = True
 
@@ -478,7 +488,9 @@ def test_failed_watch_uses_structured_error_envelope(
 
     @asynccontextmanager
     async def open_client():
-        yield SimpleNamespace(jobs=StubJobs([_job(job_id, status)]))
+        yield SimpleNamespace(
+            tasks=EmptyTaskDiagnostics(), jobs=StubJobs([_job(job_id, status)])
+        )
 
     monkeypatch.setattr(invocation_context, "open_asset_client", open_client)
     assert (
@@ -514,3 +526,74 @@ def test_job_schema_is_offline_and_describes_streaming_and_mutation() -> None:
     }
     assert watch_errors["remote_failed"] == 8
     assert specs["job.cancel"]["side_effects"]["mutates_remote_state"] is True
+
+
+async def test_watch_reports_analyzer_added_after_import_and_clears_warning() -> None:
+    """New analysis work is diagnosed even while the job stays running."""
+    from kitaru.api_models.v1.task import TaskDiagnosticsResponse
+
+    job_id = uuid.uuid4()
+    pending = TaskDiagnosticsResponse.model_validate(
+        {
+            "live_worker_count": 1,
+            "pending_task_count": 1,
+            "truncated": False,
+            "groups": [
+                {
+                    "kind": "analyzer",
+                    "labels": {},
+                    "reasons": ["claim_mismatch"],
+                    "task_count": 1,
+                    "task_ids": [str(uuid.uuid4())],
+                    "job_ids": [str(job_id)],
+                }
+            ],
+        }
+    )
+    covered = pending.model_copy(
+        update={"groups": [pending.groups[0].model_copy(update={"reasons": []})]}
+    )
+    observations = [
+        TaskDiagnosticsResponse(
+            live_worker_count=1, pending_task_count=0, groups=[], truncated=False
+        ),
+        pending,
+        pending,
+        covered,
+    ]
+
+    class Tasks:
+        async def diagnostics(self, **kwargs) -> TaskDiagnosticsResponse:
+            assert kwargs["job_id"] == job_id
+            return observations.pop(0)
+
+    async def sleep(_: float) -> None:
+        return None
+
+    client = SimpleNamespace(
+        tasks=Tasks(),
+        jobs=StubJobs(
+            [
+                *[_job(job_id, JobStatus.RUNNING) for _ in range(4)],
+                _job(job_id, JobStatus.COMPLETED),
+            ]
+        ),
+    )
+    stdout = io.StringIO()
+    token = set_output_context(_output_context("jsonl", stdout))
+    try:
+        result = await jobs.watch_job(
+            client, job_id, interval=1, timeout=None, sleep=sleep
+        )
+    finally:
+        reset_output_context(token)
+    assert result.item["status"] == "completed"
+    events = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    diagnostics = [event["item"] for event in events if event["event"] == "diagnostics"]
+    assert len(diagnostics) == 2
+    assert "analyzer" in diagnostics[0]["warnings"][0]
+    assert (
+        "Explicit --claim options replace the defaults" in diagnostics[0]["warnings"][0]
+    )
+    assert diagnostics[1]["warnings"] == []
+    assert observations == []
