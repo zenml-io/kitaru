@@ -62,14 +62,16 @@ def _get_token_count(value: int | None) -> int | None:
 
 @dataclass(frozen=True)
 class ModelCallTokens:
-    """Token counts of one model call, read under its source's cache convention.
+    """Token counts of one model call, read under its source's cache conventions.
 
-    Sources disagree on whether ``input_tokens`` includes cache reads and
-    cache writes. OpenAI-style usage counts both inside input tokens, while
-    Anthropic-style usage, including Kitaru's Claude Agent SDK adapter, reports
-    them separately. Kitaru stores both as recorded. ``cache_reads_separate`` is
-    true only when the convention is established for this call's model in its
-    session; otherwise it is unknown and the inclusive reading is used.
+    Sources disagree on whether ``input_tokens`` includes cache reads and cache
+    writes, and a source can treat the two differently. OpenAI-style usage
+    counts both inside input tokens, raw Anthropic usage reports both
+    separately, and Kitaru's Claude Agent SDK adapter adds cache writes to input
+    tokens while reporting cache reads separately. Kitaru stores the counts as
+    recorded. Each ``*_separate`` flag is true only when that convention is
+    established for this call's model in its session; otherwise it is unknown
+    and the inclusive reading is used.
     """
 
     node: SessionNodeResponse
@@ -78,41 +80,43 @@ class ModelCallTokens:
     cached_input_tokens: int | None
     cache_write_input_tokens: int | None
     cache_reads_separate: bool
+    cache_writes_separate: bool
 
     @property
     def prompt_tokens(self) -> int | None:
         """Return the call's total input size, including cache reads and writes."""
         if self.input_tokens is None:
             return None
-        if self.cache_reads_separate:
-            cache_tokens = (self.cached_input_tokens or 0) + (
-                self.cache_write_input_tokens or 0
-            )
-            return self.input_tokens + cache_tokens
-        return self.input_tokens
+        reads = self.cached_input_tokens if self.cache_reads_separate else None
+        writes = self.cache_write_input_tokens if self.cache_writes_separate else None
+        return self.input_tokens + (reads or 0) + (writes or 0)
 
 
 def read_model_calls(nodes: Iterable[SessionNodeResponse]) -> list[ModelCallTokens]:
     """Read each model call's token counts in node order.
 
-    A call reporting more cache reads and writes than input tokens can only
-    come from a source that counts them separately. One source records every call to
-    a model the same way, so that evidence applies to every call to the same
-    model in the session.
+    A call reporting more cache reads than input tokens can only come from a
+    source that counts cache reads separately, and the same holds for cache
+    writes. One source records every call to a model the same way, so that
+    evidence applies to every call to the same model in the session.
     """
     calls = [node for node in nodes if node.node_type is NodeType.LLM_CALL]
     readings: list[
         tuple[SessionNodeResponse, str, int | None, int | None, int | None]
     ] = []
-    separate: set[str] = set()
+    separate_reads: set[str] = set()
+    separate_writes: set[str] = set()
     for node in calls:
         model_key = node.model or node.requested_model or ""
         tokens = node.tokens
         input_tokens = _get_token_count(tokens.input_tokens) if tokens else None
         cached = _get_token_count(tokens.cached_input_tokens) if tokens else None
         writes = _get_token_count(tokens.cache_write_input_tokens) if tokens else None
-        if input_tokens is not None and (cached or 0) + (writes or 0) > input_tokens:
-            separate.add(model_key)
+        if input_tokens is not None:
+            if cached is not None and cached > input_tokens:
+                separate_reads.add(model_key)
+            if writes is not None and writes > input_tokens:
+                separate_writes.add(model_key)
         readings.append((node, model_key, input_tokens, cached, writes))
     return [
         ModelCallTokens(
@@ -121,7 +125,8 @@ def read_model_calls(nodes: Iterable[SessionNodeResponse]) -> list[ModelCallToke
             input_tokens=input_tokens,
             cached_input_tokens=cached,
             cache_write_input_tokens=writes,
-            cache_reads_separate=model_key in separate,
+            cache_reads_separate=model_key in separate_reads,
+            cache_writes_separate=model_key in separate_writes,
         )
         for node, model_key, input_tokens, cached, writes in readings
     ]

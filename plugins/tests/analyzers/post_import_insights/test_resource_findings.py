@@ -385,6 +385,37 @@ def test_warming_a_separately_reported_cache_is_not_context_growth() -> None:
     assert _find(profile_sessions(sessions), "context-growth") is None
 
 
+def _claude_agent_sdk_sessions(count: int) -> list[SessionWithNodesResponse]:
+    # The Claude Agent SDK adapter adds cache writes to input tokens and reports
+    # cache reads separately, so both calls below send 10,100 tokens.
+    return [
+        _session(
+            number,
+            [
+                _llm(number, 0, input_tokens=10_100, cached=0, writes=10_000),
+                _llm(number, 1, input_tokens=100, cached=10_000, writes=0),
+            ],
+        )
+        for number in range(1, count + 1)
+    ]
+
+
+def test_cache_writes_inside_input_are_not_counted_twice() -> None:
+    # Input grows from 2,100 to 5,000 tokens, under the 3 times threshold.
+    # Counting the last call's 4,900 cache writes twice would read 9,900.
+    sessions = [
+        _session(
+            number,
+            [
+                _llm(number, 0, input_tokens=100, cached=2_000, writes=0),
+                _llm(number, 1, input_tokens=5_000, cached=0, writes=4_900),
+            ],
+        )
+        for number in range(1, 4)
+    ]
+    assert _find(profile_sessions(sessions), "context-growth") is None
+
+
 def _sized_sessions(
     sizes: list[int], *, start: int = 1, cached: int | None = None
 ) -> list[SessionWithNodesResponse]:
@@ -468,6 +499,14 @@ def test_prompt_cache_share_counts_separately_reported_cache_writes() -> None:
     candidate = _get(profile_sessions(sessions), "prompt-cache")
     assert _facts(candidate)["cache_read_share_percent"] == 49.5
     assert "the share is a range" not in (candidate.caveat or "")
+
+
+def test_prompt_cache_share_keeps_inclusive_writes_as_the_read_share() -> None:
+    # No call settles the write convention, so the share is a range whose
+    # as-read end is the true 10,000 of 20,200 tokens.
+    candidate = _get(profile_sessions(_claude_agent_sdk_sessions(5)), "prompt-cache")
+    assert _facts(candidate)["cache_read_share_high_percent"] == 49.5
+    assert _facts(candidate)["cache_read_share_low_percent"] == 33.11
 
 
 def test_prompt_cache_share_is_a_range_when_the_convention_is_unknown() -> None:
