@@ -1,0 +1,1 @@
+- Classify model-swap provider content-policy rejections as refusals instead of generic HTTP errors.

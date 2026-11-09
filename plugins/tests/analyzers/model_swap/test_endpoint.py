@@ -189,6 +189,81 @@ async def test_error_messages_are_kept_but_not_the_body() -> None:
     )
 
 
+@pytest.mark.parametrize("api", ["chat_completions", "responses"])
+@pytest.mark.parametrize(
+    "error",
+    [
+        {
+            "message": (
+                "Your prompt was flagged as potentially violating our usage policy."
+            ),
+            "type": "invalid_request_error",
+            "code": None,
+        },
+        {"code": "content_policy_violation", "message": "Request rejected."},
+        {"code": "content_filter", "message": "The response was filtered."},
+    ],
+)
+async def test_policy_rejections_are_refusals(api: str, error: dict[str, Any]) -> None:
+    requests: list[httpx.Request] = []
+
+    def reject(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(400, json={"error": error, "echo": "secret request text"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(reject)) as client:
+        result = await send(
+            client,
+            candidate(provider_settings={"api": api, "max_retries": 3}),
+            api_key=None,
+            messages=MESSAGES,
+            tools=[],
+        )
+
+    assert result.failure == "refusal"
+    assert result.failure_detail == f"HTTP 400: {error['message']}"
+    assert result.attempts == 1
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "payload", "category"),
+    [
+        (
+            400,
+            {"error": {"message": "Invalid parameter: content_filter."}},
+            "http_error",
+        ),
+        (
+            400,
+            {
+                "error": {
+                    "message": "Your organization policy does not allow this model."
+                }
+            },
+            "http_error",
+        ),
+        (
+            400,
+            {"error": {"code": ["content_filter"], "message": "Malformed error code."}},
+            "http_error",
+        ),
+        (400, ["content_policy_violation"], "http_error"),
+        (401, {"error": {"code": "content_policy_violation"}}, "http_error"),
+        (429, {"error": {"code": "content_policy_violation"}}, "rate_limited"),
+        (503, {"error": {"code": "content_policy_violation"}}, "http_error"),
+    ],
+)
+async def test_unrelated_errors_keep_their_categories(
+    status: int, payload: Any, category: str
+) -> None:
+    server = MockOpenAIServer({"m": lambda _: httpx.Response(status, json=payload)})
+
+    result = await call(server, candidate(provider_settings={"max_retries": 0}))
+
+    assert result.failure == category
+
+
 async def test_timeouts_are_categorized() -> None:
     def slow(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("slow", request=request)

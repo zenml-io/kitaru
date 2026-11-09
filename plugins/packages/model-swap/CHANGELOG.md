@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Classify HTTP 400 content-policy rejections as `refusal` for both Chat Completions and Responses candidates, while preserving the provider's error detail and keeping unrelated request failures separate.
 - Keep decision-candidate questions independent of recorded answers by deriving the bounded question set from every offered tool schema, including for recorded text replies and omitted optional arguments.
 - Compare best-mix candidates with the reference on common answered calls within each step and session split, and retain today's model when reference hold-out evidence is missing instead of crashing the report.
 - Treat empty or incomplete provider usage as unknown, and retain spend reservations for decision requests sent without measurable usage, including read timeouts.
