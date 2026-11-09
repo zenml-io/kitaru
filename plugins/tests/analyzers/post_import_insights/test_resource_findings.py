@@ -82,6 +82,7 @@ def _llm(
     *,
     input_tokens: int | None = None,
     cached: int | None = None,
+    writes: int | None = None,
     cost: str | None = None,
     model: str = "model-a",
     system: str | None = None,
@@ -101,7 +102,11 @@ def _llm(
         system_prompt_selector=None if system is None else "/messages/0/content",
         inputs=None if system is None else {"messages": [{"content": system}]},
         model=model,
-        tokens=TokenUsage(input_tokens=input_tokens, cached_input_tokens=cached),
+        tokens=TokenUsage(
+            input_tokens=input_tokens,
+            cached_input_tokens=cached,
+            cache_write_input_tokens=writes,
+        ),
         cost=None if cost is None else Decimal(cost),
         metadata={},
     )
@@ -362,6 +367,22 @@ def test_input_counts_cache_reads_when_the_source_reports_them_separately() -> N
     assert candidate.coverage.affected_sessions == 3
     assert candidate.evidence[0].session_id == _id(1)
     assert _facts(candidate)["maximum"] == 10.67
+
+
+def test_warming_a_separately_reported_cache_is_not_context_growth() -> None:
+    # Both calls send the same 10,100 tokens: the first writes them to the
+    # cache and the second reads them back.
+    sessions = [
+        _session(
+            number,
+            [
+                _llm(number, 0, input_tokens=100, cached=0, writes=10_000),
+                _llm(number, 1, input_tokens=100, cached=10_000, writes=0),
+            ],
+        )
+        for number in range(1, 4)
+    ]
+    assert _find(profile_sessions(sessions), "context-growth") is None
 
 
 def _sized_sessions(

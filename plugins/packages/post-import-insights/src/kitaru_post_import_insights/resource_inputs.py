@@ -64,8 +64,8 @@ def _get_token_count(value: int | None) -> int | None:
 class ModelCallTokens:
     """Token counts of one model call, read under its source's cache convention.
 
-    Sources disagree on whether ``input_tokens`` includes cache reads.
-    OpenAI-style usage counts cache reads inside input tokens, while
+    Sources disagree on whether ``input_tokens`` includes cache reads and
+    cache writes. OpenAI-style usage counts both inside input tokens, while
     Anthropic-style usage, including Kitaru's Claude Agent SDK adapter, reports
     them separately. Kitaru stores both as recorded. ``cache_reads_separate`` is
     true only when the convention is established for this call's model in its
@@ -76,46 +76,54 @@ class ModelCallTokens:
     model_key: str
     input_tokens: int | None
     cached_input_tokens: int | None
+    cache_write_input_tokens: int | None
     cache_reads_separate: bool
 
     @property
     def prompt_tokens(self) -> int | None:
-        """Return the call's total input size, including cache reads."""
+        """Return the call's total input size, including cache reads and writes."""
         if self.input_tokens is None:
             return None
         if self.cache_reads_separate:
-            return self.input_tokens + (self.cached_input_tokens or 0)
+            cache_tokens = (self.cached_input_tokens or 0) + (
+                self.cache_write_input_tokens or 0
+            )
+            return self.input_tokens + cache_tokens
         return self.input_tokens
 
 
 def read_model_calls(nodes: Iterable[SessionNodeResponse]) -> list[ModelCallTokens]:
     """Read each model call's token counts in node order.
 
-    A call reporting more cache reads than input tokens can only come from a
-    source that counts cache reads separately. One source records every call to
+    A call reporting more cache reads and writes than input tokens can only
+    come from a source that counts them separately. One source records every call to
     a model the same way, so that evidence applies to every call to the same
     model in the session.
     """
     calls = [node for node in nodes if node.node_type is NodeType.LLM_CALL]
-    readings: list[tuple[SessionNodeResponse, str, int | None, int | None]] = []
+    readings: list[
+        tuple[SessionNodeResponse, str, int | None, int | None, int | None]
+    ] = []
     separate: set[str] = set()
     for node in calls:
         model_key = node.model or node.requested_model or ""
         tokens = node.tokens
         input_tokens = _get_token_count(tokens.input_tokens) if tokens else None
         cached = _get_token_count(tokens.cached_input_tokens) if tokens else None
-        if input_tokens is not None and cached is not None and cached > input_tokens:
+        writes = _get_token_count(tokens.cache_write_input_tokens) if tokens else None
+        if input_tokens is not None and (cached or 0) + (writes or 0) > input_tokens:
             separate.add(model_key)
-        readings.append((node, model_key, input_tokens, cached))
+        readings.append((node, model_key, input_tokens, cached, writes))
     return [
         ModelCallTokens(
             node=node,
             model_key=model_key,
             input_tokens=input_tokens,
             cached_input_tokens=cached,
+            cache_write_input_tokens=writes,
             cache_reads_separate=model_key in separate,
         )
-        for node, model_key, input_tokens, cached in readings
+        for node, model_key, input_tokens, cached, writes in readings
     ]
 
 
