@@ -62,6 +62,7 @@ from kitaru.server.application.interfaces.replay_repository import ReplayReposit
 from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.services import (
+    agent_session_termination,
     evaluation_recording,
     import_pipeline,
     insight_recording,
@@ -103,6 +104,13 @@ def register_subscribers(
         insight_repository: Insight repository.
         analytics: Analytics tracker, None skips tracking.
     """
+    dispatcher.register(
+        TaskTerminal,
+        partial(
+            agent_session_termination.fail_unfinished_agent_session,
+            session_repository=session_repository,
+        ),
+    )
     dispatcher.register(
         TaskTerminal,
         partial(
