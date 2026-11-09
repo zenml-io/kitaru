@@ -28,6 +28,46 @@ class OpenAIInsightGenerationError(RuntimeError):
     """Sanitized provider failure safe for application diagnostics."""
 
 
+def get_openai_credential(api_key: str | None = None) -> str:
+    """Return the given OpenAI credential, or the one in `OPENAI_API_KEY`.
+
+    Args:
+        api_key: Optional caller-supplied credential.
+
+    Returns:
+        Credential.
+
+    Raises:
+        MissingOpenAICredential: No credential is available.
+    """
+    credential = api_key or os.environ.get("OPENAI_API_KEY")
+    if not credential or not credential.strip():
+        raise MissingOpenAICredential(
+            "OpenAI credentials are required for model-backed insights"
+        )
+    return credential
+
+
+def import_openai() -> Any:
+    """Import the OpenAI SDK, naming the extra that provides it when absent.
+
+    Returns:
+        The `openai` module.
+
+    Raises:
+        ModuleNotFoundError: The OpenAI dependency is absent.
+    """
+    try:
+        return importlib.import_module("openai")
+    except ModuleNotFoundError as error:
+        if error.name != "openai":
+            raise
+        raise ModuleNotFoundError(
+            "Install kitaru-post-import-insights[openai] to use model-backed insights",
+            name="openai",
+        ) from error
+
+
 class OpenAIInsightGenerator:
     """Run the fixed analyst and editor operations through OpenAI Responses."""
 
@@ -42,21 +82,8 @@ class OpenAIInsightGenerator:
             MissingOpenAICredential: No credential is available.
             ModuleNotFoundError: The OpenAI dependency is absent.
         """
-        credential = api_key or os.environ.get("OPENAI_API_KEY")
-        if not credential or not credential.strip():
-            raise MissingOpenAICredential(
-                "OpenAI credentials are required for model-backed insights"
-            )
-        try:
-            module: Any = importlib.import_module("openai")
-        except ModuleNotFoundError as error:
-            if error.name != "openai":
-                raise
-            raise ModuleNotFoundError(
-                "Install kitaru-post-import-insights[openai] "
-                "to use model-backed insights",
-                name="openai",
-            ) from error
+        credential = get_openai_credential(api_key)
+        module = import_openai()
         self._timeout_errors = (TimeoutError, module.APITimeoutError)
         self._client: Any = module.AsyncOpenAI(api_key=credential, max_retries=0)
 

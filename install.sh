@@ -16,7 +16,7 @@
 #      --project / --global force either.
 #   3. Runs `kitaru setup`, which installs the Kitaru agent skills
 #      (zenml-io/kitaru-skills) into ~/.agents/skills plus ~/.claude/skills
-#      and ~/.codex/skills when those CLIs are installed, and registers the
+#      when Claude Code is installed, and registers the
 #      Kitaru MCP server with Claude Code, Codex, Cursor, and Windsurf when
 #      found (printing the JSON for everything else). Re-run `kitaru setup`
 #      after installing a new coding agent. Kitaru releases before `setup`
@@ -35,6 +35,9 @@
 # it runs before the shell reaches any bash syntax below.
 if [ -z "${BASH_VERSION:-}" ]; then echo "Kitaru's installer needs bash. Run: curl -fsSL https://kitaru.ai/install | bash" >&2; exit 1; fi
 
+# macOS sh sets BASH_VERSION but rejects the Bash syntax below in POSIX mode.
+case ":${SHELLOPTS:-}:" in *:posix:*) echo "Kitaru's installer needs bash, not sh. Run: curl -fsSL https://kitaru.ai/install | bash" >&2; exit 1 ;; esac
+
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
@@ -48,6 +51,7 @@ KITARU_SKIP_MCP="${KITARU_SKIP_MCP:-0}"
 KITARU_QUIET="${KITARU_QUIET:-0}"
 KITARU_VERBOSE="${KITARU_VERBOSE:-0}"
 KITARU_WITH=()                                # extra packages, e.g. kitaru-pydantic-ai
+KITARU_PYTHON_EXPLICIT="${KITARU_PYTHON:+1}"
 KITARU_PYTHON="${KITARU_PYTHON:-3.12}"        # uv-managed Python if none suitable (global mode)
 KITARU_SCOPE="${KITARU_SCOPE:-auto}"          # auto | project | global
 KITARU_SKILLS_REPO="${KITARU_SKILLS_REPO:-zenml-io/kitaru-skills}"
@@ -68,6 +72,7 @@ Usage: install.sh [options]
                       (uv add). Default when a pyproject.toml or uv.lock is here.
   --global            Install into an isolated uv tool environment on PATH.
                       Default anywhere else.
+  --python=VERSION    Select Python for a global install (default: 3.12)
   --server=URL        Point the MCP server at a team/self-hosted server
                       (default: the local server, http://localhost:8000)
   --no-skills         Skip installing the coding-agent skills
@@ -84,15 +89,23 @@ KITARU_PYTHON (default 3.12), NO_COLOR.
 USAGE
 }
 
+require_value() {
+  case "${2:-}" in
+    ""|-*) echo "$1 needs a value." >&2; exit 2 ;;
+  esac
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    --version=*) KITARU_VERSION="${1#*=}" ;;
-    --version) shift; KITARU_VERSION="${1:-}" ;;
+    --version=*) require_value --version "${1#*=}"; KITARU_VERSION="${1#*=}" ;;
+    --version) require_value "$1" "${2:-}"; shift; KITARU_VERSION="$1" ;;
+    --python=*) require_value --python "${1#*=}"; KITARU_PYTHON="${1#*=}"; KITARU_PYTHON_EXPLICIT=1 ;;
+    --python) require_value "$1" "${2:-}"; shift; KITARU_PYTHON="$1"; KITARU_PYTHON_EXPLICIT=1 ;;
     --pre) KITARU_PRE=1 ;;
-    --with=*) KITARU_WITH+=("${1#*=}") ;;
-    --with) shift; KITARU_WITH+=("${1:-}") ;;
-    --server=*) KITARU_SERVER="${1#*=}" ;;
-    --server) shift; KITARU_SERVER="${1:-}" ;;
+    --with=*) require_value --with "${1#*=}"; KITARU_WITH+=("${1#*=}") ;;
+    --with) require_value "$1" "${2:-}"; shift; KITARU_WITH+=("$1") ;;
+    --server=*) require_value --server "${1#*=}"; KITARU_SERVER="${1#*=}" ;;
+    --server) require_value "$1" "${2:-}"; shift; KITARU_SERVER="$1" ;;
     --project) KITARU_SCOPE=project ;;
     --global) KITARU_SCOPE=global ;;
     --no-skills) KITARU_SKIP_SKILLS=1 ;;
@@ -153,11 +166,10 @@ case "$(uname -s)" in
   *) die "Unsupported OS: $(uname -s)" ;;
 esac
 
-if ! have curl && ! have wget; then die "Need curl or wget."; fi
+have curl || die "Need curl with HTTPS support. Install curl and re-run this installer."
 
 fetch_to_stdout() {
-  if have curl; then curl -fsSL --proto '=https' --tlsv1.2 "$1"
-  else wget -q --https-only -O- "$1"; fi
+  curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 "$1"
 }
 
 say ""
@@ -170,8 +182,15 @@ say ""
 ensure_path() {
   case ":$PATH:" in *":$1:"*) ;; *) export PATH="$1:$PATH" ;; esac
 }
-ensure_path "$HOME/.local/bin"
-ensure_path "$HOME/.cargo/bin"
+UV_BIN_DIR="${UV_INSTALL_DIR:-${CARGO_DIST_FORCE_INSTALL_DIR:-${UV_UNMANAGED_INSTALL:-${XDG_BIN_HOME:-${XDG_DATA_HOME:+$XDG_DATA_HOME/../bin}}}}}"
+UV_BIN_DIR="${UV_BIN_DIR:-$HOME/.local/bin}"
+if [ "$UV_BIN_DIR" = "${CARGO_HOME:-$HOME/.cargo}" ]; then UV_BIN_DIR="$UV_BIN_DIR/bin"; fi
+for candidate in "$UV_BIN_DIR" "$HOME/.local/bin" "$HOME/.cargo/bin"; do
+  if [ -x "$candidate/uv" ] && "$candidate/uv" --version >/dev/null 2>&1; then
+    ensure_path "$candidate"
+    break
+  fi
+done
 
 version_ge() {
   # version_ge A B → true if A >= B (dotted numerics only)
@@ -188,13 +207,16 @@ install_uv() {
   trap 'rm -f "$UV_INSTALLER"' EXIT
   fetch_to_stdout https://astral.sh/uv/install.sh >"$UV_INSTALLER" \
     || die "Could not download the uv installer from https://astral.sh/uv/install.sh"
-  quiet sh "$UV_INSTALLER" --quiet \
+  if [ "$KITARU_NO_MODIFY_PATH" = "1" ]; then
+    export UV_NO_MODIFY_PATH=1
+  fi
+  quiet env PATH="$ORIG_PATH" UV_INSTALL_DIR="$UV_BIN_DIR" sh "$UV_INSTALLER" --quiet \
     || die "uv install failed. Install it from https://docs.astral.sh/uv/ and re-run."
   rm -f "$UV_INSTALLER"; trap - EXIT
   # Use the binary we just installed by absolute path, and put its directory
   # in front so an older uv earlier on PATH (or bash's hashed path) can't win.
-  UV="$HOME/.local/bin/uv"
-  export PATH="$HOME/.local/bin:$PATH"; hash -r
+  UV="$UV_BIN_DIR/uv"
+  export PATH="$UV_BIN_DIR:$PATH"; hash -r
   [ -x "$UV" ] || die "uv installed but $UV is missing. Install it from https://docs.astral.sh/uv/ and re-run."
   version_ge "$(uv_version_of "$UV")" "$KITARU_MIN_UV" \
     || die "uv at $UV is $(uv_version_of "$UV"), older than $KITARU_MIN_UV. Install a current uv and re-run."
@@ -205,11 +227,11 @@ install_uv() {
 UV=""
 if have uv; then
   UV="$(command -v uv)"
-  UV_VER="$(uv_version_of "$UV")"
-  if version_ge "$UV_VER" "$KITARU_MIN_UV"; then
+  UV_VER="$(uv_version_of "$UV" || true)"
+  if [ -n "$UV_VER" ] && version_ge "$UV_VER" "$KITARU_MIN_UV"; then
     ok "uv $UV_VER found"
   else
-    note "uv $UV_VER is older than $KITARU_MIN_UV; installing a current one alongside it."
+    note "uv at $UV is unavailable or older than $KITARU_MIN_UV; installing a current one."
     install_uv
   fi
 else
@@ -220,11 +242,21 @@ persist_path() {
   # `uv tool update-shell` handles bash/zsh/fish when it recognizes the login
   # shell. Cover the rest (Alpine sh, containers, CI images) by appending to
   # ~/.profile when no rc file mentions the directory yet.
-  local dir="$1" f
-  for f in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.config/fish/config.fish"; do
-    [ -f "$f" ] && grep -qs "$dir\|\.local/bin" "$f" && return 0
+  local dir="$1" f display="$1"
+  case "$dir" in "$HOME"/*) display="\$HOME${dir#"$HOME"}" ;; esac
+  for f in "$HOME/.bashrc" "$HOME/.zshenv" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.config/fish/config.fish"; do
+    [ -f "$f" ] && grep -Fqs -e "$dir" -e "$display" "$f" && return 0
   done
-  printf '\n# Added by the Kitaru installer\nexport PATH="%s:$PATH"\n' "$dir" >> "$HOME/.profile"
+  local shell="${SHELL:-}"
+  if [ "${shell##*/}" = fish ]; then
+    warn "Add $dir to fish's PATH: fish_add_path '$dir'"
+    return 0
+  fi
+  # shellcheck disable=SC2016  # Expand PATH when the shell starts.
+  if ! printf '\n# Added by the Kitaru installer\nexport PATH="%s:$PATH"\n' "$dir" >> "$HOME/.profile"; then
+    warn "Could not update ~/.profile. Add this to your shell: export PATH=\"$dir:\$PATH\""
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -237,7 +269,7 @@ for pkg in "${KITARU_WITH[@]:-}"; do [ -n "$pkg" ] && EXTRA_PKGS+=("$pkg"); done
 
 PROJECT_DIR="$PWD"
 if [ "$KITARU_SCOPE" = "auto" ]; then
-  if [ -f "$PROJECT_DIR/pyproject.toml" ] || [ -f "$PROJECT_DIR/uv.lock" ]; then
+  if [ -f "$PROJECT_DIR/pyproject.toml" ] || [ -f "$PROJECT_DIR/uv.lock" ] || [ -f "$PROJECT_DIR/Pipfile" ] || [ -f "$PROJECT_DIR/poetry.lock" ] || [ -f "$PROJECT_DIR/pdm.lock" ] || [ -f "$PROJECT_DIR/Pipfile.lock" ]; then
     KITARU_SCOPE=project
   else
     KITARU_SCOPE=global
@@ -250,19 +282,30 @@ if [ "$KITARU_SCOPE" = "project" ]; then
   # dependencies live. `uv add` puts kitaru into this project's environment
   # (creating .venv if needed) and records it in pyproject.toml.
   [ -f "$PROJECT_DIR/pyproject.toml" ] || die "--project needs a pyproject.toml in $PROJECT_DIR (run \`uv init\` first, or use --global)."
+  for foreign in poetry.lock pdm.lock Pipfile Pipfile.lock; do
+    [ ! -e "$PROJECT_DIR/$foreign" ] || die "Found $foreign. Add Kitaru with that project's package manager, or use --global for an isolated CLI."
+  done
+  if grep -Eq '^[[:space:]]*\[[[:space:]]*tool[[:space:]]*\.[[:space:]]*(poetry|pdm)[[:space:]]*(\.|\])' "$PROJECT_DIR/pyproject.toml"; then
+    die "Found Poetry/PDM project configuration. Add Kitaru with that package manager, or use --global for an isolated CLI."
+  fi
+  grep -Eq '^[[:space:]]*\[[[:space:]]*project[[:space:]]*\][[:space:]]*(#.*)?$' "$PROJECT_DIR/pyproject.toml" \
+    || die "pyproject.toml has no [project] metadata. Initialize a Python project first, or use --global for an isolated CLI."
   step "Installing $SPEC into this project ($PROJECT_DIR)"
-  UV_ADD=(add --quiet)
+  UV_ADD=(add --quiet --upgrade-package kitaru)
   [ "$KITARU_PRE" = "1" ] && UV_ADD+=(--prerelease allow)
   quiet "$UV" "${UV_ADD[@]}" "$SPEC" "${EXTRA_PKGS[@]:+${EXTRA_PKGS[@]}}" \
     || die "uv add failed (uv's message is above; Kitaru needs Python >= 3.11). To install outside this project instead: --global"
-  VENV_DIR="${UV_PROJECT_ENVIRONMENT:-$PROJECT_DIR/.venv}"
+  VENV_DIR="$("$UV" run --no-sync --offline --no-python-downloads python -c 'import sys; print(sys.prefix)')" \
+    || die "Could not locate the project environment after uv add. Re-run with --verbose."
+  case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) VENV_DIR="$(cygpath -u "$VENV_DIR")" ;; esac
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) TOOL_BIN="$VENV_DIR/Scripts" ;;
     *) TOOL_BIN="$VENV_DIR/bin" ;;
   esac
   KITARU_BIN="$TOOL_BIN/kitaru"
   [ -x "$KITARU_BIN" ] || [ -x "$KITARU_BIN.exe" ] || die "uv reported success but $KITARU_BIN is missing. Re-run with --verbose."
-  ok "kitaru $("$KITARU_BIN" --version 2>/dev/null) installed into this project's environment"
+  CLI_VERSION="$("$KITARU_BIN" --version)" || die "Kitaru was installed but its CLI could not start. See the error above and re-run with --verbose."
+  ok "$CLI_VERSION installed into this project's environment"
   note "environment: $VENV_DIR (recorded in pyproject.toml)"
   note "run it as: uv run kitaru ...   (or activate the environment)"
   # MCP: run through uv so the assistant gets this project's environment.
@@ -270,12 +313,17 @@ if [ "$KITARU_SCOPE" = "project" ]; then
   CLAUDE_SCOPE=project
 else
   # ---- isolated tool environment on PATH -----------------------------------
-  UV_ARGS=(tool install --upgrade --quiet --python "$KITARU_PYTHON")
-  [ "$KITARU_PRE" = "1" ] && UV_ARGS+=(--prerelease allow)
-  for pkg in "${EXTRA_PKGS[@]:+${EXTRA_PKGS[@]}}"; do UV_ARGS+=(--with "$pkg"); done
-
-  step "Installing $SPEC (isolated, on PATH)"
-  quiet "$UV" "${UV_ARGS[@]}" "$SPEC" || die "uv tool install failed. Re-run with --verbose for details."
+  TOOL_ROOT="$("$UV" tool dir)" || die "Could not locate uv's tool directory."
+  if [ -f "$TOOL_ROOT/kitaru/uv-receipt.toml" ] && [ -z "$KITARU_VERSION" ] && [ "$KITARU_PRE" != "1" ] && [ -z "$KITARU_PYTHON_EXPLICIT" ] && [ "${#EXTRA_PKGS[@]}" -eq 0 ]; then
+    step "Upgrading Kitaru (preserving installed Python and add-on packages)"
+    quiet "$UV" tool upgrade --quiet kitaru || die "uv tool upgrade failed. See uv's error above and re-run with --verbose."
+  else
+    UV_ARGS=(tool install --upgrade --quiet --python "$KITARU_PYTHON")
+    [ "$KITARU_PRE" = "1" ] && UV_ARGS+=(--prerelease allow)
+    for pkg in "${EXTRA_PKGS[@]:+${EXTRA_PKGS[@]}}"; do UV_ARGS+=(--with "$pkg"); done
+    step "Installing $SPEC (isolated, on PATH)"
+    quiet "$UV" "${UV_ARGS[@]}" "$SPEC" || die "uv tool install failed. If an unmanaged kitaru executable already exists, remove it with its original package manager or choose UV_TOOL_BIN_DIR; this installer will not overwrite it. Re-run with --verbose for details."
+  fi
 
   # uv puts tool executables in its tool bin dir; make sure future shells see it.
   TOOL_BIN="$("$UV" tool dir --bin 2>/dev/null || echo "$HOME/.local/bin")"
@@ -285,13 +333,14 @@ else
   if [ "$KITARU_NO_MODIFY_PATH" = "1" ]; then
     note "Not editing shell rc files (--no-modify-path). Make sure $TOOL_BIN is on your PATH."
   else
-    quiet "$UV" tool update-shell || true
+    quiet env PATH="$ORIG_PATH" "$UV" tool update-shell || true
     persist_path "$TOOL_BIN"
   fi
 
   KITARU_BIN="$TOOL_BIN/kitaru"
   [ -x "$KITARU_BIN" ] || [ -x "$KITARU_BIN.exe" ] || die "uv reported success but $KITARU_BIN is missing. Re-run with --verbose."
-  ok "kitaru $("$KITARU_BIN" --version 2>/dev/null) installed"
+  CLI_VERSION="$("$KITARU_BIN" --version)" || die "Kitaru was installed but its CLI could not start. See the error above and re-run with --verbose."
+  ok "$CLI_VERSION installed"
   note "isolated environment: $TOOL_ENV   (uv tool; no other Python touched)"
   note "commands: $TOOL_BIN/kitaru, $TOOL_BIN/kitaru-mcp"
   # Warn if a different kitaru was already reachable on the PATH the user
@@ -322,7 +371,11 @@ elif "$KITARU_BIN" schema setup >/dev/null 2>&1; then
   [ "$KITARU_SKIP_SKILLS" = "1" ] && SETUP_ARGS+=(--no-skills)
   [ "$KITARU_SKIP_MCP" = "1" ] && SETUP_ARGS+=(--no-mcp)
   SETUP_SERVER_ARGS=()
-  [ -n "$KITARU_SERVER" ] && SETUP_SERVER_ARGS=(--server "$KITARU_SERVER")
+  # Older releases with setup may predate the global output option.
+  if "$KITARU_BIN" --help 2>/dev/null | grep -q -- '--output'; then
+    SETUP_SERVER_ARGS+=(--output text)
+  fi
+  [ -n "$KITARU_SERVER" ] && SETUP_SERVER_ARGS+=(--server "$KITARU_SERVER")
   if [ "$KITARU_QUIET" = "1" ]; then
     quiet "$KITARU_BIN" "${SETUP_SERVER_ARGS[@]:+${SETUP_SERVER_ARGS[@]}}" setup "${SETUP_ARGS[@]}" || warn "kitaru setup failed; run it again later: $KITARU_BIN setup"
   else
@@ -335,62 +388,71 @@ if [ "$SETUP_DONE" = "0" ]; then
 # ---------------------------------------------------------------------------
 # 3a. Coding-agent skills (Kitaru releases without `kitaru setup`)
 # ---------------------------------------------------------------------------
-# Destinations: ~/.agents/skills is the cross-agent location; ~/.claude and
-# ~/.codex get their own copy when that CLI is installed or the dir exists.
+# Codex reads ~/.agents/skills directly; only Claude needs another copy.
 skill_destinations() {
   echo "$HOME/.agents/skills"
   if have claude || [ -d "$HOME/.claude" ]; then echo "$HOME/.claude/skills"; fi
-  if have codex || [ -d "$HOME/.codex" ]; then echo "$HOME/.codex/skills"; fi
 }
 
 install_skills() {
-  # Fetch the repository tarball (no git, no Node, no auth, nothing executed
-  # from the current directory) and copy every skill under skills/ into each
-  # destination. Every mutation is checked; a partial copy is a failure.
-  local tmp url src dest skill name
-  tmp="$(mktemp -d)" || return 1
-  url="https://github.com/${KITARU_SKILLS_REPO}/archive/refs/heads/main.tar.gz"
-  if ! fetch_to_stdout "$url" | tar -xzf - -C "$tmp" 2>/dev/null; then
-    rm -rf "$tmp"; return 1
-  fi
-  src="$(find "$tmp" -mindepth 2 -maxdepth 2 -type d -name skills | head -1)"
-  if [ -z "$src" ]; then rm -rf "$tmp"; return 1; fi
-  SKILL_NAMES=()
-  for skill in "$src"/*/; do
-    [ -f "$skill/SKILL.md" ] && SKILL_NAMES+=("$(basename "$skill")")
-  done
-  if [ "${#SKILL_NAMES[@]}" -eq 0 ]; then rm -rf "$tmp"; return 1; fi
-  SKILL_DESTS=()
-  while IFS= read -r dest; do SKILL_DESTS+=("$dest"); done < <(skill_destinations)
-  for dest in "${SKILL_DESTS[@]}"; do
-    mkdir -p "$dest" || { rm -rf "$tmp"; return 1; }
-    for name in "${SKILL_NAMES[@]}"; do
-      rm -rf "$dest/$name" || { rm -rf "$tmp"; return 1; }
-      cp -R "$src/$name" "$dest/$name" || { rm -rf "$tmp"; return 1; }
+  (
+    # Bash 3 clears function locals before EXIT; keep cleanup state in this subshell.
+    tmp=""; staging=""; target=""
+    SKILL_NAMES=(); SKILL_DESTS=()
+    # shellcheck disable=SC2329 # Invoked by the scoped EXIT trap.
+    cleanup_skills() {
+      trap '' INT TERM
+      if [ -n "$staging" ] && { [ -e "$staging/previous" ] || [ -L "$staging/previous" ]; }; then
+        if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+          mv "$staging/previous" "$target" || { warn "Previous skill remains at $staging/previous"; rm -rf "$tmp"; return; }
+        fi
+      fi
+      [ -z "$staging" ] || rm -rf "$staging"
+      [ -z "$tmp" ] || rm -rf "$tmp"
+    }
+    trap cleanup_skills EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    tmp="$(mktemp -d)" || exit 1
+    url="https://github.com/${KITARU_SKILLS_REPO}/archive/refs/heads/main.tar.gz"
+    fetch_to_stdout "$url" | tar -xzf - -C "$tmp" 2>/dev/null || exit 1
+    src="$(find "$tmp" -mindepth 2 -maxdepth 2 -type d -name skills | head -1)"
+    [ -n "$src" ] || exit 1
+    SKILL_NAMES=()
+    for skill in "$src"/*/; do
+      [ -f "$skill/SKILL.md" ] && SKILL_NAMES+=("$(basename "$skill")")
     done
-  done
-  rm -rf "$tmp"
-  skills_complete
+    [ "${#SKILL_NAMES[@]}" -gt 0 ] || exit 1
+    SKILL_DESTS=()
+    while IFS= read -r dest; do SKILL_DESTS+=("$dest"); done < <(skill_destinations)
+    for dest in "${SKILL_DESTS[@]}"; do
+      mkdir -p "$dest" || exit 1
+      for name in "${SKILL_NAMES[@]}"; do
+        target="$dest/$name"
+        staging="$(mktemp -d "$dest/.kitaru-skills.XXXXXX")" || exit 1
+        cp -R "$src/$name" "$staging/$name" || exit 1
+        if [ -e "$target" ] || [ -L "$target" ]; then
+          mv "$target" "$staging/previous" || exit 1
+        fi
+        mv "$staging/$name" "$target" || exit 1
+        rm -rf "$staging"
+        staging=""
+      done
+    done
+    for dest in "${SKILL_DESTS[@]}"; do
+      for name in "${SKILL_NAMES[@]}"; do
+        [ -f "$dest/$name/SKILL.md" ] || exit 1
+      done
+    done
+  )
 }
 
-# Postcondition: every skill from the tarball is present in every destination.
-skills_complete() {
-  local dest name
-  for dest in "${SKILL_DESTS[@]}"; do
-    for name in "${SKILL_NAMES[@]}"; do
-      [ -f "$dest/$name/SKILL.md" ] || return 1
-    done
-  done
-  return 0
-}
-
-SKILL_NAMES=(); SKILL_DESTS=()
 if [ "$KITARU_SKIP_SKILLS" = "1" ]; then
   note "Skipping skills (--no-skills)"
 else
   step "Installing Kitaru agent skills ($KITARU_SKILLS_REPO)"
   if install_skills; then
-    ok "${#SKILL_NAMES[@]} skills installed into ${SKILL_DESTS[*]}"
+    ok "Skills installed into ~/.agents/skills and detected Claude Code directories"
   else
     warn "Could not install skills. Later: npx skills add $KITARU_SKILLS_REPO"
   fi
@@ -452,24 +514,25 @@ fi  # SETUP_DONE
 say ""
 say "${C_GREEN}◆${C_RESET} ${C_BOLD}Kitaru is installed.${C_RESET}"
 say ""
-# In project mode kitaru is not on PATH; every command goes through uv run.
-# In global mode the tool dir may not be on this shell's PATH yet; `uvx kitaru`
-# (uv tool run) reuses the environment just installed, so the printed commands
-# work right now instead of after a new terminal.
+# Print the PATH export needed by the first word of the suggested commands.
 if [ "$KITARU_SCOPE" = "project" ]; then
-  K="uv run kitaru"
-elif [ "$(PATH="$ORIG_PATH" command -v kitaru 2>/dev/null || true)" != "$KITARU_BIN" ]; then
-  K="uvx kitaru"
-else
-  K="kitaru"
-fi
-if [ "$KITARU_SCOPE" = "project" ]; then
+  K="uv run kitaru"; NEEDED_DIR="$(dirname "$UV")"
+  case "$(PATH="$ORIG_PATH" command -v uv 2>/dev/null || true)" in
+    "$UV"|"$UV.exe") NEEDED_DIR="" ;;
+  esac
   say "  Installed into this project's environment, so run it as ${C_BOLD}uv run kitaru ...${C_RESET}"
   say "  (or activate $VENV_DIR)."
   say ""
-elif [ "$K" = "uvx kitaru" ]; then
-  say "  'kitaru' is not on this shell's PATH yet. Run it as ${C_BOLD}uvx kitaru ...${C_RESET} for now;"
-  say "  a new terminal will have plain 'kitaru'."
+else
+  K="kitaru"; NEEDED_DIR="$TOOL_BIN"
+  case "$(PATH="$ORIG_PATH" command -v kitaru 2>/dev/null || true)" in
+    "$KITARU_BIN"|"$KITARU_BIN.exe") NEEDED_DIR="" ;;
+  esac
+fi
+if [ -n "$NEEDED_DIR" ]; then
+  case "$NEEDED_DIR" in "$HOME"/*) NEEDED_DIR="\$HOME${NEEDED_DIR#"$HOME"}" ;; esac
+  say "  '${K%% *}' is not on this shell's PATH yet. Run:"
+  say "    ${C_BOLD}export PATH=\"$NEEDED_DIR:\$PATH\"${C_RESET}"
   say ""
 fi
 if [ -n "$KITARU_SERVER" ]; then

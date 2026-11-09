@@ -302,6 +302,9 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
             "/0/parts/3/content"
           ],
           "inputs": {
@@ -727,6 +730,9 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
             "/0/parts/3/content"
           ],
           "inputs": {
@@ -1153,6 +1159,7 @@
           "output_text_selector": "/0/parts/2/arguments/customer_reply",
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
             "/0/parts/1/content"
           ],
           "inputs": {
@@ -1844,6 +1851,10 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
+            "/0/parts/3/content",
             "/0/parts/4/content"
           ],
           "inputs": {
@@ -2203,6 +2214,10 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
+            "/0/parts/3/content",
             "/0/parts/4/content"
           ],
           "inputs": {
@@ -2612,6 +2627,7 @@
           "output_text_selector": "/0/parts/2/arguments/customer_reply",
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
             "/0/parts/1/content"
           ],
           "inputs": {
@@ -3302,6 +3318,7 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
             "/0/parts/1/content"
           ],
           "inputs": {
@@ -3719,6 +3736,10 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
+            "/0/parts/3/content",
             "/0/parts/4/content"
           ],
           "inputs": {
@@ -4141,6 +4162,8 @@
           "output_text_selector": "/0/parts/3/arguments/customer_reply",
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
             "/0/parts/2/content"
           ],
           "inputs": {
@@ -5254,6 +5277,10 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
+            "/0/parts/3/content",
             "/0/parts/4/content"
           ],
           "inputs": {
@@ -5672,6 +5699,8 @@
           "output_text_selector": "/0/parts/3/arguments/customer_reply",
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
             "/0/parts/2/content"
           ],
           "inputs": {
@@ -6341,6 +6370,10 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
+            "/0/parts/3/content",
             "/0/parts/4/content"
           ],
           "inputs": {
@@ -7851,6 +7884,9 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
             "/0/parts/3/content"
           ],
           "inputs": {
@@ -8206,6 +8242,8 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
             "/0/parts/2/content"
           ],
           "inputs": {
@@ -8600,6 +8638,7 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
             "/0/parts/1/content"
           ],
           "inputs": {
@@ -9102,6 +9141,9 @@
           "output_text_selector": "/0/parts/4/arguments/customer_reply",
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
             "/0/parts/3/content"
           ],
           "inputs": {
@@ -9854,6 +9896,9 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
             "/0/parts/3/content"
           ],
           "inputs": {
@@ -10274,6 +10319,10 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
+            "/0/parts/3/content",
             "/0/parts/4/content"
           ],
           "inputs": {
@@ -10699,6 +10748,9 @@
           "output_text_selector": "/0/parts/4/arguments/customer_reply",
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
             "/0/parts/3/content"
           ],
           "inputs": {
@@ -11385,6 +11437,7 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
             "/0/parts/1/content"
           ],
           "inputs": {
@@ -11732,6 +11785,10 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
+            "/0/parts/3/content",
             "/0/parts/4/content"
           ],
           "inputs": {
@@ -12129,6 +12186,7 @@
           "output_text_selector": "/0/parts/2/arguments/customer_reply",
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
             "/0/parts/1/content"
           ],
           "inputs": {
@@ -12822,6 +12880,7 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
             "/0/parts/1/content"
           ],
           "inputs": {
@@ -13169,6 +13228,7 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
             "/0/parts/1/content"
           ],
           "inputs": {
@@ -13558,6 +13618,7 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
             "/0/parts/1/content"
           ],
           "inputs": {
@@ -13987,6 +14048,10 @@
           "output_text_selector": "/0/parts/5/arguments/customer_reply",
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
+            "/0/parts/3/content",
             "/0/parts/4/content"
           ],
           "inputs": {
@@ -14766,6 +14831,10 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
+            "/0/parts/3/content",
             "/0/parts/4/content"
           ],
           "inputs": {
@@ -15181,6 +15250,9 @@
           "output_text_selector": null,
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
+            "/0/parts/1/content",
+            "/0/parts/2/content",
             "/0/parts/3/content"
           ],
           "inputs": {
@@ -16158,6 +16230,7 @@
           "output_text_selector": "/0/parts/2/arguments/customer_reply",
           "system_prompt_selector": "/messages/0/content",
           "reasoning_selectors": [
+            "/0/parts/0/content",
             "/0/parts/1/content"
           ],
           "inputs": {

@@ -15,12 +15,11 @@
 
 import uuid
 from collections.abc import Sequence
-from decimal import Decimal
 
 from sqlalchemy import Select, case, func, select
 from sqlalchemy.orm import defer
 
-from kitaru.api_models.v1.session import SessionOrigin
+from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.server.adapters.db.filtering import compile_filter_expression
 from kitaru.server.adapters.db.orm.cohort_version_session import (
@@ -34,7 +33,7 @@ from kitaru.server.adapters.db.orm.session_node import (
 from kitaru.server.adapters.db.pagination import StartOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session_node import SessionNodeFilter
-from kitaru.server.domain.session import SessionNotFound
+from kitaru.server.domain.session import SessionNotFound, SessionUsage
 from kitaru.server.domain.session_node import SessionNode
 
 RECORDED_HISTORY_ORIGINS = [SessionOrigin.RECORDED.value, SessionOrigin.IMPORTED.value]
@@ -55,24 +54,53 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
 
     orm_class = SessionNodeORM
 
-    async def get_cost(self, session_id: uuid.UUID) -> Decimal | None:
-        """Sum recorded node costs unless any LLM call is unpriced.
+    async def get_usage(self, session_id: uuid.UUID) -> SessionUsage:
+        """Sum recorded usage, preserving incomplete LLM measurements.
 
         Args:
             session_id: Id of the owning session.
 
         Returns:
-            Total cost, or ``None`` when any LLM call is unpriced or no
-            node has a recorded cost.
+            Cost and per-field token totals, with incomplete measurements unknown.
         """
         unpriced_llm_calls = func.count().filter(
             SessionNodeORM.node_type == NodeType.LLM_CALL.value,
             SessionNodeORM.cost.is_(None),
         )
         statement = select(
-            case((unpriced_llm_calls > 0, None), else_=func.sum(SessionNodeORM.cost))
+            case(
+                (unpriced_llm_calls > 0, None), else_=func.sum(SessionNodeORM.cost)
+            ).label("cost"),
+            *(
+                case(
+                    (
+                        func.count().filter(
+                            SessionNodeORM.node_type == NodeType.LLM_CALL.value,
+                            column.is_(None),
+                        )
+                        > 0,
+                        None,
+                    ),
+                    else_=func.sum(column),
+                ).label(column.key)
+                for column in (
+                    SessionNodeORM.input_tokens,
+                    SessionNodeORM.output_tokens,
+                    SessionNodeORM.cached_input_tokens,
+                    SessionNodeORM.reasoning_tokens,
+                )
+            ),
         ).where(SessionNodeORM.session_id == session_id)
-        return await self._session.scalar(statement)
+        row = (await self._session.execute(statement)).one()
+        return SessionUsage(
+            cost=row.cost,
+            tokens=TokenUsage(
+                input_tokens=row.input_tokens,
+                output_tokens=row.output_tokens,
+                cached_input_tokens=row.cached_input_tokens,
+                reasoning_tokens=row.reasoning_tokens,
+            ),
+        )
 
     async def get_by_external_ids(
         self,

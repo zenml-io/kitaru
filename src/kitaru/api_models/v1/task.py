@@ -304,6 +304,10 @@ class TaskSpecResponse(ResponseModel):
     secret_env: dict[str, str] = Field(
         description="Secrets merged into the process environment."
     )
+    unset_env: list[str] = Field(
+        default_factory=list,
+        description="Inherited variables removed before the spec's values apply.",
+    )
     hooks: list[TaskHook] = Field(
         default_factory=list, description="Hooks run around the task process."
     )

@@ -27,7 +27,7 @@ from kitaru.api_models.v1.session import (
     SessionOrigin,
     SessionStatus,
 )
-from kitaru.api_models.v1.session_node import NodeType, SessionNodeBatchRequest
+from kitaru.api_models.v1.session_node import NodeType, SessionIngestRequest
 from kitaru.task.importer import ImportedSession
 from kitaru_langfuse_importer.adapter import LangfuseAdapter
 from kitaru_langfuse_importer.importer import parse
@@ -48,17 +48,15 @@ class _FakeSessionsResource:
     def __init__(self) -> None:
         self.session_id = uuid.uuid4()
         self.created: list[SessionCreateRequest] = []
-        self.batches: list[SessionNodeBatchRequest] = []
+        self.ingested: list[SessionIngestRequest] = []
 
     async def create(self, request: SessionCreateRequest) -> Any:
         self.created.append(request)
         return SimpleNamespace(id=self.session_id)
 
-    async def ingest_nodes(
-        self, session_id: uuid.UUID, batch: SessionNodeBatchRequest
-    ) -> list[Any]:
-        self.batches.append(batch)
-        return []
+    async def ingest(self, request: SessionIngestRequest) -> Any:
+        self.ingested.append(request)
+        return SimpleNamespace(id=self.session_id)
 
 
 class _FakeClient:
@@ -107,15 +105,15 @@ def test_run_imports_the_langfuse_trace_around_the_function(
     ]
     trace_id = fake_langfuse.trace_contexts[0]["trace_id"]
     assert fake_langfuse.requested == [trace_id, trace_id]
-    assert len(client.sessions.created) == 1
-    request = client.sessions.created[0]
+    assert client.sessions.created == []
+    assert len(client.sessions.ingested) == 1
+    request = client.sessions.ingested[0].session
     assert request.agent_id is None
     assert request.origin == SessionOrigin.RECORDED
     assert request.status == SessionStatus.COMPLETED
     assert request.external_id == f"project-1:{trace_id}"
     assert request.imported_from == "langfuse"
-    assert len(client.sessions.batches) == 1
-    nodes = client.sessions.batches[0].nodes
+    nodes = client.sessions.ingested[0].nodes
     assert [node.name for node in nodes] == ["obs-root", "obs-llm"]
     assert nodes[0].parent_external_id is None
     assert nodes[1].parent_external_id == nodes[0].external_id
@@ -298,5 +296,5 @@ async def test_poll_timeout_keeps_existing_failed_session_behavior(
     assert request.inputs is None
     assert request.error == "Provider trace did not complete within 0.01 seconds"
     assert request.metadata == {"external_id": "trace"}
-    assert not client.sessions.batches
+    assert not client.sessions.ingested
     assert "trace" not in adapter._completed_traces

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+## 0.4.0 - 2026-11-03
+
+- Add the `kitaru/openai-session-findings` analyzer, which reads imported sessions, writes each problem it notices as a yes/no check, verifies every check on every session with the OpenAI Decisions API, and stores one insight per verified finding with its session count, harm, example, and session IDs. It sends session content to OpenAI and accepts optional `context`, `model`, and `decisions_model` parameters.
+- Require `openai` 3.37 or later for the `openai` extra, the first release with the current Decisions API types.
+
+## 0.3.0 - 2026-11-02
+
+- Suppress uniform distribution and single-model inventory cards so analyses can return no findings instead of promoting an uninformative recommendation.
+- Exclude missing or unsupported assistant outputs from tool-request counts and retain incomplete tool-activity coverage even when no card is generated.
+- Fetch up to three sessions ahead while the current one is profiled, so post-import analysis waits on the server far less. Sessions are still profiled in import order and the first failure in that order is still the one reported, but up to four full sessions are now held in memory at once instead of one.
+- Measure the JSON size of payload strings with the standard library encoder instead of a per-character loop, roughly halving profiling CPU without changing any result.
+- Require Kitaru 0.27.0 or later, which provides the ordered bounded fetching the analyzer now uses.
+
 ## 0.2.0 - 2026-10-30
 
 - Count explicit tool requests in LLM output messages when a session has no separate tool nodes, label the fallback as requests, and exclude incomplete request scans from the distribution.

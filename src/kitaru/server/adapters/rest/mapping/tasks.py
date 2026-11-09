@@ -231,6 +231,7 @@ def spec_to_response(spec: TaskSpec) -> TaskSpecResponse:
         ),
         env=spec.env,
         secret_env=spec.secret_env,
+        unset_env=spec.unset_env,
         hooks=[hook_to_response(hook) for hook in spec.hooks],
         details=_details_to_response(spec),
     )

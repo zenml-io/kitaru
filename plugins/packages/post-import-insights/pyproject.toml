@@ -1,6 +1,6 @@
 [project]
 name = "kitaru-post-import-insights"
-version = "0.2.0"
+version = "0.4.0"
 description = "Post-import session insights for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"
@@ -23,11 +23,11 @@ classifiers = [
 ]
 keywords = ["ai-agents", "insights", "kitaru", "llm", "analysis"]
 dependencies = [
-    "kitaru>=0.26.0",
+    "kitaru>=0.27.0",
 ]
 
 [project.optional-dependencies]
-openai = ["openai>=2.15,<4"]
+openai = ["openai>=3.37,<4"]
 
 [project.urls]
 Homepage = "https://kitaru.ai"

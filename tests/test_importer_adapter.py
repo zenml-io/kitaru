@@ -15,7 +15,7 @@
 
 import asyncio
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
@@ -40,7 +40,7 @@ from kitaru.api_models.v1.session import (
     SessionStatus,
 )
 from kitaru.api_models.v1.session_node import (
-    SessionNodeBatchRequest,
+    SessionIngestRequest,
 )
 from kitaru.client.exceptions import APIError
 from kitaru.importer_adapter import ImporterBackedAdapter
@@ -78,23 +78,18 @@ class _FakeSessionsResource:
     def __init__(self) -> None:
         self.session_id = uuid.uuid4()
         self.created: list[SessionCreateRequest] = []
-        self.batches: list[SessionNodeBatchRequest] = []
-        self.create_error: APIError | None = None
+        self.ingested: list[SessionIngestRequest] = []
         self.ingest_error: APIError | None = None
 
     async def create(self, request: SessionCreateRequest) -> Any:
-        if self.create_error is not None:
-            raise self.create_error
         self.created.append(request)
         return SimpleNamespace(id=self.session_id)
 
-    async def ingest_nodes(
-        self, session_id: uuid.UUID, batch: SessionNodeBatchRequest
-    ) -> list[Any]:
+    async def ingest(self, request: SessionIngestRequest) -> Any:
         if self.ingest_error is not None:
             raise self.ingest_error
-        self.batches.append(batch)
-        return []
+        self.ingested.append(request)
+        return SimpleNamespace(id=self.session_id)
 
 
 class _FakeReplaysResource:
@@ -138,7 +133,7 @@ class _FakeAdapter(ImporterBackedAdapter):
         self.fetch_error: Exception | None = None
 
     @contextmanager
-    def open_trace(self) -> Iterator[str]:
+    def open_trace(self) -> Generator[str]:
         self.events.append("trace-enter")
         try:
             yield "trace-1"
@@ -204,14 +199,14 @@ def test_run_imports_the_trace_around_the_function(
         "wait:trace-1",
         "fetch:trace-1",
     ]
-    assert len(client.sessions.created) == 1
-    request = client.sessions.created[0]
+    assert len(client.sessions.ingested) == 1
+    request = client.sessions.ingested[0].session
     assert request.agent_id is None
     assert request.origin == SessionOrigin.RECORDED
     assert request.external_id == "trace-1"
     assert request.imported_from == "acme"
-    assert len(client.sessions.batches) == 1
-    assert client.sessions.batches[0].nodes[0].name == "call-1"
+    assert client.sessions.ingested[0].nodes[0].name == "call-1"
+    assert client.sessions.created == []
 
 
 async def test_run_async_imports_the_trace_around_the_function(
@@ -234,8 +229,8 @@ async def test_run_async_imports_the_trace_around_the_function(
         "wait:trace-1",
         "fetch:trace-1",
     ]
-    assert len(client.sessions.created) == 1
-    assert len(client.sessions.batches) == 1
+    assert len(client.sessions.ingested) == 1
+    assert [node.name for node in client.sessions.ingested[0].nodes] == ["call-1"]
 
 
 def test_run_imports_the_trace_of_a_raising_function(
@@ -258,8 +253,8 @@ def test_run_imports_the_trace_of_a_raising_function(
         "wait:trace-1",
         "fetch:trace-1",
     ]
-    assert len(client.sessions.created) == 1
-    assert len(client.sessions.batches) == 1
+    assert len(client.sessions.ingested) == 1
+    assert [node.name for node in client.sessions.ingested[0].nodes] == ["call-1"]
 
 
 def test_run_preserves_the_function_error_when_importing_fails(
@@ -296,7 +291,7 @@ async def test_run_async_imports_the_trace_of_a_raising_function(
         "wait:trace-1",
         "fetch:trace-1",
     ]
-    assert len(client.sessions.created) == 1
+    assert len(client.sessions.ingested) == 1
 
 
 async def test_run_async_preserves_the_function_error_when_importing_fails(
@@ -321,6 +316,7 @@ def test_run_rejects_a_parse_without_sessions(monkeypatch: pytest.MonkeyPatch) -
         adapter.run(lambda: None)
 
     assert client.sessions.created == []
+    assert client.sessions.ingested == []
 
 
 def test_run_rejects_a_parse_with_several_sessions(
@@ -333,6 +329,7 @@ def test_run_rejects_a_parse_with_several_sessions(
         adapter.run(lambda: None)
 
     assert client.sessions.created == []
+    assert client.sessions.ingested == []
 
 
 def test_run_rejects_a_parse_with_a_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -343,6 +340,7 @@ def test_run_rejects_a_parse_with_a_failure(monkeypatch: pytest.MonkeyPatch) -> 
         adapter.run(lambda: None)
 
     assert client.sessions.created == []
+    assert client.sessions.ingested == []
 
 
 def test_run_creates_a_failed_session_on_timeout(
@@ -367,7 +365,7 @@ def test_run_creates_a_failed_session_on_timeout(
     assert request.imported_from == "acme"
     assert request.error is not None
     assert "did not complete" in request.error
-    assert client.sessions.batches == []
+    assert client.sessions.ingested == []
 
 
 def test_run_creates_a_failed_session_on_hook_timeout(
@@ -396,6 +394,7 @@ def test_run_raises_a_fetch_error_after_the_function(
 
     assert "func" in adapter.events
     assert client.sessions.created == []
+    assert client.sessions.ingested == []
 
 
 def test_run_raises_an_ingest_error_after_the_function(
@@ -411,16 +410,16 @@ def test_run_raises_an_ingest_error_after_the_function(
         adapter.run(lambda: adapter.events.append("func"))
 
     assert "func" in adapter.events
-    assert len(client.sessions.created) == 1
-    assert client.sessions.batches == []
+    assert client.sessions.created == []
+    assert client.sessions.ingested == []
 
 
-def test_run_raises_a_create_error_after_the_function(
+def test_run_raises_a_service_error_after_the_function(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Raise the session create error after the function has completed."""
+    """Raise the atomic ingest service error after the function has completed."""
     adapter, client = _adapter(monkeypatch, _single_session_parser)
-    client.sessions.create_error = APIError(
+    client.sessions.ingest_error = APIError(
         httpx.codes.SERVICE_UNAVAILABLE, "backend unavailable"
     )
 
@@ -428,7 +427,7 @@ def test_run_raises_a_create_error_after_the_function(
         adapter.run(lambda: adapter.events.append("func"))
 
     assert "func" in adapter.events
-    assert client.sessions.batches == []
+    assert client.sessions.ingested == []
 
 
 def test_run_rejects_an_already_imported_trace(
@@ -436,13 +435,13 @@ def test_run_rejects_an_already_imported_trace(
 ) -> None:
     """Raise SessionImportError when the session external id already exists."""
     adapter, client = _adapter(monkeypatch, _single_session_parser)
-    client.sessions.create_error = APIError(httpx.codes.CONFLICT, "conflict")
+    client.sessions.ingest_error = APIError(httpx.codes.CONFLICT, "conflict")
 
     with pytest.raises(SessionImportError, match="already exists"):
         adapter.run(lambda: adapter.events.append("func"))
 
     assert "func" in adapter.events
-    assert client.sessions.batches == []
+    assert client.sessions.ingested == []
 
 
 def test_run_rejects_a_replay_with_an_override(
@@ -458,6 +457,7 @@ def test_run_rejects_a_replay_with_an_override(
     assert client.replays.requested == [replay_id]
     assert adapter.events == []
     assert client.sessions.created == []
+    assert client.sessions.ingested == []
 
 
 def test_run_rejects_a_replay_with_a_default_tool_policy(
@@ -480,6 +480,7 @@ def test_run_rejects_a_replay_with_a_default_tool_policy(
 
     assert adapter.events == []
     assert client.sessions.created == []
+    assert client.sessions.ingested == []
 
 
 def test_run_rejects_a_replay_with_a_named_tool_policy(
@@ -505,6 +506,7 @@ def test_run_rejects_a_replay_with_a_named_tool_policy(
 
     assert adapter.events == []
     assert client.sessions.created == []
+    assert client.sessions.ingested == []
 
 
 def test_run_proceeds_with_a_passthrough_replay(
@@ -517,11 +519,12 @@ def test_run_proceeds_with_a_passthrough_replay(
     result = adapter.run(lambda: "done")
 
     assert result == "done"
-    assert len(client.sessions.created) == 1
-    request = client.sessions.created[0]
+    assert len(client.sessions.ingested) == 1
+    request = client.sessions.ingested[0].session
     assert request.origin == SessionOrigin.REPLAY
     assert request.imported_from == "acme"
-    assert len(client.sessions.batches) == 1
+    assert [node.name for node in client.sessions.ingested[0].nodes] == ["call-1"]
+    assert client.sessions.created == []
 
 
 def test_run_creates_a_replay_origin_session_on_timeout(
@@ -558,3 +561,4 @@ async def test_run_async_rejects_a_replay_with_an_override(
 
     assert adapter.events == []
     assert client.sessions.created == []
+    assert client.sessions.ingested == []

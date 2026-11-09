@@ -102,6 +102,7 @@ def test_route_manifest_is_registered() -> None:
         "/api/v1/service-accounts/{account_id}",
         "/api/v1/session-runs",
         "/api/v1/sessions",
+        "/api/v1/sessions/ingest",
         "/api/v1/sessions/{session_id}",
         "/api/v1/sessions/{session_id}/evaluations",
         "/api/v1/sessions/{session_id}/full",

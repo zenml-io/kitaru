@@ -27,7 +27,11 @@ from kitaru.api_models.v1.base import (
     ResponseModel,
 )
 from kitaru.api_models.v1.filter import FilterableListParams
-from kitaru.api_models.v1.session import SessionDetailResponse, TokenUsage
+from kitaru.api_models.v1.session import (
+    SessionCreateRequest,
+    SessionDetailResponse,
+    TokenUsage,
+)
 from kitaru.json_pointer import resolve_json_pointer
 
 
@@ -125,7 +129,7 @@ class SessionNodeCreateRequest(RequestModel):
 class SessionNodeListParams(FilterableListParams):
     """Session node list params."""
 
-    sort: Literal["position:asc"] = Field(
+    sort: Literal["position:asc"] = Field(  # ty: ignore[invalid-mutable-override]
         default="position:asc",
         description="Nodes are ordered by start time, then insertion.",
     )
@@ -169,6 +173,15 @@ class SessionNodeBatchRequest(RequestModel):
                 raise ValueError("node external ids must be unique within a batch")
             seen.add(node.external_id)
         return self
+
+
+class SessionIngestRequest(SessionNodeBatchRequest):
+    """Session creation with all initial nodes in one transaction."""
+
+    session: SessionCreateRequest = Field(description="Session to create.")
+    nodes: list[SessionNodeCreateRequest] = Field(
+        description="Complete initial nodes, in any order.",
+    )
 
 
 class SessionNodeResponse(ResponseModel):

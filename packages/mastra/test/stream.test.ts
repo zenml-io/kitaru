@@ -151,12 +151,15 @@ describe("KitaruAgent.stream", () => {
       outputs: { finish_reason: "stop", step_count: 1, text: "hello world" },
       status: "completed",
     });
-    expect(
-      api
-        .nodeBatches()
-        .flat()
-        .filter((node) => node.node_type === "llm_call"),
-    ).toHaveLength(1);
+    const modelNodes = api
+      .nodeBatches()
+      .flat()
+      .filter((node) => node.node_type === "llm_call");
+    expect(modelNodes).toHaveLength(1);
+    expect(modelNodes[0]).toMatchObject({
+      output_text_selector: "/text",
+      outputs: { text: "hello world" },
+    });
   });
 
   it("delivers the first native chunk while generation and terminal recording are blocked", async () => {

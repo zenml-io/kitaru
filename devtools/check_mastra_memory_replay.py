@@ -525,7 +525,7 @@ async def check(output: Path) -> None:
             replay = await client.replays.create(
                 ReplayCreateRequest(
                     baseline_session_id=baseline.id,
-                    override=ReplayOverride(**OVERRIDE),
+                    override=ReplayOverride.model_validate(OVERRIDE),
                     tool_policy=ToolPolicy.model_validate(POLICY),
                     evaluators=[config],
                 )
@@ -584,7 +584,7 @@ async def check(output: Path) -> None:
                     ReplayCreateRequest(
                         baseline_session_id=broken.id,
                         evaluators=[config],
-                        override=ReplayOverride(**OVERRIDE),
+                        override=ReplayOverride.model_validate(OVERRIDE),
                     )
                 )
             except APIError as error:

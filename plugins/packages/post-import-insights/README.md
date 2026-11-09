@@ -1,11 +1,12 @@
 # Kitaru post-import insights
 
-Generate evidence-backed insight cards from imported Kitaru sessions. This distribution provides two independently selectable analyzers. Both profile every selected session and build deterministic candidates; the OpenAI analyzer then uses bounded analyst and editor calls to select candidates and write their descriptions.
+Generate evidence-backed insight cards from imported Kitaru sessions. This distribution provides three independently selectable analyzers. The first two profile every selected session and build deterministic candidates; the OpenAI analyzer then uses bounded analyst and editor calls to select candidates and write their descriptions. The session findings analyzer instead sends the sessions themselves to OpenAI: a reader writes each problem it notices as a yes/no check, the Decisions API verifies every check on every session, and a merge step groups the verified checks into findings.
 
 | Catalog name | Entrypoint in `kitaru_post_import_insights.analyzer` | Required configuration |
 |---|---|---|
 | `kitaru/post-import-insights` | `analyze_post_import_sessions` | None |
 | `kitaru/openai-post-import-insights` | `analyze_openai_post_import_sessions` | OpenAI connection supplying `OPENAI_API_KEY`; defaults to `gpt-5.6-luna` with low reasoning effort and accepts an optional `model` override |
+| `kitaru/openai-session-findings` | `analyze_session_findings` in `kitaru_post_import_insights.session_findings` | OpenAI connection supplying `OPENAI_API_KEY` with Decisions API access; accepts optional `context`, `model` (default `gpt-5.6-luna`), and `decisions_model` (default `gpt-6-luna`) |
 
 Both entrypoints accept a list of session UUIDs for one agent and import, fetch each session with its nodes through `KitaruAPIClient`, and return `list[InsightInput]` for the task runner to persist. Each fetched trace is processed and released before the next fetch. Select either analyzer or both for an import. Each invocation persists its own cards; matching candidate names do not replace another analyzer's results.
 
@@ -17,9 +18,11 @@ Install `kitaru-post-import-insights` for deterministic analysis, or `kitaru-pos
 
 Language cards detect literal markers in selected text. A recorded `user` role does not prove that text came from a customer: some harnesses put agent policy in user-role messages. Importers that know the customer input should set `input_text_selector` on both the session and each relevant LLM node. For example, `/messages/1/content` selects the second message's content in a `messages` array. Choose selectors for the actual trace structure and preserve later customer turns; setting only the session selector leaves node input histories available to the profiler.
 
-Tool activity counts separate tool nodes when present in a session. Otherwise, it counts explicit `tool_call` parts in assistant output messages, accepting a message, a message list, or a `messages` container. When this fallback contributes requests, the distribution is labeled as requests and states that execution is unverified. Input histories are not counted, and incomplete request scans are excluded. Tool error, retry, and result analysis still requires separate tool nodes.
+Tool activity counts separate tool nodes when present in a session. Otherwise, it counts explicit `tool_call` parts in assistant output messages, accepting a message, a message list, or a `messages` container. When this fallback contributes requests, the distribution is labeled as requests and states that execution is unverified. Input histories are not counted, and missing, unsupported, or incompletely inspected request payloads are excluded with a coverage caveat. Zero counts mean no recorded requests, not proof of no tool use. Tool error, retry, and result analysis still requires separate tool nodes.
 
-The model-mix card counts recorded model identifiers. It prefers the served model field and falls back to the requested model field; different identifiers can refer to the same model.
+The model-mix card requires multiple recorded model identifiers. It prefers the served model field and falls back to the requested model field; different identifiers can refer to the same model.
+
+Uniform activity and duration distributions are not insight candidates by themselves. Concrete findings such as failures and retries remain eligible even when every session exhibits them. When no candidates qualify, either analyzer returns no cards.
 
 ## Release context
 

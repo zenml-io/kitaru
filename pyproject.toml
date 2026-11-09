@@ -1,7 +1,7 @@
 [project]
 name = "kitaru"
-version = "0.27.3+dev"
-description = "Record, replay, and improve AI agents in production."
+version = "0.27.6+dev"
+description = "Insights, checks, and tested fixes from your AI agent's traces."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
@@ -101,7 +101,7 @@ Documentation = "https://docs.zenml.io/kitaru"
 Repository = "https://github.com/zenml-io/kitaru"
 
 [build-system]
-requires = ["hatchling==1.32.4"]
+requires = ["hatchling==1.33.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]
@@ -228,7 +228,7 @@ known-first-party = [
 ]
 
 [tool.ty.src]
-include = ["src/**/*.py", "scripts/**/*.py", "tests/**/*.py", "examples/**/*.py"]
+include = ["src/**/*.py", "scripts/**/*.py", "tests/**/*.py", "examples/**/*.py", "devtools/**/*.py"]
 # Exclude the Python adapter examples: they import plugin packages (kitaru-langgraph,
 # kitaru-openai-agents) from the separate plugins workspace, which are not installed
 # in the root environment. The TypeScript examples' Python drivers import only kitaru
@@ -237,7 +237,7 @@ exclude = ["examples/python/**"]
 
 [tool.ty.environment]
 python-version = "3.11"
-root = [".", "src", "scripts", "tests"]
+root = [".", "src", "scripts", "tests", "devtools"]
 
 [tool.ty.rules]
 missing-type-argument = "error"
