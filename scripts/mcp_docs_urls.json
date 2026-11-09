@@ -33,6 +33,7 @@
   "guides/llm-calls.md": "https://docs.zenml.io/kitaru/guides/llm-calls",
   "getting-started/import-your-traces.md": "https://docs.zenml.io/kitaru/import-your-traces/import-your-traces",
   "guides/post-import-insights.md": "https://docs.zenml.io/kitaru/import-your-traces/post-import-insights",
+  "guides/model-swap.md": "https://docs.zenml.io/kitaru/import-your-traces/model-swap",
   "guides/import-langfuse-traces.md": "https://docs.zenml.io/kitaru/import-your-traces/import-langfuse-traces",
   "guides/import-langsmith-traces.md": "https://docs.zenml.io/kitaru/import-your-traces/import-langsmith-traces",
   "guides/import-braintrust-traces.md": "https://docs.zenml.io/kitaru/import-your-traces/import-braintrust-traces",

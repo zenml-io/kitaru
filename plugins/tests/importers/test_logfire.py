@@ -23,7 +23,11 @@ from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportedNode, ImportedSession
-from kitaru_logfire_importer.importer import LogfireRecordsImporter, importer
+from kitaru_logfire_importer.importer import (
+    TOOL_DEFINITIONS_METADATA_KEY,
+    LogfireRecordsImporter,
+    importer,
+)
 from kitaru_logfire_importer.importer import parse as unified_parse
 
 
@@ -119,7 +123,7 @@ def test_maps_trace_corpus_genai_spans() -> None:
                 "gen_ai.usage.input_tokens": 507,
                 "gen_ai.usage.output_tokens": 77,
                 "operation.cost": 0.000892,
-                "model_request_parameters": {"temperature": 0},
+                "model_settings": {"temperature": 0},
             },
         ),
         row(
@@ -567,3 +571,165 @@ def test_missing_project_identity_isolates_trace() -> None:
     parsed = parse(jsonl(row("bad", project_id=None), row("good", trace_id="trace-2")))
     assert sum(isinstance(item, ImportedSession) for item in parsed) == 1
     assert sum(isinstance(item, ImportFailure) for item in parsed) == 1
+
+
+LOOKUP_ORDER_SCHEMA = {
+    "additionalProperties": False,
+    "properties": {"order_id": {"type": "string"}},
+    "required": ["order_id"],
+    "type": "object",
+}
+FINAL_RESULT_SCHEMA = {
+    "additionalProperties": False,
+    "properties": {"customer_reply": {"type": "string"}},
+    "required": ["customer_reply"],
+    "type": "object",
+}
+
+
+def _llm_node(attributes: dict[str, Any]) -> ImportedNode:
+    """Import one chat span under a root span and return its node."""
+    [session] = parse(
+        jsonl(
+            row("root", span_name="invoke_agent support-agent"),
+            row(
+                "llm",
+                parent_span_id="root",
+                span_name="chat gpt-5-nano",
+                attributes={
+                    "gen_ai.operation.name": "chat",
+                    "gen_ai.request.model": "gpt-5-nano",
+                    **attributes,
+                },
+            ),
+        )
+    )
+    assert isinstance(session, ImportedSession)
+    return next(
+        node for node in flatten(session.nodes) if node.external_id == "trace-1:llm"
+    )
+
+
+def test_model_request_parameters_become_tool_definitions() -> None:
+    """Keep pydantic-ai tool lists as tool definitions, not model parameters."""
+    node = _llm_node(
+        {
+            "model_request_parameters": json.dumps(
+                {
+                    "function_tools": [
+                        {
+                            "name": "lookup_order",
+                            "description": "Look up an order by order number.",
+                            "parameters_json_schema": LOOKUP_ORDER_SCHEMA,
+                            "kind": "function",
+                            "strict": None,
+                        }
+                    ],
+                    "output_mode": "tool",
+                    "output_tools": [
+                        {
+                            "name": "final_result",
+                            "description": "Structured resolution.",
+                            "parameters_json_schema": FINAL_RESULT_SCHEMA,
+                            "kind": "output",
+                        }
+                    ],
+                    "allow_text_output": False,
+                }
+            ),
+            "model_settings": json.dumps({"temperature": 0.1}),
+        }
+    )
+
+    assert node.model_params == {"temperature": 0.1}
+    assert node.metadata[TOOL_DEFINITIONS_METADATA_KEY] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "lookup_order",
+                "description": "Look up an order by order number.",
+                "parameters": LOOKUP_ORDER_SCHEMA,
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "final_result",
+                "description": "Structured resolution.",
+                "parameters": FINAL_RESULT_SCHEMA,
+            },
+        },
+    ]
+    # Model-swap reads `allow_text_output` from the raw span attributes.
+    raw = json.loads(node.attributes["logfire.attributes"]["model_request_parameters"])
+    assert raw["allow_text_output"] is False
+
+
+def test_model_request_parameters_alone_are_not_model_params() -> None:
+    """Do not treat a pydantic-ai request-parameter blob as model settings."""
+    node = _llm_node(
+        {"model_request_parameters": {"function_tools": [], "output_mode": "text"}}
+    )
+
+    assert node.model_params is None
+    assert TOOL_DEFINITIONS_METADATA_KEY not in node.metadata
+
+
+def test_genai_tool_definitions_become_tool_definitions() -> None:
+    """Normalize flat OTel GenAI tool definitions to the nested form."""
+    node = _llm_node(
+        {
+            "gen_ai.tool.definitions": json.dumps(
+                [
+                    {
+                        "type": "function",
+                        "name": "lookup_order",
+                        "description": "Look up an order by order number.",
+                        "parameters": LOOKUP_ORDER_SCHEMA,
+                    }
+                ]
+            )
+        }
+    )
+
+    assert node.metadata[TOOL_DEFINITIONS_METADATA_KEY] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "lookup_order",
+                "description": "Look up an order by order number.",
+                "parameters": LOOKUP_ORDER_SCHEMA,
+            },
+        }
+    ]
+
+
+def test_chat_span_without_tools_has_no_tool_definitions() -> None:
+    """Leave the tool definitions key absent when the span has no schemas."""
+    node = _llm_node({"gen_ai.tool.definitions": [{"name": "no_schema"}]})
+
+    assert TOOL_DEFINITIONS_METADATA_KEY not in node.metadata
+
+
+def test_anthropic_custom_tools_become_tool_definitions() -> None:
+    """Normalize Anthropic `custom` tools that keep their schema in input_schema."""
+    node = _llm_node(
+        {
+            "gen_ai.tool.definitions": json.dumps(
+                [
+                    {
+                        "type": "custom",
+                        "name": "lookup_order",
+                        "input_schema": LOOKUP_ORDER_SCHEMA,
+                    }
+                ]
+            )
+        }
+    )
+
+    assert node.metadata[TOOL_DEFINITIONS_METADATA_KEY] == [
+        {
+            "type": "function",
+            "function": {"name": "lookup_order", "parameters": LOOKUP_ORDER_SCHEMA},
+        }
+    ]

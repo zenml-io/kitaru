@@ -61,7 +61,7 @@ from kitaru_post_import_insights.profiling_state import (
     SessionReferences,
 )
 
-ANALYSIS_VERSION = "2026-10-31.1"
+ANALYSIS_VERSION = "2026-11-09.1"
 MAX_DISTRIBUTION_EXAMPLES = 5
 MAX_LABEL_LENGTH = 120
 MAX_ROLE_LENGTH = 32
@@ -210,7 +210,7 @@ class CandidateFinding(_ProfilingModel):
 class ProfilingResult(_ProfilingModel):
     """Stable candidate envelope produced without a model or evaluations."""
 
-    analysis_version: Literal["2026-10-31.1"] = ANALYSIS_VERSION
+    analysis_version: Literal["2026-11-09.1"] = ANALYSIS_VERSION
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     coverage: Coverage
     candidates: list[CandidateFinding]
@@ -1475,13 +1475,13 @@ def _build_model_mix_briefing(
         look_first=look_first,
         cohort=cohort,
         hypothesis=(
-            "Check whether swapping the leading model for one candidate changes "
-            "outcome or cost. Run one replay with a single model override and no "
-            "other change."
+            "Check whether another model is better, cheaper, faster, or open for "
+            "these calls: run kitaru/model-swap on this import with the "
+            "kitaru-model-swap skill, then review where the candidates differ."
         ),
         held=(
-            "cost per session or the failed-session rate falls on the replayed "
-            "cohort while the other one does not rise."
+            "a candidate is judged right as often as today's model on the reviewed "
+            "differences and is cheaper, faster, or open."
         ),
     )
 
@@ -1983,8 +1983,8 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                     "these sessions"
                 ),
                 fallback_description=(
-                    "This identifier mix can seed a cohort for cost, latency, or "
-                    "quality comparisons."
+                    "Compare other models on these exact recorded calls for "
+                    "quality, cost, speed, and openness."
                 ),
                 caveat=(
                     "Identifiers prefer the served model, falling back to the "

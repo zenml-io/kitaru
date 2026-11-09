@@ -45,6 +45,7 @@
 
 - [Overview](getting-started/import-your-traces.md)
 - [Post-import insights](guides/post-import-insights.md)
+- [Choose the right model for your agent](guides/model-swap.md)
 - [Langfuse](guides/import-langfuse-traces.md)
 - [LangSmith](guides/import-langsmith-traces.md)
 - [Braintrust](guides/import-braintrust-traces.md)

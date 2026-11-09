@@ -54,6 +54,26 @@ kitaru analyzer register model-judge \
   --connection-schema model-provider-connection.json
 ```
 
+## Add a section to the HTML report
+
+`kitaru insight report --import-id IMPORT_ID --out report.html` renders an import's insights as one self-contained HTML file, drawing each insight as a card from its data. An analyzer whose results need more than cards can store its own rendered section in one insight's metadata:
+
+```python
+InsightInput(
+    name="my-analysis-summary",
+    title="My analysis",
+    data=TextInsightData(content=summary_markdown),
+    metadata={
+        "kitaru.report_section/v1": {
+            "html": "<section><h2>My analysis</h2>...</section>",
+            "covers": ["my-analysis-chart"],
+        }
+    },
+)
+```
+
+The report embeds `html` as is in place of that insight's card, and leaves out the insights named in `covers`, so a section can replace the cards it already shows. Escape every value that comes from traces or models. The page forbids scripts, remote resources, and form submission, and provides base styles for tables, `pre`, `.card`, `.badge`, and a two-column `.cols` grid. When an analyzer runs again, only the newest section of each insight name is shown.
+
 ## Register it
 
 ```bash

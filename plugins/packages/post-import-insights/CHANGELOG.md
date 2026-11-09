@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Point the model mix card at choosing the right model: its description, button label ("Investigate model choice") and briefing now lead to comparing candidate models on the import's recorded calls with the `kitaru-model-swap` skill instead of a single replay. The analysis version is bumped to `2026-11-09.1` because the briefing text is part of each candidate's content hash.
+
 ## 0.4.0 - 2026-11-03
 
 - Add the `kitaru/openai-session-findings` analyzer, which reads imported sessions, writes each problem it notices as a yes/no check, verifies every check on every session with the OpenAI Decisions API, and stores one insight per verified finding with its session count, harm, example, and session IDs. It sends session content to OpenAI and accepts optional `context`, `model`, and `decisions_model` parameters.

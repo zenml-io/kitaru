@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Preserve function `strict` flags and retain unsupported offered tool definitions so replay can reject an incomplete request instead of silently loosening its constraints.
+- Keep model-call tool definitions under the `kitaru.tool_definitions` node metadata key, normalized to the OpenAI chat-completions form, from PydanticAI `model_request_parameters` function and output tools or `gen_ai.tool.definitions`.
+- Stop importing PydanticAI `model_request_parameters` as `model_params`; `gen_ai.request.parameters`, `model_parameters`, and `model_settings` still populate them.
+
 ## 0.4.1 - 2026-10-08
 
 - Send API import queries through the Logfire SDK query client, which gives them the SDK's 30 second query timeout instead of the 5 second HTTP default, and stop importing the private `logfire._internal` region helper.
