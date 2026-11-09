@@ -116,8 +116,8 @@ class PromptCacheUse:
         self._calls_with_reads = 0
         self._cached_tokens = 0
         # Two readings of total input bound the true cache-read share: one adds
-        # cache reads to every call's input, the other adds them only where the
-        # call's source is known to count them separately.
+        # cache reads and writes to every call's input, the other adds them only
+        # where the call's source is known to count them separately.
         self._input_with_reads_added = 0
         self._input_as_read = 0
         self._reporting_sessions = SessionReferences(limits.contributors)
@@ -139,7 +139,8 @@ class PromptCacheUse:
             self._reporting_calls += 1
             self._reporting_sessions.add(session_id)
             self._cached_tokens += cached
-            self._input_with_reads_added += input_tokens + cached
+            writes = call.cache_write_input_tokens or 0
+            self._input_with_reads_added += input_tokens + cached + writes
             self._input_as_read += call.prompt_tokens or 0
             if cached:
                 self._calls_with_reads += 1

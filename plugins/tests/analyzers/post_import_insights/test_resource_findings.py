@@ -452,6 +452,24 @@ def test_prompt_cache_share_follows_the_established_convention() -> None:
     ]
 
 
+def test_prompt_cache_share_counts_separately_reported_cache_writes() -> None:
+    # Each session writes 10,000 tokens to the cache and then reads them back:
+    # 10,000 cached of 20,200 input tokens.
+    sessions = [
+        _session(
+            number,
+            [
+                _llm(number, 0, input_tokens=100, cached=0, writes=10_000),
+                _llm(number, 1, input_tokens=100, cached=10_000, writes=0),
+            ],
+        )
+        for number in range(1, 6)
+    ]
+    candidate = _get(profile_sessions(sessions), "prompt-cache")
+    assert _facts(candidate)["cache_read_share_percent"] == 49.5
+    assert "the share is a range" not in (candidate.caveat or "")
+
+
 def test_prompt_cache_share_is_a_range_when_the_convention_is_unknown() -> None:
     candidate = _get(
         profile_sessions(_cache_sessions(10, [(1_000, 400)])), "prompt-cache"
