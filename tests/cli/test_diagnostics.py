@@ -22,6 +22,7 @@ from typing import Any
 
 import httpx
 import pytest
+from tests.cli.task_diagnostic_fakes import EmptyTaskDiagnostics
 
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.api_models.v1.worker import WorkerScope
@@ -71,6 +72,7 @@ class FakeClient:
                 return info
 
         self.info: Any = InfoResource()
+        self.tasks = EmptyTaskDiagnostics()
         self.workers = FakeWorkers()
         self.closed = False
 

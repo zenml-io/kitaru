@@ -63,7 +63,9 @@ Restarting matters because the worker launches the registered agent as a subproc
 
 When agent code runs again, its tools need an explicit relationship to the outside world. The tool policy determines whether a call uses recorded history, a static result, or the live tool.
 
-This synthetic example uses passthrough:
+A `history` policy reuses recorded tool responses instead of calling the current tool implementation. Use it to test an agent decision against the recorded results. If the candidate changes a tool implementation, history would hide that change by returning the old response.
+
+This synthetic example uses passthrough so each replay calls the current tools against its isolated in-memory commerce store:
 
 ```json
 {"default":{"type":"passthrough"},"tools":{}}
@@ -110,7 +112,7 @@ uv run kitaru experiment run start \
   returns-candidate \
   --cohort-version "$COHORT_VERSION_ID" \
   --agent "$CANDIDATE_AGENT" \
-  --evaluate-baselines \
+  --baseline-evaluation-mode if_missing \
   --wait \
   --timeout 1800
 ```
@@ -121,9 +123,9 @@ Save the experiment-run UUID printed in the receipt:
 RUN_ID="YOUR_EXPERIMENT_RUN_UUID"
 ```
 
-The worker launches the candidate command once for each cohort session and stores every new run as a session with `origin: replay`. `--evaluate-baselines` applies the same evaluator versions to both the imported sessions and their replays, giving you a like-for-like baseline next to the candidate measurements.
+The worker launches the candidate command once for each cohort session and stores every new run as a session with `origin: replay`. `--baseline-evaluation-mode if_missing` reuses the latest baseline evaluations with the same evaluator versions and parameters, or schedules any that are missing. Replays receive fresh evaluations with those same versions and parameters, giving you paired baseline and candidate measurements.
 
-`--timeout-seconds 180` limits each agent subprocess. `--timeout 1800` limits how long the CLI waits for the complete experiment run.
+`--timeout-seconds 180` limits each agent subprocess. `--timeout 1800` limits how long the CLI waits for the complete experiment run. Reaching the CLI timeout stops polling; remote work continues until it finishes or you explicitly cancel it.
 
 If a replay fails or times out, keep it in the denominator. A completed subset is not the complete experiment result.
 

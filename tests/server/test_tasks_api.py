@@ -362,3 +362,26 @@ async def test_update_task_requires_a_status(
         headers={"Authorization": f"Bearer {task_token}"},
     )
     assert response.status_code == 422
+
+
+async def test_diagnostics_route(
+    client: httpx.AsyncClient, services: JobAndTaskServices, account: Account
+) -> None:
+    job = await create_job(services.jobs, account.id)
+    task = await create_agent_task(services.tasks, job.id)
+    response = await client.get(
+        "/api/v1/tasks/diagnostics", params={"job_id": str(job.id)}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["pending_task_count"] == 1
+    assert data["groups"][0]["task_ids"] == [str(task.id)]
+    assert data["groups"][0]["reasons"] == ["no_live_workers"]
+    assert (
+        await client.get(
+            "/api/v1/tasks/diagnostics", params={"job_id": str(uuid.uuid4())}
+        )
+    ).status_code == 404
+    assert (
+        await client.get("/api/v1/tasks/diagnostics", headers={"Authorization": ""})
+    ).status_code == 401
