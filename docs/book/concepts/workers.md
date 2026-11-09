@@ -42,6 +42,8 @@ kitaru worker start --claim agent=<AGENT_VERSION_ID>
 kitaru worker start --job-id <job-id>
 ```
 
+Explicit `--claim` options replace the default claims. An import can finish parsing and then queue analyzer tasks in the same job. To run those too, keep the existing claims and add `--claim analyzer`, or start a separate analyzer worker. Replays need an `agent` claim, and their evaluation tasks need an `evaluator` claim. Label selectors and provider credential requirements must also match.
+
 Every option is also an environment variable with the `KITARU_WORKER_` prefix (`KITARU_WORKER_CONCURRENCY`, `KITARU_WORKER_SCOPE__CLAIMS`, …), so a containerized worker can be configured without flags. Deployment patterns, including long-running workers on Kubernetes and one-shot workers in CI, are in [Workers in production](../deploy/workers.md).
 
 Check what's alive:
@@ -52,5 +54,7 @@ kitaru worker get <worker-id>
 ```
 
 `kitaru worker list` shows live workers, add `--include-stale` for the rest. Names are labels shared by any number of workers, so `kitaru worker get` takes an id from that listing. A worker record exposes `last_seen_at`, the time of its last observed heartbeat, and `live`, the server's current liveness calculation. These are observations, not assignment guarantees: a worker can become unavailable after its last heartbeat, and a live worker may not match a task's scope or win its claim. The native MCP server exposes the same list and exact-UUID get operations through the read-only `kitaru_registry_read` tool. It cannot register, update, delete, or control workers.
+
+`kitaru status` summarizes pending tasks without a compatible live worker. `kitaru job get <job-id>` and `kitaru job watch <job-id>` explain missing claims, job or agent-version restrictions, and label or credential-selector mismatches. Watching refreshes this information as follow-up tasks appear, including analyzers added after import parsing. The MCP `kitaru_activity_read` tool includes the same warnings when reading a job or experiment run. These warnings describe current worker coverage; they do not fail the job or prove that a matching worker has free capacity or valid credentials.
 
 A worker that stops heartbeating loses its tasks: the server requeues them for the next worker (or fails them at the retry cap), so a crashed pod never strands a replay.
