@@ -27,11 +27,11 @@ keywords = ["ai-agents", "kitaru", "pydantic-ai", "recording", "replay"]
 dependencies = [
     "genai-prices>=0.1.1,<0.2",
     "kitaru==0.27.6+dev",
-    "pydantic-ai-slim>=2.14.1,<2.62",
+    "pydantic-ai-slim>=2.14.1,<2.67",
 ]
 
 [project.optional-dependencies]
-openai = ["pydantic-ai-slim[openai]>=2.14.1,<2.62"]
+openai = ["pydantic-ai-slim[openai]>=2.14.1,<2.67"]
 
 [project.urls]
 Homepage = "https://kitaru.ai"
