@@ -5,6 +5,7 @@ INSTALLER="${1:-$(cd "$(dirname "$0")/.." && pwd)/install.sh}"
 INSTALLER="$(cd "$(dirname "$INSTALLER")" && pwd)/$(basename "$INSTALLER")"
 command -v uv >/dev/null
 PYTHON="$(uv python find --no-python-downloads ">=3.11")"
+PYTHON_INSTALL_DIR="$(uv python dir)"
 TMP="$(mktemp -d /tmp/kitaru-installer.XXXXXX)"
 TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
@@ -14,8 +15,9 @@ export UV_TOOL_DIR="$TMP/tools" UV_TOOL_BIN_DIR="$TMP/bin"
 export XDG_CONFIG_HOME="$TMP/config" XDG_DATA_HOME="$TMP/data"
 export XDG_CACHE_HOME="$TMP/xdg-cache"
 export UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never UV_NO_CONFIG=1
+export UV_PYTHON_INSTALL_DIR="$PYTHON_INSTALL_DIR"
 export UV_NO_INDEX=1 UV_FIND_LINKS="$TMP/wheels"
-unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT UV_PYTHON UV_PROJECT UV_WORKING_DIR UV_CONSTRAINT UV_FROZEN UV_NO_SYNC
+unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT UV_PYTHON UV_PROJECT UV_WORKING_DIR UV_CONSTRAINT UV_FROZEN UV_NO_SYNC KITARU_PYTHON
 mkdir -p "$TMP/wheels"
 # This is an installer fixture, not a test of the real Kitaru package.
 "$PYTHON" - "$TMP/wheels" <<'PY'
@@ -33,6 +35,18 @@ files = {
 files["kitaru-0.0.0.dist-info/RECORD"] = "".join(f"{name},,\n" for name in files)
 with zipfile.ZipFile(wheel, "w") as archive:
     for name, content in files.items():
+        archive.writestr(name, content)
+
+# A Python payload with interpreter-specific wheel tags models an adapter
+# whose transitive dependency has wheels through Python 3.14 but no sdist.
+adapter_files = {
+    "adapter_fixture.py": "VALUE = 1\n",
+    "kitaru_adapter_fixture-1.0.0.dist-info/METADATA": "Metadata-Version: 2.1\nName: kitaru-adapter-fixture\nVersion: 1.0.0\nRequires-Python: >=3.11\nRequires-Dist: kitaru\n",
+    "kitaru_adapter_fixture-1.0.0.dist-info/WHEEL": "Wheel-Version: 1.0\nRoot-Is-Purelib: true\n" + "".join(f"Tag: cp3{minor}-none-any\n" for minor in range(11, 15)),
+    "kitaru_adapter_fixture-1.0.0.dist-info/RECORD": "",
+}
+with zipfile.ZipFile(wheel.parent / "kitaru_adapter_fixture-1.0.0-cp311.cp312.cp313.cp314-none-any.whl", "w") as archive:
+    for name, content in adapter_files.items():
         archive.writestr(name, content)
 PY
 
@@ -57,7 +71,11 @@ TOML
   if [ "${3:-pin}" = pin ]; then
     printf '%s\n' "$PYTHON" > "$workspace/.python-version"
   else
-    uv venv --python "$PYTHON" "$workspace/.venv" >/dev/null 2>&1
+    local existing="$workspace/.venv"
+    if [ -n "$environment" ]; then
+      case "$environment" in /*) existing="$environment" ;; *) existing="$workspace/$environment" ;; esac
+    fi
+    uv venv --python "$PYTHON" "$existing" >/dev/null 2>&1
   fi
   (
     cd "$workspace/member"
@@ -70,8 +88,12 @@ TOML
   fi
   [ -x "$expected/bin/kitaru" ]
   grep -F "environment: $expected " "$TMP/$label.log" >/dev/null
-  # Interpreter selection remains with uv, including inherited root pins.
-  if grep -F -- '--python ' "$TMP/$label.log"; then return 1; fi
+  [ "$("$expected/bin/python" -c 'import sys; print(sys.base_prefix)')" = "$("$PYTHON" -c 'import sys; print(sys.base_prefix)')" ]
+  if [ "${3:-pin}" = pin ]; then
+    [ "$(cat "$workspace/.python-version")" = "$PYTHON" ]
+  else
+    [ ! -e "$workspace/.python-version" ]
+  fi
   echo "PASS: $label"
 }
 
@@ -79,6 +101,132 @@ run_project workspace ""
 run_project existing-env "" existing
 run_project relative-env custom-env
 run_project absolute-env "$TMP/absolute-venv"
+run_project relative-existing-env custom-env existing
+run_project absolute-existing-env "$TMP/absolute-existing-venv" existing
+
+# The environment can remain usable after its base interpreter disappears
+# from PATH and uv's configured installation directory. Do not download a
+# metadata parser when the project's interpreter already works.
+mkdir "$TMP/uv-only" "$TMP/undiscoverable-pythons"
+ln -s "$(command -v uv)" "$TMP/uv-only/uv"
+UV_INSTALL_DIR="$TMP/uv-only" UV_PYTHON_INSTALL_DIR="$TMP/undiscoverable-pythons" PATH="$TMP/uv-only:/usr/bin:/bin" \
+  run_project undiscoverable-existing-python "" existing
+UV_INSTALL_DIR="$TMP/uv-only" UV_PYTHON_INSTALL_DIR="$TMP/undiscoverable-pythons" PATH="$TMP/uv-only:/usr/bin:/bin" \
+  run_project undiscoverable-custom-python custom-env existing
+
+run_unpinned_project() {
+  local label="$1" requirement="$2" expected="$3" project="$TMP/$1"
+  shift 3
+  mkdir -p "$project"
+  cat > "$project/pyproject.toml" <<TOML
+[project]
+name = "installer-$label"
+version = "0.0.0"
+requires-python = "$requirement"
+TOML
+  if [ -n "${PROJECT_PIN:-}" ]; then printf '%s\n' "$PROJECT_PIN" > "$project/.python-version"; fi
+  (
+    cd "$project"
+    bash "$INSTALLER" --project --no-skills --no-mcp --no-modify-path --with=kitaru-adapter-fixture "$@"
+  ) > "$TMP/$label.log" 2>&1 || { cat "$TMP/$label.log"; return 1; }
+  "$project/.venv/bin/python" -c 'import adapter_fixture; assert adapter_fixture.VALUE == 1'
+  local actual_python expected_python
+  actual_python="$("$project/.venv/bin/python" -c 'import sys; print(sys.base_prefix)')"
+  expected_python="$("$expected" -c 'import sys; print(sys.base_prefix)')"
+  if [ "$actual_python" != "$expected_python" ]; then
+    echo "$label: expected Python from $expected_python, got $actual_python" >&2
+    return 1
+  fi
+  if [ -n "${PROJECT_PIN:-}" ]; then
+    [ "$(cat "$project/.python-version")" = "$PROJECT_PIN" ]
+  else
+    [ ! -e "$project/.python-version" ]
+  fi
+  echo "PASS: $label"
+}
+
+# This project only accepts the locally available minor, so the check works
+# offline on every supported CI interpreter, including jobs without 3.12.
+PYTHON_MINOR="$("$PYTHON" -c 'import sys; print(sys.version_info.minor)')"
+run_unpinned_project constrained-python ">=3.$PYTHON_MINOR,<3.$((PYTHON_MINOR + 1))" "$PYTHON"
+run_unpinned_project explicit-python '>=3.11' "$PYTHON" --python "$PYTHON"
+KITARU_PYTHON="$PYTHON" run_unpinned_project environment-python '>=3.11' "$PYTHON"
+
+mkdir -p "$TMP/unpinned-workspace/member"
+cat > "$TMP/unpinned-workspace/pyproject.toml" <<TOML
+[project]
+name = "installer-unpinned-workspace"
+version = "0.0.0"
+requires-python = ">=3.$PYTHON_MINOR,<3.$((PYTHON_MINOR + 1))"
+[tool.uv.workspace]
+members = ["member"]
+TOML
+cat > "$TMP/unpinned-workspace/member/pyproject.toml" <<'TOML'
+[project]
+name = "installer-unpinned-member"
+version = "0.0.0"
+requires-python = ">=3.11"
+TOML
+(
+  cd "$TMP/unpinned-workspace/member"
+  bash "$INSTALLER" --project --no-skills --no-mcp --no-modify-path --with=kitaru-adapter-fixture
+) > "$TMP/unpinned-workspace.log" 2>&1 || { cat "$TMP/unpinned-workspace.log"; exit 1; }
+"$TMP/unpinned-workspace/.venv/bin/python" -c 'import adapter_fixture; assert adapter_fixture.VALUE == 1'
+[ "$("$TMP/unpinned-workspace/.venv/bin/python" -c 'import sys; print(sys.base_prefix)')" = "$("$PYTHON" -c 'import sys; print(sys.base_prefix)')" ]
+[ ! -e "$TMP/unpinned-workspace/.python-version" ]
+[ ! -e "$TMP/unpinned-workspace/member/.python-version" ]
+echo 'PASS: unpinned workspace honors root Python requirements'
+
+PYTHON_312="$(uv python find --no-project --no-python-downloads 3.12 2>/dev/null || true)"
+if [ -n "$PYTHON_312" ]; then
+  run_unpinned_project preferred-python '>=3.11' "$PYTHON_312"
+  PROJECT_PIN="$PYTHON_312" run_unpinned_project explicit-pinned-python '>=3.11' "$PYTHON_312" --python 3.12
+  if [ "$("$PYTHON" -c 'import sys; print(sys.base_prefix)')" != "$("$PYTHON_312" -c 'import sys; print(sys.base_prefix)')" ]; then
+    mkdir "$TMP/conflicting-pin"
+    cp "$TMP/explicit-pinned-python/pyproject.toml" "$TMP/conflicting-pin/pyproject.toml"
+    cp "$TMP/conflicting-pin/pyproject.toml" "$TMP/conflicting-pin/original.toml"
+    printf '%s\n' "$PYTHON" > "$TMP/conflicting-pin/.python-version"
+    if (
+      cd "$TMP/conflicting-pin"
+      bash "$INSTALLER" --project --no-skills --no-mcp --no-modify-path --python 3.12
+    ) > "$TMP/conflicting-pin.log" 2>&1; then
+      echo 'installer accepted a Python override that later uv run commands cannot retain' >&2
+      exit 1
+    fi
+    cmp "$TMP/conflicting-pin/pyproject.toml" "$TMP/conflicting-pin/original.toml"
+    [ "$(cat "$TMP/conflicting-pin/.python-version")" = "$PYTHON" ]
+    [ ! -e "$TMP/conflicting-pin/.venv" ]
+    grep -F 'Update that pin explicitly' "$TMP/conflicting-pin.log" >/dev/null
+    echo 'PASS: conflicting Python override leaves project and pin unchanged'
+  fi
+else
+  echo 'SKIP: Python 3.12 preference (interpreter not installed)'
+fi
+
+# A request outside the project's requirements must fail before uv add can
+# change the project. It must not be silently ignored or replace an existing pin.
+mkdir "$TMP/incompatible-python"
+cat > "$TMP/incompatible-python/pyproject.toml" <<'TOML'
+[project]
+name = "installer-incompatible-python"
+version = "0.0.0"
+requires-python = ">=3.11"
+TOML
+cp "$TMP/incompatible-python/pyproject.toml" "$TMP/incompatible-python/original.toml"
+printf '%s\n' "$PYTHON" > "$TMP/incompatible-python/.python-version"
+if (
+  cd "$TMP/incompatible-python"
+  bash "$INSTALLER" --project --no-skills --no-mcp --no-modify-path --python=3.10
+) > "$TMP/incompatible-python.log" 2>&1; then
+  echo 'installer ignored an incompatible --python request' >&2
+  cat "$TMP/incompatible-python.log" >&2
+  exit 1
+fi
+cmp "$TMP/incompatible-python/pyproject.toml" "$TMP/incompatible-python/original.toml"
+[ "$(cat "$TMP/incompatible-python/.python-version")" = "$PYTHON" ]
+[ ! -e "$TMP/incompatible-python/.venv" ]
+grep -Ei 'Python|interpreter' "$TMP/incompatible-python.log" >/dev/null
+echo 'PASS: incompatible Python request leaves project and pin unchanged'
 
 # Exercise the production bootstrap function, stopping before its HOME-based
 # binary lookup. The stub cannot install uv or edit shell configuration.
@@ -137,7 +285,7 @@ with zipfile.ZipFile(root / "kitaru-0.0.1-py3-none-any.whl", "w") as new:
 PY
   bash "$INSTALLER" --project --no-skills --no-mcp --no-modify-path
 ) > "$TMP/upgrade.log" 2>&1 || { cat "$TMP/upgrade.log"; exit 1; }
-grep -F 'version 0.0.1' "$TMP/upgrade.log" >/dev/null
+grep -F 'kitaru 0.0.1 installed' "$TMP/upgrade.log" >/dev/null
 echo 'PASS: rerun upgrades project dependency'
 
 if bash --posix "$INSTALLER" --help > "$TMP/posix.log" 2>&1; then exit 1; fi
