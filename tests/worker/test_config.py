@@ -111,7 +111,7 @@ def test_config_is_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     """The config cannot be mutated after construction."""
     config = WorkerConfig()
     with pytest.raises(Exception):  # noqa: B017 - pydantic raises ValidationError
-        config.concurrency = 5
+        config.concurrency = 5  # ty: ignore[invalid-assignment]
 
 
 @pytest.mark.parametrize(
