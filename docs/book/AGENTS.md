@@ -47,4 +47,4 @@ The visual source of truth is the React components in `docs/components/diagrams.
 - Langfuse, LangSmith, and Braintrust are complements, never competitors, in docs copy ("Langfuse stays your system of record").
 - US English. Only document shipped features. Keep plans for unshipped behavior in unpublished planning material until the behavior ships.
 
-`just markdown-check` fails for a page without a `description:`, a page missing from `toc.md`, a cross-file anchor link, and hard-wrapped prose.
+`just markdown-check` fails for a page without a `description:`, a page whose front matter is not valid YAML (quote values that contain `: `), a page missing from `toc.md`, a cross-file anchor link, and hard-wrapped prose.
