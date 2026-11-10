@@ -125,18 +125,20 @@ class PayloadStore:
             data_by_hash.setdefault(sha256, serialized[first_index_by_key[key]])
         await self._data_stores.get_write_store().put_many(data_by_hash)
 
-        for key in missing_keys:
-            sha256, media_type = key
-            blob, _ = await self._repository.create(
-                Blob(
-                    owner_id=owner_id,
-                    sha256=sha256,
-                    size=len(data_by_hash[sha256]),
-                    media_type=media_type,
-                    stored_in=self._data_stores.backend,
-                )
+        registry.update(
+            await self._repository.create_many(
+                [
+                    Blob(
+                        owner_id=owner_id,
+                        sha256=sha256,
+                        size=len(data_by_hash[sha256]),
+                        media_type=media_type,
+                        stored_in=self._data_stores.backend,
+                    )
+                    for sha256, media_type in missing_keys
+                ]
             )
-            registry[key] = blob
+        )
 
         for index, sha256 in sha256_by_index.items():
             payload = candidates[index]

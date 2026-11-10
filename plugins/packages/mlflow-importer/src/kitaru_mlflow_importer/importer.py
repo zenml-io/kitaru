@@ -360,8 +360,7 @@ def _parse_span(record: Any, index: int) -> _Span:
         ),
         name=str(record.get("name") or "span"),
         started_at=_unix_datetime(
-            record.get("start_time_unix_nano", record.get("start_time")),
-            1_000_000_000,
+            record.get("start_time_unix_nano", record.get("start_time")), 1_000_000_000
         ),
         ended_at=_unix_datetime(
             record.get("end_time_unix_nano", record.get("end_time")), 1_000_000_000
@@ -490,6 +489,7 @@ def _token_counts(span: _Span) -> dict[str, int]:
             ("input_tokens", "input_tokens"),
             ("output_tokens", "output_tokens"),
             ("cached_input_tokens", "cache_read_input_tokens"),
+            ("cache_write_input_tokens", "cache_creation_input_tokens"),
         )
     }
     return {name: count for name, count in counts.items() if count is not None}

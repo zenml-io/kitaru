@@ -39,6 +39,7 @@ from kitaru.cli.command_registry import (
 )
 from kitaru.cli.output import CommandResult
 from kitaru.cli.schema import ParameterSpec
+from kitaru.session_transcript import DEFAULT_MAX_CHARS
 
 
 @register_command(
@@ -537,6 +538,72 @@ async def session_nodes(
             cursor=cursor,
             include_payloads=include_payloads,
             filter=filter,
+        )
+
+
+@register_command(
+    session_app,
+    build_spec(
+        ("session", "read"),
+        "Read sessions as compact transcripts, one node per line.",
+        parameters=(
+            ParameterSpec(
+                "SESSION", "UUID[]", "argument", False, "Explicit session IDs."
+            ),
+            ParameterSpec(
+                "--sessions-file",
+                "path",
+                "option",
+                False,
+                "UTF-8 file with one session UUID per nonblank line.",
+            ),
+            ParameterSpec(
+                "--max-chars",
+                "integer",
+                "option",
+                False,
+                "Longest text kept per field before it is cut.",
+            ),
+            ParameterSpec(
+                "--full", "boolean", "option", False, "Keep every field uncut."
+            ),
+            ParameterSpec(
+                "--reasoning",
+                "boolean",
+                "option",
+                False,
+                "Include the visible reasoning of model calls.",
+            ),
+            ParameterSpec(
+                "--node",
+                "integer",
+                "option",
+                False,
+                "Show only the node at this zero-based position.",
+            ),
+        ),
+        errors=UUID_READ_ERRORS,
+    ),
+)
+async def session_read(
+    session: list[str] | None = None,
+    /,
+    *,
+    sessions_file: Path | None = None,
+    max_chars: int = DEFAULT_MAX_CHARS,
+    full: bool = False,
+    reasoning: bool = False,
+    node: int | None = None,
+) -> CommandResult:
+    """Read sessions as compact transcripts, one node per line."""
+    async with invocation_context.open_asset_client() as client:
+        return await sessions.read_sessions(
+            client,
+            session or [],
+            sessions_file=sessions_file,
+            max_chars=None if full else max_chars,
+            include_reasoning=reasoning,
+            node=node,
         )
 
 

@@ -54,6 +54,12 @@ class TokenUsage(RequestModel):
     cached_input_tokens: int | None = Field(
         default=None, description="Cached input tokens."
     )
+    cache_write_input_tokens: int | None = Field(
+        default=None,
+        description="Input tokens written to the provider's prompt cache, as the "
+        "source reports them. Whether `input_tokens` also counts them follows "
+        "the source.",
+    )
     reasoning_tokens: int | None = Field(default=None, description="Reasoning tokens.")
 
 

@@ -16,7 +16,8 @@
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 
 from kitaru.server.adapters.db.errors import violated_constraint
@@ -78,6 +79,54 @@ class SQLBlobRepository(BaseSQLRepository[BlobORM]):
             raise
         return row.to_domain(), True
 
+    async def create_many(self, blobs: Sequence[Blob]) -> dict[tuple[str, str], Blob]:
+        """Persist many new blobs, deduping concurrent identical uploads.
+
+        A blob whose (sha256, media_type) is already stored, including by a
+        concurrent writer that committed first, is not stored again.
+
+        Args:
+            blobs: Blobs to store, at most one per (sha256, media_type).
+
+        Returns:
+            Stored blobs keyed by (sha256, media_type), the already-stored
+            row in place of each blob that was not stored again.
+        """
+        if not blobs:
+            return {}
+        # Insert in key order, since two multi-row inserts taking the same
+        # unique keys in different orders can deadlock.
+        ordered = sorted(blobs, key=lambda blob: (blob.sha256, blob.media_type))
+        statement = (
+            insert(BlobORM)
+            .on_conflict_do_nothing(constraint=BLOB_SHA256_MEDIA_TYPE_UNIQUE_CONSTRAINT)
+            .returning(BlobORM)
+        )
+        # ON CONFLICT covers only the content key, so a savepoint keeps the
+        # surrounding transaction usable when another constraint, such as the
+        # owner foreign key, rejects the batch. Passing the rows as parameters
+        # rather than through values() lets SQLAlchemy reuse one cached
+        # single-row compile and send the rows as one multi-row insert.
+        async with self._session.begin_nested():
+            rows = (
+                await self._session.scalars(
+                    statement, [BlobORM.column_values(blob) for blob in ordered]
+                )
+            ).all()
+        stored = {(row.sha256, row.media_type): row.to_domain() for row in rows}
+        conflicted = [
+            (blob.sha256, blob.media_type)
+            for blob in ordered
+            if (blob.sha256, blob.media_type) not in stored
+        ]
+        if conflicted:
+            # Each statement reads a fresh READ COMMITTED snapshot, so this
+            # read sees a row a concurrent writer committed while the insert
+            # waited on it.
+            existing = await self._get_many_by_sha256_and_media_type(conflicted)
+            stored.update({key: existing[key] for key in conflicted})
+        return stored
+
     async def _get_by_sha256_and_media_type(self, sha256: str, media_type: str) -> Blob:
         """Load a blob by sha256 and media type.
 
@@ -93,6 +142,24 @@ class SQLBlobRepository(BaseSQLRepository[BlobORM]):
         )
         row = (await self._session.execute(statement)).scalar_one()
         return row.to_domain()
+
+    async def _get_many_by_sha256_and_media_type(
+        self, keys: Sequence[tuple[str, str]]
+    ) -> dict[tuple[str, str], Blob]:
+        """Bulk-load blobs by (sha256, media_type), keyed by it.
+
+        Args:
+            keys: (sha256, media_type) pairs to look up.
+
+        Returns:
+            Stored blobs keyed by (sha256, media_type), keys with no matching
+            row omitted.
+        """
+        statement = select(BlobORM).where(
+            tuple_(BlobORM.sha256, BlobORM.media_type).in_(keys)
+        )
+        rows = (await self._session.scalars(statement)).all()
+        return {(row.sha256, row.media_type): row.to_domain() for row in rows}
 
     async def get(self, blob_id: uuid.UUID) -> Blob:
         """Load a blob by id.

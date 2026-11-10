@@ -57,10 +57,13 @@ from kitaru_pydantic_ai import KitaruAgent, PydanticAIUsageSummary
 
 
 def calculate_cost(usage: PydanticAIUsageSummary) -> Decimal:
-    uncached_input = usage.input_tokens - usage.cached_input_tokens
+    uncached_input = (
+        usage.input_tokens - usage.cached_input_tokens - usage.cache_write_input_tokens
+    )
     return (
         Decimal(uncached_input) * Decimal("0.000002")
         + Decimal(usage.cached_input_tokens) * Decimal("0.0000002")
+        + Decimal(usage.cache_write_input_tokens) * Decimal("0.0000025")
         + Decimal(usage.output_tokens) * Decimal("0.000008")
     )
 

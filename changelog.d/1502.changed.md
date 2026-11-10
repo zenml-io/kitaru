@@ -1,0 +1,1 @@
+- Raised the default per-import timeout from 10 to 20 minutes, so large trace imports no longer fail partway through. Set `KITARU_SERVER_IMPORTER_TASK_TIMEOUT_SECONDS` to override it.

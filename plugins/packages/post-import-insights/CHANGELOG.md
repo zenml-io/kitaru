@@ -3,7 +3,15 @@
 ## Unreleased
 
 - Accept any sessions that belong to one agent, including live-recorded sessions and sessions from several imports. When every session comes from the same import, the cards and copied investigation prompt still name that import and its provider; otherwise the prompt omits the import line.
-- Stop telling readers to compare against "the same import" when the analyzed sessions may share no import. The failure, marker, and language briefings now compare against the analyzed sessions, and the model-call card no longer calls them imported. The analysis version is bumped because briefing text is part of each candidate's content hash.
+- Stop telling readers to compare against "the same import" when the analyzed sessions may share no import. The failure, marker, and language briefings now compare against the analyzed sessions, and the model-call card no longer calls them imported.
+- Add cost, time, token, and tool-path cards to both analyzers: the share of recorded cost carried by the costliest 10% of sessions; the tool or model covering most recorded time, measured as the union of its node intervals so parallel calls count once; sessions whose model input grows at least three times and model calls with oversized input; the share of input tokens read from a prompt cache, with system prompts that change between calls to the same model; and the most common and one-off tool-call paths. Each card appears only above its documented threshold, keeps exact aggregates in bounded memory that spills to temporary storage, and reports in its caveat the sessions or calls that lacked the field it needs.
+- Read a model call's input as input tokens plus cache reads when a call to the same model in that session reports more cache reads than input tokens, since that source counts them separately, and likewise add cache writes when a call reports more cache writes than input tokens. The two are settled independently because the Claude Agent SDK adapter counts cache writes inside input tokens but cache reads outside them; where no call settles the convention, state the cache-read share as a range between the two readings.
+- Let editor copy restate a number with a unit that the card's chart unit or fact names declare, such as tokens on a card with token facts.
+- Bump the analysis version to `2026-11-09.1` because the new candidates and the reworded briefings change each profile's content hash. The deterministic analyzer ranks the new cards after outcome and language cards and before the activity, duration, and model-mix distributions, so those can drop out of a full six-card page.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
 
 ## 0.4.0 - 2026-11-03
 

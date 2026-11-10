@@ -401,24 +401,25 @@ class JobService:
         )
         job = await self.create_job(JobKind.EVALUATION, actor)
         # The job was just created in this call and cannot have settled yet, so
-        # each pair skips add_task's redundant per-iteration settled check.
-        for session_id in command.input_session_ids:
-            for evaluator in evaluators:
-                await self._tasks.create(
-                    EvaluationTask(
-                        job_id=job.id,
-                        plugin_version_id=evaluator.evaluator_version_id,
-                        input_session_id=session_id,
-                        connection_id=evaluator.connection_id,
-                        labels=get_plugin_task_labels(
-                            evaluator.evaluator,
-                            evaluator.provider,
-                            evaluator.requires_credentials,
-                        ),
-                        params=evaluator.params,
-                        on_failure=TaskOnFailure.CONTINUE,
-                    )
-                )
+        # the pair tasks skip add_task's redundant settled check.
+        tasks: list[Task] = [
+            EvaluationTask(
+                job_id=job.id,
+                plugin_version_id=evaluator.evaluator_version_id,
+                input_session_id=session_id,
+                connection_id=evaluator.connection_id,
+                labels=get_plugin_task_labels(
+                    evaluator.evaluator,
+                    evaluator.provider,
+                    evaluator.requires_credentials,
+                ),
+                params=evaluator.params,
+                on_failure=TaskOnFailure.CONTINUE,
+            )
+            for session_id in command.input_session_ids
+            for evaluator in evaluators
+        ]
+        await self._tasks.create_many(tasks)
         return job
 
     async def create_analyses(self, command: AnalysisCreate, actor: AuthContext) -> Job:
