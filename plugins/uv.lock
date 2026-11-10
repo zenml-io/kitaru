@@ -130,9 +130,10 @@ wheels = [
 
 [[package]]
 name = "arize-phoenix-client"
-version = "3.5.0"
+version = "3.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "certifi" },
     { name = "httpx" },
     { name = "openinference-instrumentation" },
     { name = "openinference-semantic-conventions" },
@@ -141,9 +142,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a5/43/564a6250a64a8dbd05239fca547fac74f47ef003c3d2284cb86edc05ff61/arize_phoenix_client-3.5.0.tar.gz", hash = "sha256:6f9013457f6f56d56db65f61877369eae7bd23460212030b54da68cb0a4d8047", size = 311114, upload-time = "2026-09-08T22:24:52.577Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6b/f3/350ee5e56455f0813bf93bbd351c8be2d159babcb74cef46af058582a5b6/arize_phoenix_client-3.6.0.tar.gz", hash = "sha256:096733f0b95ac3456e1bd99ae639c2ae3b0b395ac1c651eefd050fd1ecb9c215", size = 310293, upload-time = "2026-10-30T03:39:40.179Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/93/e6/ce7d4acb909595d215a81effd1af1ee33e7ce09f1d53b095d8441afeed17/arize_phoenix_client-3.5.0-py3-none-any.whl", hash = "sha256:db7d05b692db0389d8d3306d59579793264f8ec3b2f7e9e5d724e9160ac78f72", size = 263582, upload-time = "2026-09-08T22:24:50.833Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/bb/0add971fcf095ca2f0ea9bdd73599db1abb52a4482eae6015debba6e3cca/arize_phoenix_client-3.6.0-py3-none-any.whl", hash = "sha256:6ab26e95fb2cc57d5e289471a4aa12095fee44e930531320c2be0cbdcd5dd3f6", size = 268352, upload-time = "2026-10-30T03:39:38.672Z" },
 ]
 
 [[package]]
@@ -293,7 +294,7 @@ wheels = [
 
 [[package]]
 name = "braintrust"
-version = "0.48.1"
+version = "0.49.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
@@ -308,9 +309,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/43/ca/4320f94736d5ff9e5d6f6ea809e6dee64b047a3490d235a3b3313c1fdf9f/braintrust-0.48.1.tar.gz", hash = "sha256:cc557ab1d0e697312b888a302734337219ca91a1ef77d4452f58efa0cd07e17b", size = 610726, upload-time = "2026-10-26T18:40:45.981Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/75/ec/d94918fed23ae539e7d5be4c30d3641403161d2d46a6630e646862973086/braintrust-0.49.1.tar.gz", hash = "sha256:e1322dfceeaac0170610de258535afb912aaa2d592d3e8bdb244e0e4123edea1", size = 627142, upload-time = "2026-10-30T18:32:27.5Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/12/68/9624415f4d852ff894e642c16a5c6a66e606b0e00dc7f8b3c3788e7cb71b/braintrust-0.48.1-py3-none-any.whl", hash = "sha256:b8482a12857e56bbe2fd5f3ef9032d81f410612aadd3dee8cbaeaf807fc57bf9", size = 737254, upload-time = "2026-10-26T18:40:43.908Z" },
+    { url = "https://files.pythonhosted.org/packages/97/6c/b9f557200c2ff855fd7a98297a3c2d460b8fd7c68d5f6c69fbe6b613f694/braintrust-0.49.1-py3-none-any.whl", hash = "sha256:e912b0187e3c9c3a031f86b678d56681e36fbf4ed64b66ac9c0b608c3dc61050", size = 757314, upload-time = "2026-10-30T18:32:25.419Z" },
 ]
 
 [[package]]
@@ -1858,7 +1859,7 @@ wheels = [
 
 [[package]]
 name = "langfuse"
-version = "5.0.4"
+version = "5.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "backoff" },
@@ -1871,9 +1872,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/75/b3/6694c5edf351a01f85aae48a867fd34979865062cda808630aae86a99768/langfuse-5.0.4.tar.gz", hash = "sha256:f9f13a7a0bf0aad4d75287411cece3172c717d9440e73b4b84255ffffb549c31", size = 367328, upload-time = "2026-10-21T07:36:07.896Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/45/83/47ed47d5404a15da9a4176dd40f53b173bfa3eebff155a13002b6a3da9d6/langfuse-5.1.0.tar.gz", hash = "sha256:364afbfdfb44b9ae40feba73d08938c8c823a0101c85f3d466dc49d09951b286", size = 371201, upload-time = "2026-10-30T16:05:28.665Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/42/f4/de90215c074ddde1849a60a939f75f9ceaf656c019501b5cac7cdb63b2fc/langfuse-5.0.4-py3-none-any.whl", hash = "sha256:6ab4ddcbc4b33efbd9c7f5feb405bfb0060949e7a170f7410f8fcc52984887a7", size = 637544, upload-time = "2026-10-21T07:36:06.457Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/22/36962b043c6f2b8a1612e596670e64bb4b7137c52690aeb9f3b29dc4773d/langfuse-5.1.0-py3-none-any.whl", hash = "sha256:de947b911ead9d95c56d8592b172b7f84953789c430aa0117045f1f4b6e5a6d3", size = 641284, upload-time = "2026-10-30T16:05:26.931Z" },
 ]
 
 [[package]]
@@ -1937,7 +1938,7 @@ wheels = [
 
 [[package]]
 name = "langsmith"
-version = "0.14.16"
+version = "0.14.17"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1955,9 +1956,9 @@ dependencies = [
     { name = "xxhash" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f5/45/576803a72da96d9c0866b3815f08f447ed16c14acb52174129daca6847d6/langsmith-0.14.16.tar.gz", hash = "sha256:4e5816cbe1541f4d04d71f652eb8f4137889861bebcf7137bcba3553ae9e335e", size = 5096529, upload-time = "2026-10-29T17:53:27.747Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/12/4b/c91526e3038d5d5869fa5dba647215826fb8b2b8a3c042d20581a3e5d735/langsmith-0.14.17.tar.gz", hash = "sha256:53efa2db8293d0a8d60efebe0945c595b635873774b302066ed0a746ddf87562", size = 5106102, upload-time = "2026-11-02T00:58:45.943Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/11/3a/9a072c02a22089ddf20f0f33ea95bee5a5951b31839f118b04f27b94be6e/langsmith-0.14.16-py3-none-any.whl", hash = "sha256:b9ea1a57622b0788b181d78605f974fb206c5f6f75793076ffec23cef4d904c8", size = 933680, upload-time = "2026-10-29T17:53:25.465Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/11/4da3faa7fd20c487c4770f14aa2b4247871e787ad305c2ba528fcf0f2bcc/langsmith-0.14.17-py3-none-any.whl", hash = "sha256:0aa2c79936c93c7cea9c55656f05e21cc5da715fecbdbda439d084adc08429be", size = 940828, upload-time = "2026-11-02T00:58:43.727Z" },
 ]
 
 [[package]]
