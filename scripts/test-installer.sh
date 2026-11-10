@@ -25,7 +25,7 @@ import zipfile
 
 wheel = pathlib.Path(sys.argv[1]) / "kitaru-0.0.0-py3-none-any.whl"
 files = {
-    "kitaru_fixture.py": 'def main():\n    print("kitaru, version 0.0.0")\n',
+    "kitaru_fixture.py": 'from importlib.metadata import version\n\ndef main():\n    print("kitaru, version", version("kitaru"))\n',
     "kitaru-0.0.0.dist-info/METADATA": "Metadata-Version: 2.1\nName: kitaru\nVersion: 0.0.0\nProvides-Extra: cli\nProvides-Extra: mcp\nProvides-Extra: worker\n",
     "kitaru-0.0.0.dist-info/WHEEL": "Wheel-Version: 1.0\nGenerator: installer-regression\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
     "kitaru-0.0.0.dist-info/entry_points.txt": "[console_scripts]\nkitaru = kitaru_fixture:main\n",
@@ -137,8 +137,33 @@ with zipfile.ZipFile(root / "kitaru-0.0.1-py3-none-any.whl", "w") as new:
 PY
   bash "$INSTALLER" --project --no-skills --no-mcp --no-modify-path
 ) > "$TMP/upgrade.log" 2>&1 || { cat "$TMP/upgrade.log"; exit 1; }
+# Equal-size sources installed within one second can reuse the previous pyc.
+# Recreate that collision instead of depending on installation timing.
+"$TMP/workspace/.venv/bin/python" - "$TMP/wheels" <<'PY'
+import importlib.util
+import os
+import pathlib
+import py_compile
+import sys
+import zipfile
+
+source = pathlib.Path(importlib.util.find_spec("kitaru_fixture").origin)
+current = source.read_bytes()
+timestamp = source.stat().st_mtime_ns
+with zipfile.ZipFile(pathlib.Path(sys.argv[1]) / "kitaru-0.0.0-py3-none-any.whl") as old:
+    previous = old.read("kitaru_fixture.py")
+assert len(previous) == len(current)
+source.write_bytes(previous)
+os.utime(source, ns=(timestamp, timestamp))
+py_compile.compile(str(source), doraise=True, invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP)
+source.write_bytes(current)
+os.utime(source, ns=(timestamp, timestamp))
+PY
+cached_version="$("$TMP/workspace/.venv/bin/kitaru" --version)"
+printf '%s\n' "$cached_version"
+[ "$cached_version" = 'kitaru, version 0.0.1' ]
 grep -F 'version 0.0.1' "$TMP/upgrade.log" >/dev/null
-echo 'PASS: rerun upgrades project dependency'
+echo 'PASS: rerun upgrades project dependency despite cached bytecode'
 
 if bash --posix "$INSTALLER" --help > "$TMP/posix.log" 2>&1; then exit 1; fi
 grep -F 'installer needs bash' "$TMP/posix.log" >/dev/null
