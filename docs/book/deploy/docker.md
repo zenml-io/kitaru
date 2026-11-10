@@ -55,7 +55,7 @@ Operational knobs with sensible defaults; raise or lower them deliberately:
 | `KITARU_SERVER_TASK_RETRY_LIMIT` | 3 | Attempts before a stale task is abandoned |
 | `KITARU_SERVER_JOB_PENDING_TIMEOUT_SECONDS` | 3600 | How long a job waits unclaimed before it's canceled |
 | `KITARU_SERVER_EVALUATOR_TASK_TIMEOUT_SECONDS` | 300 | Per-evaluator process timeout |
-| `KITARU_SERVER_IMPORTER_TASK_TIMEOUT_SECONDS` | 600 | Per-import process timeout |
+| `KITARU_SERVER_IMPORTER_TASK_TIMEOUT_SECONDS` | 1200 | Per-import process timeout |
 | `KITARU_SERVER_EVALUATION_PAIR_LIMIT` | 100 | Max (session × evaluator) pairs per batch request |
 | `KITARU_SERVER_IDEMPOTENCY_KEY_RETENTION_SECONDS` | 900 | How long a stored response stays replayable for a retried request |
 | `KITARU_SERVER_LOG_LEVEL` | `INFO` | Server logging |
