@@ -447,6 +447,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 input_tokens=usage.tokens.input_tokens,
                 output_tokens=usage.tokens.output_tokens,
                 cached_input_tokens=usage.tokens.cached_input_tokens,
+                cache_write_input_tokens=usage.tokens.cache_write_input_tokens,
                 reasoning_tokens=usage.tokens.reasoning_tokens,
                 llm_call_count=SessionORM.llm_call_count + deltas.llm_call_count,
                 tool_call_count=SessionORM.tool_call_count + deltas.tool_call_count,

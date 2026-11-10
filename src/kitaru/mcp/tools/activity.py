@@ -3,16 +3,25 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Bounded activity-read handler."""
 
+import asyncio
+import uuid
+from json import JSONDecodeError
+
+import httpx
+from pydantic import ValidationError
+
 from kitaru.api_models.v1.evaluation import EvaluationListParams
 from kitaru.api_models.v1.experiment_run import (
     ExperimentRunJobsListParams,
     ExperimentRunListParams,
+    ExperimentRunStatus,
 )
 from kitaru.api_models.v1.imports import ImportListParams
-from kitaru.api_models.v1.job import JobListParams, JobTasksListParams
+from kitaru.api_models.v1.job import JobListParams, JobStatus, JobTasksListParams
 from kitaru.api_models.v1.replay import ReplayListParams
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.api_models.v1.session_node import SessionNodeListParams
+from kitaru.client.exceptions import APIError, InvalidServerResponseError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.links import (
     get_dashboard_info,
@@ -29,6 +38,7 @@ from kitaru.mcp.models.activity import (
 from kitaru.mcp.models.common import ActivityItem, PageData, ToolSuccessPayload
 from kitaru.mcp.tools.params import build_list_params
 from kitaru.mcp.tools.registry import build_page_data
+from kitaru.task_diagnostics import get_task_diagnostic_warnings
 
 
 async def handle_activity_read(
@@ -75,9 +85,24 @@ async def handle_activity_read(
                 }
                 if base
                 else {},
-                warnings=warnings,
+                warnings=[
+                    *warnings,
+                    *(
+                        await _get_worker_warnings(state, experiment_run_id=run.id)
+                        if run.status == ExperimentRunStatus.RUNNING
+                        else []
+                    ),
+                ],
             )
-        return await client.jobs.get(request.id)
+        job = await client.jobs.get(request.id)
+        return ToolSuccessPayload(
+            data=job,
+            warnings=(
+                await _get_worker_warnings(state, job_id=job.id)
+                if job.status in {JobStatus.PENDING, JobStatus.RUNNING}
+                else []
+            ),
+        )
     if isinstance(request, ActivityListRequest):
         if request.kind == "session":
             page = await client.sessions.list(
@@ -103,6 +128,31 @@ async def handle_activity_read(
             page = await client.jobs.list(build_list_params(JobListParams, request))
         return build_page_data(page, request.size, PageData[ActivityItem])
     return await _get_children(state, request)
+
+
+async def _get_worker_warnings(
+    state: MCPServerState,
+    *,
+    job_id: uuid.UUID | None = None,
+    experiment_run_id: uuid.UUID | None = None,
+) -> list[str]:
+    try:
+        async with asyncio.timeout(5):
+            diagnostics = await state.client.tasks.diagnostics(
+                job_id=job_id, experiment_run_id=experiment_run_id
+            )
+    except (
+        APIError,
+        InvalidServerResponseError,
+        httpx.HTTPError,
+        TimeoutError,
+        ValidationError,
+        JSONDecodeError,
+    ):
+        return [
+            "Worker coverage diagnostics are unavailable; the activity read succeeded."
+        ]
+    return get_task_diagnostic_warnings(diagnostics)
 
 
 async def _get_children(

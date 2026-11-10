@@ -589,11 +589,57 @@ def test_invalid_cost_is_isolated(value: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "field", ["prompt_tokens", "completion_tokens", "prompt_cached_tokens"]
+    "field",
+    [
+        "prompt_tokens",
+        "completion_tokens",
+        "prompt_cached_tokens",
+        "prompt_cache_creation_tokens",
+        "prompt_cache_creation_1h_tokens",
+    ],
 )
 @pytest.mark.parametrize("value", [-1, -0.25, float("inf")])
 def test_invalid_tokens_are_isolated(field: str, value: Any) -> None:
     assert_bad_trace_isolated(boundary_event(metrics={field: value}))
+
+
+@pytest.mark.parametrize(
+    ("metrics", "expected"),
+    [
+        ({"prompt_cache_creation_tokens": 300}, 300),
+        (
+            {
+                "prompt_cache_creation_5m_tokens": 200,
+                "prompt_cache_creation_1h_tokens": 100,
+            },
+            300,
+        ),
+        ({"prompt_cache_creation_1h_tokens": 0}, 0),
+        ({"prompt_cached_tokens": 800}, None),
+    ],
+)
+def test_maps_cache_write_metrics(
+    metrics: dict[str, int], expected: int | None
+) -> None:
+    """Read the aggregate creation metric, or sum Anthropic's TTL split."""
+    record = event(
+        event_id="event-llm",
+        span_id="llm",
+        root_span_id="llm",
+        name="model",
+        span_type="llm",
+        parents=[],
+        input_={"messages": ["hello"]},
+        output={"text": "hi"},
+        start=1_785_000_000.0,
+    )
+    record["metrics"].update({"prompt_tokens": 2300, **metrics})
+
+    [node] = flatten(sessions(json.dumps({"events": [record]}).encode())[0].nodes)
+
+    assert node.tokens is not None
+    assert node.tokens.input_tokens == 2300
+    assert node.tokens.cache_write_input_tokens == expected
 
 
 @pytest.mark.parametrize("value", [False, 0, 1, "", "parent", {}])

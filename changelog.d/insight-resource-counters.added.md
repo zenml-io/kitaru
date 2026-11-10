@@ -1,0 +1,1 @@
+- The `kitaru/post-import-insights` and `kitaru/openai-post-import-insights` analyzers add cards for cost concentrated in the costliest sessions, the tool or model that covers most recorded time, growing or oversized model input, prompt cache reads and changing system prompts, and the most common and one-off tool-call paths.
