@@ -47,6 +47,10 @@ class TaskRepository(Protocol):
         Args:
             tasks: Tasks to store.
 
+        Raises:
+            DuplicateEvaluationTask: Two of the tasks are evaluator tasks of
+                one job for the same input session and plugin version.
+
         Returns:
             Stored tasks with timestamps set, in the same order.
         """
