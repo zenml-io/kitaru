@@ -1,5 +1,5 @@
 ---
-description: A handful of nouns and how they fit together: sessions, analyzers, investigations, evaluators, cohorts, replays, experiments, and workers.
+description: "A handful of nouns and how they fit together: sessions, analyzers, investigations, evaluators, cohorts, replays, experiments, and workers."
 icon: lightbulb
 ---
 
