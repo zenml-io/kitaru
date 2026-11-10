@@ -1,2 +1,0 @@
-- Mark unfinished agent result sessions as failed when their running task fails, times out, is canceled, or is abandoned, preserving already finished sessions and recorded payloads.
-- Update replay and experiment examples to use `--baseline-evaluation-mode if_missing` and clarify the returns tutorial's evaluator and tool policies.

@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 keywords = ["ai-agents", "mastra", "kitaru", "observability", "traces"]
-dependencies = ["kitaru==0.27.6+dev"]
+dependencies = ["kitaru>=0.27.7"]
 
 [project.urls]
 Homepage = "https://kitaru.ai"

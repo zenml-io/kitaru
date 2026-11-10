@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.27.7] - 2026-11-10
+
+### Added
+
+- Added `cache_write_input_tokens` to session and session node token usage for input tokens written to the provider's prompt cache. Sessions sum it across nodes the same way as `cached_input_tokens`, and REST, the SDK, the CLI, and MCP return it.
+- Added `KITARU_SERVER_EPHEMERAL_WORKER__MODAL__REGION` to choose a region for Modal ephemeral workers, such as `eu` for Europe. Leaving it unset preserves Modal's default placement.
+- Added `kitaru session read` and the read-only `kitaru_session_read` MCP tool, which show whole sessions as compact transcripts (one line per step, each model call's new text only, errors kept whole, every cut marked with its size) so an agent can read many sessions without paging through raw node JSON.
+
+### Changed
+
+- Raised the default per-import timeout from 10 to 20 minutes, so large trace imports no longer fail partway through. Set `KITARU_SERVER_IMPORTER_TASK_TIMEOUT_SECONDS` to override it.
+- Store the blob registry rows for a node batch's offloaded payloads, and the tasks of an evaluation batch, with one database statement each instead of three per row. A 100-node batch with 200 payloads over the offload threshold drops from 609 statements to 12, and a 100-pair evaluation job from 309 to 12.
+
+### Fixed
+
+- Fixed installer workspace and custom environment detection, first-run shell PATH setup, `--no-modify-path` during uv bootstrap, and project upgrades on rerun. Failed skill replacements now preserve the previous entry in both `kitaru setup` and the legacy installer.
+- Fixed installer startup verification, missing option values, uv bootstrap paths, shell-profile failures, and interrupted legacy skill updates. Ordinary global upgrades now preserve Python and add-on packages, ambiguous projects receive package-manager guidance, and setup avoids adding a duplicate Codex skill copy.
+- Mark unfinished agent result sessions as failed when their running task fails, times out, is canceled, or is abandoned, preserving already finished sessions and recorded payloads.
+- Update replay and experiment examples to use `--baseline-evaluation-mode if_missing` and clarify the returns tutorial's evaluator and tool policies.
+- Explain pending imports, replays, and experiments when no compatible live worker claims their tasks, including analyzer tasks queued after import parsing. Show actionable worker-coverage warnings in CLI status and job waiting, and MCP job and experiment-run inspection.
+
 ## [0.27.6] - 2026-11-04
 
 ### Changed
