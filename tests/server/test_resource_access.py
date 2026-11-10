@@ -30,12 +30,14 @@ from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.services.resource_access import (
     build_task_grants,
     check_task_session_read,
+    expand_task_session_grants,
     scope_task_session_filter,
 )
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.session import Session, SessionAccessDenied
 from kitaru.server.domain.task import (
     AgentTaskDetails,
+    AnalysisTask,
     AnalysisTaskDetails,
     ApiImportSourceSpec,
     BlobImportSourceSpec,
@@ -47,6 +49,7 @@ from kitaru.server.domain.task import (
     TaskSpec,
 )
 from kitaru.server.filtering import AndExpression, FilterCondition, OrExpression
+from kitaru_test_support import FakeTaskRepository
 
 
 def _script_plugin(blob_id: uuid.UUID) -> ScriptPluginSpec:
@@ -218,11 +221,12 @@ def test_analysis_spec_grants_its_import_and_script_blob() -> None:
     }
 
 
-def test_analysis_spec_with_a_session_list_grants_its_agent() -> None:
-    """Grant a session-list analyzer task its agent instead of each session."""
+def test_analysis_spec_with_a_session_list_grants_its_task_session_list() -> None:
+    """Grant a session-list analyzer task its own stored list, not each session."""
     agent_id = uuid.uuid4()
+    task_id = uuid.uuid4()
     spec = TaskSpec(
-        task_id=uuid.uuid4(),
+        task_id=task_id,
         kind=TaskKind.ANALYZER,
         timeout_seconds=60,
         details=AnalysisTaskDetails(
@@ -233,7 +237,7 @@ def test_analysis_spec_with_a_session_list_grants_its_agent() -> None:
             session_ids=[uuid.uuid4() for _ in range(3)],
         ),
     )
-    assert build_task_grants(spec) == {GrantKind.AGENT: frozenset({agent_id})}
+    assert build_task_grants(spec) == {GrantKind.TASK_SESSIONS: frozenset({task_id})}
 
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
@@ -293,31 +297,28 @@ def test_scope_task_session_filter_limits_a_task_without_imports_to_its_own() ->
     )
 
 
-def test_scope_task_session_filter_includes_granted_agents() -> None:
-    """OR a granted agent's sessions into a task principal's scope."""
+async def test_task_session_list_grant_reads_only_the_listed_sessions() -> None:
+    """Let a session-list grant read the listed sessions, not the agent's others."""
     agent_id = uuid.uuid4()
-    actor = _task_actor({GrantKind.AGENT: frozenset({agent_id})})
-    assert isinstance(actor.principal, TaskPrincipal)
-    scoped = scope_task_session_filter(SessionFilter(), actor)
-    assert scoped.expression == OrExpression(
-        operands=(
-            FilterCondition(
-                field="task_id", op=FilterOp.EQ, value=actor.principal.task_id
-            ),
-            FilterCondition(field="agent_id", op=FilterOp.IN, value=[agent_id]),
-        )
-    )
-
-
-def test_check_task_session_read_covers_a_granted_agents_sessions() -> None:
-    """Let an agent grant read that agent's sessions and no other agent's."""
-    agent_id = uuid.uuid4()
-    actor = _task_actor({GrantKind.AGENT: frozenset({agent_id})})
-    granted = Session(
+    listed = Session(
         owner_id=ACCOUNT.id, agent_id=agent_id, number=1, origin=SessionOrigin.RECORDED
     )
-    other = granted.model_copy(update={"id": uuid.uuid4(), "agent_id": uuid.uuid4()})
+    unlisted = listed.model_copy(update={"id": uuid.uuid4(), "number": 2})
+    tasks = FakeTaskRepository()
+    task = await tasks.create(
+        AnalysisTask(
+            job_id=uuid.uuid4(),
+            plugin_version_id=uuid.uuid4(),
+            agent_id=agent_id,
+            session_ids=[listed.id],
+        )
+    )
+    grants = await expand_task_session_grants(
+        {GrantKind.TASK_SESSIONS: frozenset({task.id})}, tasks
+    )
+    actor = _task_actor(grants)
 
-    check_task_session_read(granted, actor)
+    assert grants == {GrantKind.SESSION: frozenset({listed.id})}
+    check_task_session_read(listed, actor)
     with pytest.raises(SessionAccessDenied):
-        check_task_session_read(other, actor)
+        check_task_session_read(unlisted, actor)

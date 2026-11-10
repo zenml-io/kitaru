@@ -38,6 +38,9 @@ from kitaru.server.adapters.db.repositories.api_key_repository import (
 from kitaru.server.adapters.db.repositories.device_repository import (
     SQLDeviceRepository,
 )
+from kitaru.server.adapters.db.repositories.task_repository import (
+    SQLTaskRepository,
+)
 from kitaru.server.adapters.rest.dependencies.request import (
     get_app_settings,
     get_auth_session,
@@ -158,6 +161,7 @@ def get_auth_service(
         password_hasher=BcryptPasswordHasher(),
         device_service=_build_device_service(auth_session, engine, settings),
         control_plane=control_plane,
+        task_repository=SQLTaskRepository(auth_session),
     )
 
 

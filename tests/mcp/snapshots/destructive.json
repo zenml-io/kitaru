@@ -13287,7 +13287,7 @@
       "$defs": {
         "AnalysisStart": {
           "additionalProperties": false,
-          "description": "Run analyzers once over one agent's finished sessions matching every scope field.\n\nScope fields combine as AND. With none set, every finished session of the\nagent is analyzed. The server fixes the matching sessions when it creates\nthe job.",
+          "description": "Run analyzers once over one agent's finished sessions matching a filter.\n\nWithout a filter, every finished session of the agent is analyzed. The\nserver fixes the matching sessions when it creates the job.",
           "properties": {
             "agent_id": {
               "format": "uuid",
@@ -13303,18 +13303,27 @@
               "title": "Analyzers",
               "type": "array"
             },
-            "cohort_version_id": {
+            "filter": {
               "anyOf": [
                 {
-                  "format": "uuid",
-                  "type": "string"
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
               "default": null,
-              "title": "Cohort Version Id"
+              "description": "Session filter selecting the sessions, e.g. id in a list, tag, cohort_version_id, import_id, or a started_at range.",
+              "title": "Filter"
             },
             "idempotency_key": {
               "anyOf": [
@@ -13329,80 +13338,10 @@
               "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
               "title": "Idempotency Key"
             },
-            "import_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Import Id"
-            },
             "operation": {
               "const": "analysis",
               "title": "Operation",
               "type": "string"
-            },
-            "session_ids": {
-              "anyOf": [
-                {
-                  "items": {
-                    "format": "uuid",
-                    "type": "string"
-                  },
-                  "maxItems": 1000,
-                  "minItems": 1,
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Session Ids"
-            },
-            "started_after": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Started After"
-            },
-            "started_before": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Started Before"
-            },
-            "tag": {
-              "anyOf": [
-                {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Tag"
             }
           },
           "required": [
@@ -13474,6 +13413,39 @@
             "analyzer"
           ],
           "title": "AnalyzerConfig",
+          "type": "object"
+        },
+        "AndFilter": {
+          "additionalProperties": false,
+          "description": "And filter.",
+          "properties": {
+            "and": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "And",
+              "type": "array"
+            }
+          },
+          "required": [
+            "and"
+          ],
+          "title": "AndFilter",
           "type": "object"
         },
         "BaselineEvaluationMode": {
@@ -13613,6 +13585,113 @@
           ],
           "title": "ExperimentRunStart",
           "type": "object"
+        },
+        "FilterCondition": {
+          "additionalProperties": false,
+          "description": "Filter condition.",
+          "properties": {
+            "field": {
+              "description": "Field to filter on.",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "title": "Field",
+              "type": "string"
+            },
+            "op": {
+              "$ref": "#/$defs/FilterOp",
+              "description": "Comparison operator."
+            },
+            "value": {
+              "default": null,
+              "description": "Comparison value.",
+              "title": "Value"
+            }
+          },
+          "required": [
+            "field",
+            "op"
+          ],
+          "title": "FilterCondition",
+          "type": "object"
+        },
+        "FilterOp": {
+          "description": "Filter condition operator.",
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "in",
+            "is_null",
+            "startswith",
+            "endswith",
+            "contains"
+          ],
+          "title": "FilterOp",
+          "type": "string"
+        },
+        "NotFilter": {
+          "additionalProperties": false,
+          "description": "Not filter.",
+          "properties": {
+            "not": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                }
+              ],
+              "description": "Operand.",
+              "title": "Not"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "title": "NotFilter",
+          "type": "object"
+        },
+        "OrFilter": {
+          "additionalProperties": false,
+          "description": "Or filter.",
+          "properties": {
+            "or": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "Or",
+              "type": "array"
+            }
+          },
+          "required": [
+            "or"
+          ],
+          "title": "OrFilter",
+          "type": "object"
         }
       },
       "properties": {
@@ -13664,6 +13743,18 @@
               "title": "Analyzers",
               "type": "array"
             },
+            "filter": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Filter"
+            },
             "operation": {
               "const": "analysis",
               "title": "Operation",
@@ -13671,17 +13762,12 @@
             },
             "result": {
               "$ref": "#/$defs/JobResponse"
-            },
-            "scope": {
-              "additionalProperties": true,
-              "title": "Scope",
-              "type": "object"
             }
           },
           "required": [
             "operation",
             "agent_id",
-            "scope",
+            "filter",
             "analyzers",
             "result"
           ],

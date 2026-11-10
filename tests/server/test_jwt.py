@@ -126,7 +126,7 @@ def test_task_token_round_trips_grants() -> None:
     grants = {
         GrantKind.SESSION: frozenset({uuid.uuid4()}),
         GrantKind.BLOB: frozenset({uuid.uuid4()}),
-        GrantKind.AGENT: frozenset({uuid.uuid4()}),
+        GrantKind.TASK_SESSIONS: frozenset({uuid.uuid4()}),
     }
     expires_at = datetime.now(UTC) + timedelta(hours=1)
     token = JWTToken(

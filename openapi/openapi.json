@@ -464,7 +464,7 @@
       },
       "AnalysisCreateRequest": {
         "additionalProperties": false,
-        "description": "Analysis create request.\n\nEvery scope field that is set must match, so they combine as AND. With\nnone set, every finished session of the agent is analyzed.",
+        "description": "Analysis create request.\n\nWithout a filter, every finished session of the agent is analyzed.",
         "properties": {
           "agent_id": {
             "description": "Agent whose sessions are analyzed.",
@@ -480,19 +480,6 @@
             "minItems": 1,
             "title": "Analyzers",
             "type": "array"
-          },
-          "cohort_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Only sessions in this cohort version.",
-            "title": "Cohort Version Id"
           },
           "filter": {
             "anyOf": [
@@ -514,75 +501,6 @@
             ],
             "description": "Only sessions matching this session filter.",
             "title": "Filter"
-          },
-          "import_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Only sessions this import created. Insights also record it.",
-            "title": "Import Id"
-          },
-          "session_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                "minItems": 1,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Only these sessions.",
-            "title": "Session Ids"
-          },
-          "started_after": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Only sessions started at or after this time.",
-            "title": "Started After"
-          },
-          "started_before": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Only sessions started before this time.",
-            "title": "Started Before"
-          },
-          "tag": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Only sessions with this tag name.",
-            "title": "Tag"
           }
         },
         "required": [

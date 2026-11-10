@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from kitaru.api_models.v1.analysis import AnalysisCreateRequest
+from kitaru.api_models.v1.filter import OrFilter
 from kitaru.api_models.v1.imports import (
     BlobImportSource,
     ImportAnalyzeRequest,
@@ -27,6 +28,7 @@ from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskResponse, Tas
 from kitaru.cli import app as app_module
 from kitaru.cli import imports, invocation_context
 from kitaru.cli.output import CLIError
+from kitaru.cli.session_selection import FILTER_IN_VALUE_LIMIT, build_session_filter
 
 
 def _job(status: JobStatus = JobStatus.PENDING) -> JobResponse:
@@ -470,16 +472,40 @@ async def test_analyze_sessions_sends_every_selector(tmp_path: Path) -> None:
     [(request, idempotency_key)] = client.analysis_calls
     assert idempotency_key == "scope-1"
     assert request.agent_id == client.agent_id
-    assert request.session_ids == [listed]
-    assert request.tag == "refunds"
-    assert request.import_id == client.import_id
-    assert request.started_after == after
+    expected = {
+        "and": [
+            {"field": "id", "op": "in", "value": [str(listed)]},
+            {"field": "tag", "op": "eq", "value": "refunds"},
+            {"field": "import_id", "op": "eq", "value": str(client.import_id)},
+            {"field": "started_at", "op": "ge", "value": after.isoformat()},
+            {"field": "status", "op": "eq", "value": "failed"},
+        ]
+    }
     assert request.filter is not None
+    assert request.filter.model_dump(mode="json", by_alias=True) == expected
     assert result.item["operation"] == "session_analysis"
     assert result.item["agent_id"] == str(client.agent_id)
-    assert result.item["scope"]["tag"] == "refunds"
-    assert "started_before" not in result.item["scope"]
+    assert result.item["filter"] == expected
     assert "kitaru insight list" in result.next_actions
+
+
+def test_build_session_filter_splits_a_long_id_list() -> None:
+    """Split an id list over the per-condition limit into an `or` of `in` lists."""
+    session_ids = [uuid.uuid4() for _ in range(FILTER_IN_VALUE_LIMIT + 1)]
+
+    session_filter = build_session_filter(session_ids=session_ids)
+
+    assert isinstance(session_filter, OrFilter)
+    dumped = session_filter.model_dump(mode="json", by_alias=True)
+    assert [len(condition["value"]) for condition in dumped["or"]] == [
+        FILTER_IN_VALUE_LIMIT,
+        1,
+    ]
+
+
+def test_build_session_filter_returns_none_without_selectors() -> None:
+    """Leave the filter unset so every finished session is analyzed."""
+    assert build_session_filter() is None
 
 
 async def test_analyze_sessions_rejects_a_naive_timestamp() -> None:

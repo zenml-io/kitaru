@@ -25,7 +25,11 @@ from kitaru.cli.registration import (
     resolve_analyzer_configs,
     resolve_asset,
 )
-from kitaru.cli.session_selection import get_cohort_version, parse_session_ids
+from kitaru.cli.session_selection import (
+    build_session_filter,
+    get_cohort_version,
+    parse_session_ids,
+)
 
 
 async def list_imports(
@@ -171,22 +175,21 @@ async def analyze_sessions(
     request = AnalysisCreateRequest(
         agent_id=resolved_agent.id,
         analyzers=analyzer_configs,
-        session_ids=session_ids,
-        tag=normalized_tag,
-        cohort_version_id=cohort_version_id,
-        import_id=import_id,
-        started_after=started_after,
-        started_before=started_before,
-        filter=session_filter,
+        filter=build_session_filter(
+            session_ids=session_ids,
+            tag=normalized_tag,
+            cohort_version_id=cohort_version_id,
+            import_id=import_id,
+            started_after=started_after,
+            started_before=started_before,
+            extra=session_filter,
+        ),
     )
     identity: dict[str, Any] = {
         "agent_id": str(resolved_agent.id),
-        "scope": request.model_dump(
-            mode="json",
-            by_alias=True,
-            exclude_none=True,
-            exclude={"agent_id", "analyzers"},
-        ),
+        "filter": None
+        if request.filter is None
+        else request.filter.model_dump(mode="json", by_alias=True, exclude_unset=True),
         "analyzers": analyzer_identity,
     }
     job = await client.analyses.create(request, idempotency_key=idempotency_key)

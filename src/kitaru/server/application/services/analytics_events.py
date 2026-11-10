@@ -218,6 +218,9 @@ def build_analysis_completed_properties(
         **_plugin_properties(plugin),
         **_duration_properties(task.started_at, task.ended_at),
     }
+    # A task with a session list came from a session analysis request; one
+    # without reads a whole import, whether queued by the import or later.
+    properties["selection"] = "import" if task.session_ids is None else "sessions"
     if task.session_ids is not None:
         properties["session_count"] = len(task.session_ids)
     elif import_ is not None and import_.stats is not None:

@@ -58,7 +58,5 @@ class AnalysisCreate(FrozenModel):
     """Analysis create command."""
 
     agent_id: uuid.UUID
-    session_ids: list[uuid.UUID] | None = None
-    scope: tuple[FilterExpression, ...] = ()
-    import_id: uuid.UUID | None = None
+    filter: FilterExpression | None = None
     analyzers: list[AnalyzerConfigInput]

@@ -154,12 +154,12 @@ async def test_create_analyses_fixes_the_agents_finished_sessions(
     assert task.status is TaskStatus.PENDING
 
 
-async def test_create_analyses_combines_scope_fields(
+async def test_create_analyses_applies_the_filter(
     client: httpx.AsyncClient,
     session_repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
 ) -> None:
-    """Keep only the sessions every scope field matches."""
+    """Keep only the agent's sessions the filter matches."""
     import_id = uuid.uuid4()
     early = await _create_session(session_repository, days=0, import_id=import_id)
     late = await _create_session(session_repository, days=5, import_id=import_id)
@@ -170,9 +170,21 @@ async def test_create_analyses_combines_scope_fields(
         json={
             "agent_id": str(AGENT_ID),
             "analyzers": [{"analyzer": "trends", "min_sessions": 1}],
-            "session_ids": [str(early), str(late), str(live)],
-            "import_id": str(import_id),
-            "started_after": (START + timedelta(days=2)).isoformat(),
+            "filter": {
+                "and": [
+                    {
+                        "field": "id",
+                        "op": "in",
+                        "value": [str(early), str(late), str(live)],
+                    },
+                    {"field": "import_id", "op": "eq", "value": str(import_id)},
+                    {
+                        "field": "started_at",
+                        "op": "ge",
+                        "value": (START + timedelta(days=2)).isoformat(),
+                    },
+                ]
+            },
         },
     )
 
@@ -182,13 +194,35 @@ async def test_create_analyses_combines_scope_fields(
     assert task.import_id == import_id
 
 
-async def test_create_analyses_accepts_more_ids_than_one_filter_condition_holds(
+async def test_create_analyses_records_an_import_only_when_every_session_shares_it(
     client: httpx.AsyncClient,
     session_repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
 ) -> None:
-    """Select an explicit list longer than the filter's per-condition limit."""
-    session_ids = {await _create_session(session_repository) for _ in range(150)}
+    """Leave the import unset when the sessions come from an import and live."""
+    await _create_session(session_repository, import_id=uuid.uuid4())
+    await _create_session(session_repository)
+
+    response = await client.post(
+        "/api/v1/analyses",
+        json={
+            "agent_id": str(AGENT_ID),
+            "analyzers": [{"analyzer": "trends", "min_sessions": 1}],
+        },
+    )
+
+    assert response.status_code == 201
+    (task,) = await _get_analysis_tasks(task_repository, response.json()["id"])
+    assert task.import_id is None
+
+
+async def test_create_analyses_accepts_an_id_list_split_across_conditions(
+    client: httpx.AsyncClient,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+) -> None:
+    """Select an id list longer than one condition holds, split across an `or`."""
+    session_ids = [await _create_session(session_repository) for _ in range(150)]
     await _create_session(session_repository)
 
     response = await client.post(
@@ -196,14 +230,23 @@ async def test_create_analyses_accepts_more_ids_than_one_filter_condition_holds(
         json={
             "agent_id": str(AGENT_ID),
             "analyzers": [{"analyzer": "trends"}],
-            "session_ids": [str(session_id) for session_id in session_ids],
+            "filter": {
+                "or": [
+                    {
+                        "field": "id",
+                        "op": "in",
+                        "value": [str(session_id) for session_id in chunk],
+                    }
+                    for chunk in (session_ids[:100], session_ids[100:])
+                ]
+            },
         },
     )
 
     assert response.status_code == 201
     (task,) = await _get_analysis_tasks(task_repository, response.json()["id"])
     assert task.session_ids is not None
-    assert set(task.session_ids) == session_ids
+    assert set(task.session_ids) == set(session_ids)
 
 
 async def test_create_analyses_skips_below_the_session_minimum(
@@ -259,47 +302,27 @@ async def test_create_analyses_rejects_more_sessions_than_the_cap(
     assert "cap is 1" in response.text
 
 
-@pytest.mark.parametrize("policy", [TaskPolicy(analysis_session_limit=1)])
-async def test_create_analyses_rejects_a_session_list_longer_than_the_cap(
-    client: httpx.AsyncClient, session_repository: FakeSessionRepository
-) -> None:
-    """Observe HTTP 422 for a list over the cap even when fewer sessions match."""
-    finished = await _create_session(session_repository)
-    running = await _create_session(
-        session_repository, status=SessionStatus.IN_PROGRESS
-    )
-
-    response = await client.post(
-        "/api/v1/analyses",
-        json={
-            "agent_id": str(AGENT_ID),
-            "analyzers": [{"analyzer": "trends"}],
-            "session_ids": [str(finished), str(running)],
-        },
-    )
-
-    assert response.status_code == 422
-    assert "session_ids lists 2 sessions, the cap is 1" in response.text
-
-
 @pytest.mark.parametrize(
-    "scope",
+    "session_filter",
     [
-        {"started_after": "2026-10-01T00:00:00"},
-        {"session_ids": [str(uuid.UUID(int=1)), str(uuid.UUID(int=1))]},
-        {"session_ids": []},
+        {"field": "no_such_field", "op": "eq", "value": "x"},
+        {
+            "field": "id",
+            "op": "in",
+            "value": [str(uuid.UUID(int=n)) for n in range(101)],
+        },
     ],
 )
-async def test_create_analyses_rejects_invalid_scope_fields(
-    client: httpx.AsyncClient, scope: dict[str, object]
+async def test_create_analyses_rejects_an_invalid_filter(
+    client: httpx.AsyncClient, session_filter: dict[str, object]
 ) -> None:
-    """Observe HTTP 422 for naive timestamps, duplicate IDs, and empty lists."""
+    """Observe HTTP 422 for an unknown field and an oversized `in` list."""
     response = await client.post(
         "/api/v1/analyses",
         json={
             "agent_id": str(AGENT_ID),
             "analyzers": [{"analyzer": "trends"}],
-            **scope,
+            "filter": session_filter,
         },
     )
 

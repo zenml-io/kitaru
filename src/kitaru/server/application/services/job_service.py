@@ -49,6 +49,7 @@ from kitaru.server.application.services.plugin_resolution import get_plugin_task
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.job import Job, JobAlreadySettled, JobNotSettled
+from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import (
     RESERVED_LABEL_PREFIX,
     AgentTask,
@@ -56,7 +57,6 @@ from kitaru.server.domain.task import (
     Task,
 )
 from kitaru.server.filtering import (
-    MAX_FILTER_IN_VALUES,
     AndExpression,
     FilterCondition,
 )
@@ -430,14 +430,13 @@ class JobService:
         progress are left out.
 
         Args:
-            command: Agent, session scope, and analyzers to run.
+            command: Agent, session filter, and analyzers to run.
             actor: Caller context.
 
         Raises:
             ValidationError: No finished session of the agent matches the
-                scope, more sessions match than the cap allows, the explicit
-                session list is longer than the cap, or two analyzer configs
-                resolve to the same plugin version.
+                filter, more sessions match than the cap allows, or two
+                analyzer configs resolve to the same plugin version.
             PluginNotFound: An analyzer config names an unknown plugin.
             PluginVersionNotFound: An analyzer config names an unknown
                 version.
@@ -450,47 +449,29 @@ class JobService:
         analyzers = await validate_analyzers(
             command.analyzers, self._plugins, self._connections, actor
         )
-        limit = self._policy.analysis_session_limit
-        conditions = (
-            FilterCondition(field="agent_id", op=FilterOp.EQ, value=command.agent_id),
-            FilterCondition(
-                field="status", op=FilterOp.NE, value=SessionStatus.IN_PROGRESS
-            ),
-            *command.scope,
+        expression = AndExpression(
+            operands=(
+                FilterCondition(
+                    field="agent_id", op=FilterOp.EQ, value=command.agent_id
+                ),
+                FilterCondition(
+                    field="status", op=FilterOp.NE, value=SessionStatus.IN_PROGRESS
+                ),
+                *(() if command.filter is None else (command.filter,)),
+            )
         )
-        if command.session_ids is None:
-            expressions = [AndExpression(operands=conditions)]
-        elif len(command.session_ids) > limit:
-            # Reject by list length, before any query, because session_ids has
-            # no other length bound and every MAX_FILTER_IN_VALUES ids cost one
-            # query even when none of them match.
+        sessions = await self._get_capped_sessions(
+            expression, self._policy.analysis_session_limit
+        )
+        if not sessions:
             raise ValidationError(
-                f"session_ids lists {len(command.session_ids)} sessions, the cap is "
-                f"{limit}"
+                f"No finished session of agent {command.agent_id} matches the filter"
             )
-        else:
-            # Split the list because one filter condition holds at most
-            # MAX_FILTER_IN_VALUES values, below the analysis session cap.
-            expressions = [
-                AndExpression(
-                    operands=(
-                        *conditions,
-                        FilterCondition(
-                            field="id",
-                            op=FilterOp.IN,
-                            value=command.session_ids[
-                                start : start + MAX_FILTER_IN_VALUES
-                            ],
-                        ),
-                    )
-                )
-                for start in range(0, len(command.session_ids), MAX_FILTER_IN_VALUES)
-            ]
-        session_ids = await self._get_capped_session_ids(expressions, limit)
-        if not session_ids:
-            raise ValidationError(
-                f"No finished session of agent {command.agent_id} matches the scope"
-            )
+        # Record an import only when every session came from it, so insights
+        # name an import exactly when they describe that import's sessions.
+        import_ids = {session.import_id for session in sessions}
+        import_id = import_ids.pop() if len(import_ids) == 1 else None
+        session_ids = [session.id for session in sessions]
         job = await self.create_job(JobKind.ANALYSIS, actor)
         # The job was just created in this call and cannot have settled yet, so
         # the tasks skip add_tasks' settled check.
@@ -500,7 +481,7 @@ class JobService:
                 job.id,
                 len(session_ids),
                 agent_id=command.agent_id,
-                import_id=command.import_id,
+                import_id=import_id,
                 session_ids=session_ids,
             )
             for analyzer in analyzers
@@ -510,35 +491,32 @@ class JobService:
             return await self._transitions.advance_job(job.id)
         return job
 
-    async def _get_capped_session_ids(
-        self, expressions: list[AndExpression], limit: int
-    ) -> list[uuid.UUID]:
-        """List the ids of the sessions matching any filter, refusing more than a cap.
+    async def _get_capped_sessions(
+        self, expression: AndExpression, limit: int
+    ) -> list[Session]:
+        """List the sessions matching a filter, refusing more than a cap.
 
         Args:
-            expressions: Session filter expressions matching disjoint sessions.
+            expression: Session filter expression.
             limit: Most sessions the caller may select.
 
         Raises:
             ValidationError: More sessions match than the cap allows.
 
         Returns:
-            Matching session ids.
+            Matching sessions, without payloads.
         """
-        session_ids: list[uuid.UUID] = []
-        for expression in expressions:
-            cursor: str | None = None
-            while True:
-                page, cursor = await self._sessions.query(
-                    SessionFilter(expression=expression, cursor=cursor, size=1000),
-                    include_payloads=False,
+        sessions: list[Session] = []
+        cursor: str | None = None
+        while True:
+            page, cursor = await self._sessions.query(
+                SessionFilter(expression=expression, cursor=cursor, size=1000),
+                include_payloads=False,
+            )
+            sessions.extend(page)
+            if len(sessions) > limit:
+                raise ValidationError(
+                    f"The filter matches more than {limit} sessions, the cap is {limit}"
                 )
-                session_ids.extend(session.id for session in page)
-                if len(session_ids) > limit:
-                    raise ValidationError(
-                        f"The scope matches more than {limit} sessions, the cap is "
-                        f"{limit}"
-                    )
-                if not page or cursor is None:
-                    break
-        return session_ids
+            if not page or cursor is None:
+                return sessions

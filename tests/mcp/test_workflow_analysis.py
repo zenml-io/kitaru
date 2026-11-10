@@ -30,29 +30,12 @@ def _job() -> JobResponse:
     )
 
 
-def test_analysis_start_rejects_duplicate_ids_and_naive_timestamps() -> None:
-    agent_id = uuid.uuid4()
-    analyzers = [{"analyzer": "kitaru/openai-post-import-insights"}]
-    session_id = uuid.uuid4()
-    with pytest.raises(ValidationError, match="unique"):
-        AnalysisStart(
-            operation="analysis",
-            agent_id=agent_id,
-            analyzers=analyzers,
-            session_ids=[session_id, session_id],
-        )
-    with pytest.raises(ValidationError, match="timezone"):
-        AnalysisStart(
-            operation="analysis",
-            agent_id=agent_id,
-            analyzers=analyzers,
-            started_after=datetime.fromisoformat("2026-10-01T00:00:00"),
-        )
+def test_analysis_start_requires_an_analyzer() -> None:
     with pytest.raises(ValidationError):
-        AnalysisStart(operation="analysis", agent_id=agent_id, analyzers=[])
+        AnalysisStart(operation="analysis", agent_id=uuid.uuid4(), analyzers=[])
 
 
-async def test_analysis_start_forwards_scope_and_returns_a_typed_receipt() -> None:
+async def test_analysis_start_forwards_the_filter_and_returns_a_typed_receipt() -> None:
     calls: list[tuple[AnalysisCreateRequest, str | None]] = []
     job = _job()
 
@@ -65,35 +48,33 @@ async def test_analysis_start_forwards_scope_and_returns_a_typed_receipt() -> No
     client = SimpleNamespace(analyses=SimpleNamespace(create=create))
     state = MCPServerState(MCPSettings(), cast(Any, client))
     agent_id = uuid.uuid4()
-    cohort_version_id = uuid.uuid4()
-    started_after = datetime(2026, 10, 23, tzinfo=UTC)
+    session_filter = {
+        "and": [
+            {"field": "tag", "op": "eq", "value": "refunds"},
+            {"field": "started_at", "op": "ge", "value": "2026-10-23T00:00:00Z"},
+        ]
+    }
 
     receipt = await handle_workflow_start(
         state,
-        AnalysisStart(
-            operation="analysis",
-            agent_id=agent_id,
-            analyzers=[{"analyzer": "trends", "params": {"k": 3}}],
-            tag="refunds",
-            cohort_version_id=cohort_version_id,
-            started_after=started_after,
-            idempotency_key="analysis-1",
+        AnalysisStart.model_validate(
+            {
+                "operation": "analysis",
+                "agent_id": str(agent_id),
+                "analyzers": [{"analyzer": "trends", "params": {"k": 3}}],
+                "filter": session_filter,
+                "idempotency_key": "analysis-1",
+            }
         ),
     )
 
     [(request, idempotency_key)] = calls
     assert idempotency_key == "analysis-1"
     assert request.agent_id == agent_id
-    assert request.tag == "refunds"
-    assert request.cohort_version_id == cohort_version_id
-    assert request.started_after == started_after
-    assert request.session_ids is None
+    assert request.filter is not None
+    assert request.filter.model_dump(mode="json", by_alias=True) == session_filter
     assert request.analyzers[0].params == {"k": 3}
     result = WorkflowStartResult.model_validate({"ok": True, "data": receipt})
     assert result.data is not None
     assert result.data.operation == "analysis"
-    assert cast(dict[str, Any], receipt)["scope"] == {
-        "tag": "refunds",
-        "cohort_version_id": str(cohort_version_id),
-        "started_after": started_after.isoformat().replace("+00:00", "Z"),
-    }
+    assert cast(dict[str, Any], receipt)["filter"] == session_filter

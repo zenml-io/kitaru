@@ -272,7 +272,7 @@ class AnalysisStartReceipt(MCPModel):
 
     operation: Literal["analysis"]
     agent_id: uuid.UUID
-    scope: dict[str, JsonValue]
+    filter: dict[str, JsonValue] | None
     analyzers: list[AnalyzerConfig]
     result: JobResponse
 

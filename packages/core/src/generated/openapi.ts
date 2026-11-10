@@ -4497,8 +4497,7 @@ export interface components {
          * AnalysisCreateRequest
          * @description Analysis create request.
          *
-         *     Every scope field that is set must match, so they combine as AND. With
-         *     none set, every finished session of the agent is analyzed.
+         *     Without a filter, every finished session of the agent is analyzed.
          */
         AnalysisCreateRequest: {
             /**
@@ -4513,40 +4512,10 @@ export interface components {
              */
             analyzers: components["schemas"]["AnalyzerConfig"][];
             /**
-             * Cohort Version Id
-             * @description Only sessions in this cohort version.
-             */
-            cohort_version_id?: string | null;
-            /**
              * Filter
              * @description Only sessions matching this session filter.
              */
             filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
-            /**
-             * Import Id
-             * @description Only sessions this import created. Insights also record it.
-             */
-            import_id?: string | null;
-            /**
-             * Session Ids
-             * @description Only these sessions.
-             */
-            session_ids?: string[] | null;
-            /**
-             * Started After
-             * @description Only sessions started at or after this time.
-             */
-            started_after?: string | null;
-            /**
-             * Started Before
-             * @description Only sessions started before this time.
-             */
-            started_before?: string | null;
-            /**
-             * Tag
-             * @description Only sessions with this tag name.
-             */
-            tag?: string | null;
         };
         /**
          * AnalysisTaskDetails

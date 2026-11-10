@@ -73,22 +73,21 @@ async def handle_workflow_start(
 
 
 async def _start_analysis(state: MCPServerState, request: AnalysisStart) -> object:
-    """Queue one analysis job and echo the requested scope."""
-    scope = request.model_dump(
-        mode="json",
-        exclude_none=True,
-        exclude={"operation", "agent_id", "analyzers", "idempotency_key"},
-    )
+    """Queue one analysis job and echo the requested filter."""
     job = await state.client.analyses.create(
         AnalysisCreateRequest(
-            agent_id=request.agent_id, analyzers=request.analyzers, **scope
+            agent_id=request.agent_id,
+            analyzers=request.analyzers,
+            filter=request.filter,
         ),
         idempotency_key=request.idempotency_key,
     )
     return {
         "operation": "analysis",
         "agent_id": str(request.agent_id),
-        "scope": scope,
+        "filter": None
+        if request.filter is None
+        else request.filter.model_dump(mode="json", by_alias=True, exclude_unset=True),
         "analyzers": [
             config.model_dump(mode="json", exclude_unset=True)
             for config in request.analyzers

@@ -42,14 +42,19 @@ from kitaru.server.application.interfaces.api_key_repository import (
     ApiKeyRepository,
 )
 from kitaru.server.application.interfaces.password_hasher import PasswordHasher
+from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import (
     AuthContext,
+    GrantKind,
     TaskAuthContext,
     TaskPrincipal,
     WorkerAuthContext,
     WorkerPrincipal,
 )
 from kitaru.server.application.services.device_service import DeviceService
+from kitaru.server.application.services.resource_access import (
+    expand_task_session_grants,
+)
 from kitaru.server.domain.account import Account, AccountNotFound
 from kitaru.server.domain.api_key import (
     API_KEY_PREFIX,
@@ -60,6 +65,7 @@ from kitaru.server.domain.api_key import (
 )
 from kitaru.server.domain.device import DeviceError, DeviceNotFound
 from kitaru.server.domain.keys import verify_secret
+from kitaru.server.domain.task import TaskNotFound
 from kitaru.server.utils import is_stale, to_tz_aware
 
 logger = logging.getLogger(__name__)
@@ -92,6 +98,7 @@ class AuthService:
         password_hasher: PasswordHasher,
         device_service: DeviceService | None = None,
         control_plane: ControlPlaneAuthenticator | None = None,
+        task_repository: TaskRepository | None = None,
     ) -> None:
         """Create an authentication service.
 
@@ -104,6 +111,8 @@ class AuthService:
                 grant.
             control_plane: Control plane authenticator, set when the server
                 runs the control plane auth scheme.
+            task_repository: Task repository holding the session lists that
+                task tokens name.
         """
         self._settings = settings
         self._account_repository = account_repository
@@ -111,6 +120,7 @@ class AuthService:
         self._password_hasher = password_hasher
         self._device_service = device_service
         self._control_plane = control_plane
+        self._task_repository = task_repository
 
     async def resolve(
         self,
@@ -471,9 +481,21 @@ class AuthService:
                 attempt=subject.attempt,
                 worker_id=subject.worker_id,
                 job_id=subject.job_id,
-                grants=subject.grants,
+                grants=await self._expand_task_grants(subject.grants),
             ),
         )
+
+    async def _expand_task_grants(
+        self, grants: dict[GrantKind, frozenset[uuid.UUID]]
+    ) -> dict[GrantKind, frozenset[uuid.UUID]]:
+        if GrantKind.TASK_SESSIONS not in grants:
+            return grants
+        if self._task_repository is None:
+            raise AuthenticationError("Task session grants are not configured.")
+        try:
+            return await expand_task_session_grants(grants, self._task_repository)
+        except TaskNotFound as exc:
+            raise AuthenticationError("Invalid task token.") from exc
 
     async def _authorize_session_device(
         self, device_id: uuid.UUID, account_id: uuid.UUID

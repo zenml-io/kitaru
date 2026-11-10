@@ -81,9 +81,9 @@ uv run kitaru session analyze \
 
 The server resolves the selection when it creates the job and stores the matching session list on each analysis task. A job that waits in the queue therefore reads the sessions that matched when you ran the command, not the ones that match when a worker picks it up. Sessions still in progress are left out. A selection that matches no finished session, or more than the server's cap (1,000 by default, set with `KITARU_SERVER_ANALYSIS_SESSION_LIMIT`), is rejected before any job is created. The analyzer's own session minimum still applies: below it, the task is recorded as skipped.
 
-Insights from a session analysis store an `import_id` only when the selection used `--import-id`. Otherwise they have none.
+Insights from a session analysis store an `import_id` only when every analyzed session came from that one import. Otherwise they have none.
 
-SDK and REST consumers use `client.analyses.create(...)` and `POST /api/v1/analyses`. In MCP, call `kitaru_workflow_start` with `operation: "analysis"`, the `agent_id`, the `analyzers`, and any of `session_ids`, `tag`, `cohort_version_id`, `import_id`, `started_after`, and `started_before`. The tool returns the queued job immediately; read it with `kitaru_activity_read`.
+SDK and REST consumers use `client.analyses.create(...)` and `POST /api/v1/analyses`, which take the `agent_id`, the `analyzers`, and an optional session `filter`. The CLI turns its selectors into that filter: session IDs become `id` `in` conditions (split into groups of 100 joined by `or`), and the other selectors become one condition each, joined by `and`. In MCP, call `kitaru_workflow_start` with `operation: "analysis"`, the `agent_id`, the `analyzers`, and an optional `filter` in the same format. The tool returns the queued job immediately; read it with `kitaru_activity_read`.
 
 Each generated insight stores its `import_id` directly, so task cleanup does not remove its import association. Deleting the import itself clears that reference. Deleting an analyzer version clears the insight's analyzer-version reference without deleting the insight.
 

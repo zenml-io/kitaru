@@ -6,9 +6,10 @@
 import uuid
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import JsonValue
+from kitaru.api_models.v1.filter import Filter
 from kitaru.api_models.v1.imports import ImportSource
 from kitaru.api_models.v1.plugin import AnalyzerConfig, EvaluatorConfig
 from kitaru.api_models.v1.replay import BaselineEvaluationMode
@@ -57,36 +58,24 @@ class EvaluationStart(MCPModel):
 
 
 class AnalysisStart(MCPModel):
-    """Run analyzers once over one agent's finished sessions matching every scope field.
+    """Run analyzers once over one agent's finished sessions matching a filter.
 
-    Scope fields combine as AND. With none set, every finished session of the
-    agent is analyzed. The server fixes the matching sessions when it creates
-    the job.
+    Without a filter, every finished session of the agent is analyzed. The
+    server fixes the matching sessions when it creates the job.
     """
 
     operation: Literal["analysis"]
     agent_id: uuid.UUID
     analyzers: list[AnalyzerConfig] = Field(min_length=1, max_length=20)
-    session_ids: list[uuid.UUID] | None = Field(
-        default=None, min_length=1, max_length=1000
+    filter: Filter | None = Field(
+        default=None,
+        description="Session filter selecting the sessions, e.g. id in a list, "
+        "tag, cohort_version_id, import_id, or a started_at range.",
     )
-    tag: str | None = Field(default=None, min_length=1)
-    cohort_version_id: uuid.UUID | None = None
-    import_id: uuid.UUID | None = None
-    started_after: AwareDatetime | None = None
-    started_before: AwareDatetime | None = None
     idempotency_key: str | None = Field(
         default=None,
         description=IDEMPOTENCY_KEY_DESCRIPTION,
     )
-
-    @model_validator(mode="after")
-    def _validate_scope(self) -> "AnalysisStart":
-        if self.session_ids is not None and len(set(self.session_ids)) != len(
-            self.session_ids
-        ):
-            raise ValueError("session_ids must be unique")
-        return self
 
 
 class ExperimentRunStart(MCPModel):
