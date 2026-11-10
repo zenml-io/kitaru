@@ -48,6 +48,7 @@ from kitaru.server.adapters.rest.dependencies.request import (
 from kitaru.server.adapters.rest.request_state import request_uses_read_engine
 from kitaru.server.adapters.rest.user_activity import is_not_user_activity
 from kitaru.server.api.config import APISettings
+from kitaru.server.api.user_activity import UserActivityRecorder
 from kitaru.server.application.models.auth import (
     AccountPrincipal,
     AuthContext,
@@ -279,7 +280,7 @@ def _record_user_activity(request: Request, context: AuthContext) -> None:
         request: Incoming request.
         context: Resolved auth context.
     """
-    recorder = request.app.state.user_activity
+    recorder: UserActivityRecorder | None = request.app.state.user_activity
     if recorder is None or not isinstance(context.principal, AccountPrincipal):
         return
     endpoint = request.scope.get("endpoint")

@@ -30,7 +30,6 @@ from kitaru.server.application.interfaces.ephemeral_workers import EphemeralWork
 from kitaru.server.application.services.server_analytics import (
     ServerAnalytics,
 )
-from kitaru.server.application.services.user_activity import UserActivityRecorder
 from kitaru.server.database.service import DatabaseService
 
 
@@ -133,19 +132,6 @@ def get_ui_version_state(request: Request) -> str | None:
     """
     ui_version: str | None = request.app.state.ui_version
     return ui_version
-
-
-def get_user_activity_recorder(request: Request) -> UserActivityRecorder | None:
-    """Return the user activity recorder attached to the application state.
-
-    Args:
-        request: Incoming request.
-
-    Returns:
-        Recorder for this process, or None before startup created it.
-    """
-    recorder: UserActivityRecorder | None = request.app.state.user_activity
-    return recorder
 
 
 def get_analytics_client(request: Request) -> AnalyticsClient:

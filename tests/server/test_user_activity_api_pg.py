@@ -28,7 +28,6 @@ from conftest import drop_test_database, local_settings, postgres_available
 from kitaru.server.adapters.db.orm.server_settings import ServerSettingsORM
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
-from kitaru.server.application.services.user_activity import UserActivityRecorder
 from kitaru.server.database.service import DatabaseService
 
 RUNTIME = {"platform": "bare"}
@@ -94,30 +93,25 @@ async def test_user_requests_advance_activity_but_info_and_health_do_not(
     settings: APISettings,
 ) -> None:
     """Report activity from authenticated requests only."""
-    now = datetime(2026, 1, 1, tzinfo=UTC)
-
-    async def keep_in_memory(at: datetime) -> None:
-        return None
-
-    async with _serve(settings) as (app, client):
-        # Swap in a recorder on a controlled clock so the later request is
-        # later by construction.
-        app.state.user_activity = UserActivityRecorder(
-            keep_in_memory, clock=lambda: now
-        )
+    async with _serve(settings) as (_, client):
         assert await _get_activity(client) is None
         headers = await _login(client)
 
+        before = datetime.now(UTC)
         await client.get("/api/v1/agents", headers=headers)
-        assert await _get_activity(client) == now
+        first = await _get_activity(client)
+        assert first is not None
+        assert first >= before
 
-        now += timedelta(minutes=1)
         for path in ("/api/v1/info", "/health", "/health/live"):
             await client.get(path)
-        assert await _get_activity(client) == now - timedelta(minutes=1)
+        assert await _get_activity(client) == first
 
+        before = datetime.now(UTC)
         await client.get("/api/v1/agents", headers=headers)
-        assert await _get_activity(client) == now
+        second = await _get_activity(client)
+        assert second is not None
+        assert second >= before
 
 
 async def test_idle_worker_traffic_does_not_advance_activity(
@@ -186,9 +180,10 @@ async def test_a_task_in_flight_reports_fresh_activity(settings: APISettings) ->
 
         # A server that never saw a user request, as after a restart.
         async with _serve(settings) as (_, other):
+            before = datetime.now(UTC)
             running = await _get_activity(other)
             assert running is not None
-            assert running - stale > timedelta(hours=22)
+            assert running >= before
 
             finished = await other.patch(
                 f"/api/v1/tasks/{claimed['task']['id']}",
@@ -307,17 +302,17 @@ async def test_info_answers_null_when_the_read_hangs(settings: APISettings) -> N
 
 async def test_shutdown_does_not_wait_on_a_locked_write(settings: APISettings) -> None:
     """Finish the lifespan while the activity write waits on a row lock."""
-    server = _serve(settings)
-    _, client = await server.__aenter__()
     connection = await _connect(settings)
-    transaction = connection.transaction()
     try:
-        headers = await _login(client)
-        await transaction.start()
-        await connection.fetch("SELECT * FROM server_settings FOR UPDATE")
-        response = await client.get("/api/v1/agents", headers=headers)
-        assert response.status_code == 200
-        await asyncio.wait_for(server.__aexit__(None, None, None), timeout=30)
+        # The lock outlives the server, so the lifespan ends while it is held.
+        async with (
+            asyncio.timeout(30),
+            connection.transaction(),
+            _serve(settings) as (_, client),
+        ):
+            headers = await _login(client)
+            await connection.fetch("SELECT * FROM server_settings FOR UPDATE")
+            response = await client.get("/api/v1/agents", headers=headers)
+            assert response.status_code == 200
     finally:
-        await transaction.rollback()
         await connection.close()
