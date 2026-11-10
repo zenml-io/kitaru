@@ -220,6 +220,7 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
         "session.import",
         "session.list",
         "session.nodes",
+        "session.read",
     }
     assert all(
         command["read_only"]
