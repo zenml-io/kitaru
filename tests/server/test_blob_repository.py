@@ -18,6 +18,7 @@ import uuid
 from collections.abc import AsyncGenerator
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from conftest import pg_session, pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.job import JobKind, JobStatus
@@ -142,6 +143,66 @@ async def test_create_same_content_different_media_type_creates_second_row(
     assert second.sha256 == first.sha256
     assert second.media_type == "application/json"
     assert first.media_type == "text/plain"
+
+
+async def test_create_many_stores_new_blobs_by_hash_and_media_type(
+    setup: Setup,
+) -> None:
+    """Store every new blob, returning each keyed by (sha256, media_type)."""
+    repository, owner_id = setup
+    text_blob = _blob(owner_id, b"same")
+    json_blob = _blob(owner_id, b"same").model_copy(
+        update={"id": uuid.uuid4(), "media_type": "application/json"}
+    )
+    other_blob = _blob(None, b"other")
+
+    stored = await repository.create_many([text_blob, json_blob, other_blob])
+
+    assert set(stored) == {
+        (blob.sha256, blob.media_type) for blob in (text_blob, json_blob, other_blob)
+    }
+    for blob in (text_blob, json_blob, other_blob):
+        created = stored[(blob.sha256, blob.media_type)]
+        assert created.created is not None
+        assert created.model_copy(update={"created": None}) == blob
+        assert await repository.get(blob.id) == created
+
+
+async def test_create_many_returns_the_stored_row_for_a_known_key(
+    setup: Setup,
+) -> None:
+    """Return the stored row of the duplicate's media type in place of its new row."""
+    repository, owner_id = setup
+    existing, _ = await repository.create(_blob(owner_id, b"same"))
+    await repository.create(
+        _blob(owner_id, b"same").model_copy(update={"media_type": "application/json"})
+    )
+    duplicate = _blob(None, b"same")
+    fresh = _blob(None, b"fresh")
+
+    stored = await repository.create_many([duplicate, fresh])
+
+    assert stored[(existing.sha256, existing.media_type)] == existing
+    assert stored[(fresh.sha256, fresh.media_type)].id == fresh.id
+    with pytest.raises(BlobNotFound):
+        await repository.get(duplicate.id)
+
+
+async def test_create_many_keeps_the_transaction_usable_after_a_rejected_batch() -> (
+    None
+):
+    """Leave the transaction usable when a constraint besides the key rejects."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        repository = SQLBlobRepository(session)
+        with pytest.raises(IntegrityError):
+            await repository.create_many([_blob(uuid.uuid4(), b"orphan")])
+
+        kept = _blob(owner.id, b"kept")
+        stored = await repository.create_many([kept])
+        assert stored[(kept.sha256, kept.media_type)].id == kept.id
 
 
 async def test_get(setup: Setup) -> None:
