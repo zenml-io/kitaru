@@ -33,10 +33,7 @@ from pydantic_core import PydanticSerializationError
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeLink, NodeStatus, NodeType
-from kitaru.task.importer import (
-    ImportedNode,
-    ImportedSession,
-)
+from kitaru.task.importer import ImportedNode, ImportedSession
 
 SOURCE_PARENT_LINK_KIND = "source_parent"
 MAX_TREE_DEPTH = 64
@@ -44,6 +41,17 @@ MAX_TOOL_SCAN_DEPTH = 64
 _TRACE_SHAPE = "trace"
 _OBSERVATION_SHAPE = "observation"
 _EVENT_SHAPE = "ingestion_event"
+_CACHE_READ_KEYS = ("input_cached_tokens", "cache_read_tokens", "cached_input_tokens")
+_CACHE_WRITE_KEYS = (
+    "input_cache_write_tokens",
+    "cache_write_tokens",
+    "cache_creation_input_tokens",
+)
+_CACHE_WRITE_DETAIL_KEYS = (
+    "input_cache_creation",
+    "input_ephemeral_5m_input_tokens",
+    "input_ephemeral_1h_input_tokens",
+)
 _METADATA_KEYS = {
     "agent_name",
     "deployment.environment.name",
@@ -72,11 +80,7 @@ _TRACE_CONTEXT_FIELDS = {
     "traceVersion": "version",
 }
 
-_TOOL_CALL_KINDS = {
-    "function-call",
-    "tool-call",
-    "tool-use",
-}
+_TOOL_CALL_KINDS = {"function-call", "tool-call", "tool-use"}
 _TOOL_ARGUMENT_TEXT_KEYS = (
     "customer_reply",
     "final_answer",
@@ -970,27 +974,21 @@ def _tokens(record: dict[str, Any]) -> TokenUsage | None:
     output_usage = _first_nonempty(record, "outputUsage", "output_usage")
     if output_usage is None:
         output_usage = _first_nonempty(usage, "output", "output_tokens")
-    counts = (
-        _integer(input_usage),
-        _integer(output_usage),
-        _integer(
-            _first_nonempty(
-                usage,
-                "input_cached_tokens",
-                "cache_read_tokens",
-                "cached_input_tokens",
-            )
-        ),
-        _integer(usage.get("reasoning_tokens")),
-    )
-    if all(value is None for value in counts):
-        return None
-    return TokenUsage(
-        input_tokens=counts[0],
-        output_tokens=counts[1],
-        cached_input_tokens=counts[2],
-        reasoning_tokens=counts[3],
-    )
+    # Langfuse prefixes LangChain's input details with `input_`, and
+    # langchain-anthropic zeroes `cache_creation` when Anthropic splits the
+    # writes by cache lifetime.
+    writes = [_integer(usage.get(key)) for key in _CACHE_WRITE_DETAIL_KEYS]
+    cache_writes = _integer(_first_nonempty(usage, *_CACHE_WRITE_KEYS))
+    if cache_writes is None and any(c is not None for c in writes):
+        cache_writes = sum(c or 0 for c in writes)
+    counts = {
+        "input_tokens": _integer(input_usage),
+        "output_tokens": _integer(output_usage),
+        "cached_input_tokens": _integer(_first_nonempty(usage, *_CACHE_READ_KEYS)),
+        "cache_write_input_tokens": cache_writes,
+        "reasoning_tokens": _integer(usage.get("reasoning_tokens")),
+    }
+    return None if set(counts.values()) == {None} else TokenUsage(**counts)
 
 
 def _tool_call_ids(value: Any) -> set[str]:
