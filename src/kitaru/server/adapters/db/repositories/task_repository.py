@@ -16,6 +16,7 @@
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from functools import partial
 
 from sqlalchemy import (
     ColumnElement,
@@ -39,7 +40,10 @@ from kitaru.server.adapters.db.orm.task import (
     TaskORM,
 )
 from kitaru.server.adapters.db.pagination import IdOrder, paginate
-from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
+from kitaru.server.adapters.db.repositories.base import (
+    BaseSQLRepository,
+    ConstraintErrors,
+)
 from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.task import DuplicateEvaluationTask, Task, TaskNotFound
@@ -104,6 +108,31 @@ def _residual_conditions(scope: WorkerScope) -> list[ColumnElement[bool]]:
     return conditions
 
 
+def _find_repeated_evaluator_pair(
+    rows: Sequence[TaskORM],
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID] | None:
+    """Find the first (job_id, input_session_id, plugin_version_id) rows repeat.
+
+    A row with no input session or plugin version is skipped, since the
+    unique key treats a NULL as distinct from every other value.
+
+    Args:
+        rows: Rows of one insert.
+
+    Returns:
+        First repeated key, None when no two rows share one.
+    """
+    seen: set[tuple[uuid.UUID, uuid.UUID, uuid.UUID]] = set()
+    for row in rows:
+        if row.input_session_id is None or row.plugin_version_id is None:
+            continue
+        key = (row.job_id, row.input_session_id, row.plugin_version_id)
+        if key in seen:
+            return key
+        seen.add(key)
+    return None
+
+
 class SQLTaskRepository(BaseSQLRepository[TaskORM]):
     """Task repository backed by the application database."""
 
@@ -150,14 +179,27 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         Args:
             tasks: Tasks to store.
 
+        Raises:
+            DuplicateEvaluationTask: Two of the tasks are evaluator tasks of
+                one job for the same input session and plugin version.
+
         Returns:
             Stored tasks with timestamps set, in the same order.
         """
         if not tasks:
             return []
         rows = [TaskORM.from_domain(task) for task in tasks]
-        self._session.add_all(rows)
-        await self._flush()
+        pair = _find_repeated_evaluator_pair(rows)
+        # A clash with a stored task leaves no pair in the batch to name, so it
+        # propagates untranslated rather than naming the wrong pair.
+        constraints: ConstraintErrors | None = None
+        if pair is not None:
+            constraints = {
+                TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT: partial(
+                    DuplicateEvaluationTask, *pair
+                )
+            }
+        await self._add_all(rows, constraints)
         return [row.to_domain() for row in rows]
 
     async def get(self, task_id: uuid.UUID, exclusive: bool = False) -> Task:
@@ -202,6 +244,8 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
             Page of matching tasks and the next cursor.
         """
         statement = select(TaskORM)
+        if task_filter.job_ids is not None:
+            statement = statement.where(TaskORM.job_id.in_(task_filter.job_ids))
         if task_filter.job_id is not None:
             statement = statement.where(TaskORM.job_id == task_filter.job_id)
         if task_filter.stale_before is not None:

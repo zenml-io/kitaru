@@ -44,6 +44,43 @@ class TaskKind(StrEnum):
     ANALYZER = "analyzer"
 
 
+class TaskWaitReason(StrEnum):
+    """Why no live worker covers a pending task."""
+
+    NO_LIVE_WORKERS = "no_live_workers"
+    CLAIM_MISMATCH = "claim_mismatch"
+    JOB_MISMATCH = "job_mismatch"
+    SELECTOR_MISMATCH = "selector_mismatch"
+    CREDENTIAL_MISMATCH = "credential_mismatch"
+
+
+class TaskDiagnosticResponse(ResponseModel):
+    """Pending tasks sharing worker requirements and coverage."""
+
+    kind: TaskKind = Field(description="Task kind.")
+    agent_version_id: uuid.UUID | None = Field(
+        default=None, description="Required agent version."
+    )
+    labels: dict[str, str] = Field(description="Required task labels.")
+    reasons: list[TaskWaitReason] = Field(
+        description="Coverage mismatches; empty when a compatible worker exists."
+    )
+    task_count: int = Field(description="Pending tasks in this group.")
+    task_ids: list[uuid.UUID] = Field(description="Up to three example task ids.")
+    job_ids: list[uuid.UUID] = Field(description="Up to three example job ids.")
+
+
+class TaskDiagnosticsResponse(ResponseModel):
+    """Heartbeat-based coverage snapshot of pending work."""
+
+    live_worker_count: int = Field(description="Workers with recent heartbeats.")
+    pending_task_count: int = Field(description="Pending tasks examined.")
+    groups: list[TaskDiagnosticResponse] = Field(
+        description="Up to 100 groups of pending work."
+    )
+    truncated: bool = Field(description="Whether additional groups were omitted.")
+
+
 class TaskOnFailure(StrEnum):
     """What a task's hard failure does to the rest of its job."""
 

@@ -22,6 +22,7 @@ from typing import Any
 
 from kitaru.api_models.v1.job import JobResponse, JobStatus
 from kitaru.cli.output import CLIError, CommandResult, emit_event
+from kitaru.cli.task_diagnostics import get_task_diagnostics
 
 _TERMINAL_EXIT_CODES = {
     JobStatus.COMPLETED: 0,
@@ -39,7 +40,11 @@ async def get_job(client: Any, job_id: uuid.UUID, *, tasks: bool) -> CommandResu
             task.model_dump(mode="json")
             async for task in client.jobs.iter_tasks(job_id)
         ]
-    return CommandResult(item=item)
+    diagnostics, warnings = await get_task_diagnostics(client, job_id=job_id)
+    item["task_diagnostics"] = (
+        diagnostics.model_dump(mode="json") if diagnostics else None
+    )
+    return CommandResult(item=item, warnings=warnings)
 
 
 async def poll_job(
@@ -65,17 +70,19 @@ async def poll_job(
         else initial_job.model_dump(mode="json", exclude={"updated"})
     )
 
+    previous_diagnostics: dict[str, Any] | None = None
+    latest_diagnostics: dict[str, Any] | None = None
     while True:
         if deadline is None:
             job: JobResponse = await client.jobs.get(job_id)
         else:
             remaining = deadline - clock()
             if remaining <= 0:
-                raise _get_poll_timeout(job_id, previous)
+                raise _get_poll_timeout(job_id, previous, latest_diagnostics)
             try:
                 job = await asyncio.wait_for(client.jobs.get(job_id), timeout=remaining)
             except TimeoutError as error:
-                raise _get_poll_timeout(job_id, previous) from error
+                raise _get_poll_timeout(job_id, previous, latest_diagnostics) from error
         item = job.model_dump(mode="json")
         fingerprint = dict(item)
         fingerprint.pop("updated", None)
@@ -86,10 +93,34 @@ async def poll_job(
         if job.status in _TERMINAL_EXIT_CODES:
             return job
 
+        diagnostics, warnings = await get_task_diagnostics(
+            client,
+            job_id=job_id,
+            timeout=5.0 if deadline is None else deadline - clock(),
+        )
+        diagnostic_item = {
+            "job_id": str(job_id),
+            "task_diagnostics": diagnostics.model_dump(mode="json")
+            if diagnostics
+            else None,
+            "warnings": warnings,
+        }
+        latest_diagnostics = {
+            "task_diagnostics": diagnostic_item["task_diagnostics"],
+            "warnings": warnings,
+        }
+        if diagnostic_item != previous_diagnostics and (
+            warnings or previous_diagnostics is not None
+        ):
+            emit_event("diagnostics", diagnostic_item)
+        previous_diagnostics = (
+            diagnostic_item if warnings or previous_diagnostics is not None else None
+        )
+
         if deadline is not None:
             remaining = deadline - clock()
             if remaining <= 0:
-                raise _get_poll_timeout(job_id, previous)
+                raise _get_poll_timeout(job_id, previous, latest_diagnostics)
             await sleep(min(interval, remaining))
         else:
             await sleep(interval)
@@ -137,13 +168,19 @@ async def cancel_job(client: Any, job_id: uuid.UUID) -> CommandResult:
     )
 
 
-def _get_poll_timeout(job_id: uuid.UUID, previous: dict[str, Any] | None) -> CLIError:
+def _get_poll_timeout(
+    job_id: uuid.UUID,
+    previous: dict[str, Any] | None,
+    diagnostics: dict[str, Any] | None = None,
+) -> CLIError:
     """Build the stable local polling-timeout error."""
     return CLIError(
         "timeout",
         f"Timed out waiting for job {job_id}; remote work continues.",
         details={
+            **(diagnostics or {}),
             "job_id": str(job_id),
             "last_status": previous["status"] if previous is not None else None,
+            "remote_continues": True,
         },
     )

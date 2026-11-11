@@ -5,14 +5,16 @@ icon: coins
 
 # Track cost and model usage
 
-Every model call in a recorded run lands as an `llm_call` node on the [session](../concepts/agents-and-sessions.md): the requested and resolved model, inputs and outputs, token usage (input, output, cached, reasoning), and cost. The session rolls those values up as it goes, so the totals are already there when you read a run:
+Every model call in a recorded run lands as an `llm_call` node on the [session](../concepts/agents-and-sessions.md): the requested and resolved model, inputs and outputs, token usage (input, output, cached, cache write, reasoning), and cost. The session rolls those values up as it goes, so the totals are already there when you read a run:
 
 ```python
 session = await client.sessions.get(session_id)
 print(session.cost)  # Decimal, summed across the run's model calls
-print(session.tokens)  # input / output / cached_input / reasoning
+print(session.tokens)  # input / output / cached_input / cache_write_input / reasoning
 print(session.llm_call_count, session.tool_call_count)
 ```
+
+`cached_input_tokens` counts input tokens read from the provider's prompt cache, and `cache_write_input_tokens` counts input tokens written to it, which providers such as Anthropic bill above the normal input rate. Kitaru stores both counts as the source reports them. Whether `input_tokens` also counts cache reads and writes follows the source: OpenAI-style usage includes them, while Anthropic's raw usage and Langfuse's usage details report them beside the input count. Each adapter and import guide says which convention it records.
 
 Imported sessions get the same treatment: when your Langfuse export carries usage and cost, the importer preserves them, so your history is costed the moment it lands.
 

@@ -46,6 +46,7 @@ class TaskFilter(ListFilter):
     }
 
     job_id: uuid.UUID | None = None
+    job_ids: list[uuid.UUID] | None = None
     stale_before: AwareDatetime | None = None
 
 
@@ -74,7 +75,7 @@ class TaskPolicy(FrozenModel):
     retry_limit: int = 3
     sweep_batch_limit: int = 100
     evaluator_timeout_seconds: int = 300
-    importer_timeout_seconds: int = 600
+    importer_timeout_seconds: int = 1200
     analyzer_timeout_seconds: int = 900
     max_result_bytes: int = 1024 * 1024
     evaluation_pair_limit: int = 100

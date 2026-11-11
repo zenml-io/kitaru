@@ -20,6 +20,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from tests.cli.task_diagnostic_fakes import EmptyTaskDiagnostics
 
 from kitaru.api_models.v1.experiment_run import (
     EvaluationAggregateResponse,
@@ -86,6 +87,7 @@ class StubRunsClient:
         self.cohort_version = SimpleNamespace(
             id=uuid.uuid4(), cohort_id=uuid.uuid4(), version=4
         )
+        self.tasks = EmptyTaskDiagnostics()
         self.agent = SimpleNamespace(
             id=uuid.uuid4(), name="candidate", latest_version=2
         )

@@ -30,7 +30,13 @@ on:
         default: file
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths: [install.sh, .github/workflows/installer.yml]
+    paths:
+      - install.sh
+      - scripts/test-installer.sh
+      - tests/scripts/test_installer_behavior.py
+      - pyproject.toml
+      - src/kitaru/cli/setup.py
+      - .github/workflows/installer.yml
 permissions: {}
 concurrency:
   group: installer-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
@@ -234,7 +240,7 @@ jobs:
           # which would put the installer into project mode.
           cd "$(mktemp -d)"
           for attempt in 1 2 3 4 5; do
-            get_script | bash -s -- && exit 0
+            get_script | bash -s -- | tee "$RUNNER_TEMP/install.log" && exit 0
             echo "installer attempt $attempt failed; retrying in 30s" >&2
             sleep 30
           done
@@ -260,8 +266,15 @@ jobs:
             || cat doctor.json
           # `set -o pipefail` above would fail the pipe on a missing rc file, so
           # swallow cat's status and let grep decide.
-          { cat "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile" 2>/dev/null || true; } \
+          { cat "$HOME/.bashrc" "$HOME/.zshenv" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile" 2>/dev/null || true; } \
             | grep -q ".local/bin" || { echo "PATH not persisted"; exit 1; }
+      - name: The printed PATH instruction works without restarting the shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          hint="$(grep -E '^ +export PATH=' "$RUNNER_TEMP/install.log" | head -1 || true)"
+          eval "$hint"
+          kitaru --version
       - name: Re-run is an upgrade, not an error
         shell: bash
         run: cd "$(mktemp -d)" && cat "$GITHUB_WORKSPACE/install.sh" | bash -s --
@@ -297,3 +310,11 @@ jobs:
             echo "installer exited 0 on a failed install" >&2; exit 1
           fi
           echo "failed install correctly exited nonzero"
+  regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+      - run: bash scripts/test-installer.sh

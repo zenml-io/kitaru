@@ -125,14 +125,7 @@ def build_session_completed_properties(session: Session) -> dict[str, Any]:
     if session.adapter_version is not None:
         properties["adapter_version"] = session.adapter_version
     if session.tokens is not None:
-        if session.tokens.input_tokens is not None:
-            properties["input_tokens"] = session.tokens.input_tokens
-        if session.tokens.output_tokens is not None:
-            properties["output_tokens"] = session.tokens.output_tokens
-        if session.tokens.cached_input_tokens is not None:
-            properties["cached_input_tokens"] = session.tokens.cached_input_tokens
-        if session.tokens.reasoning_tokens is not None:
-            properties["reasoning_tokens"] = session.tokens.reasoning_tokens
+        properties.update(session.tokens.model_dump(exclude_none=True))
     return properties
 
 

@@ -46,7 +46,7 @@ Each node uses the fields below. Optional fields can be omitted or set to null.
 | `reasoning_selectors` | string array | RFC 6901 JSON Pointers selecting visible reasoning strings inside `outputs`. |
 | `inputs`, `outputs` | any JSON value | Complete source payloads. Importers preserve message history, tool arguments, multimodal parts, and provider-specific content here. |
 | `requested_model`, `model`, `model_provider` | string or null | Requested model, served model, and model provider. |
-| `tokens` | object or null | Input, output, cached input, and reasoning token counts when reported. |
+| `tokens` | object or null | Input, output, cached input, cache write input, and reasoning token counts when reported. |
 | `cost` | decimal or null | Recorded or estimated call cost. |
 | `model_params` | object or null | Model request parameters. |
 | `tool_name`, `subagent_id` | string or null | Tool or subagent identity for the matching node type. |
@@ -94,7 +94,7 @@ The formatted object below represents one JSONL record. Serialize it onto one li
       "outputs": [{"role": "assistant", "content": "Delft is rainy and 18 C."}, {"role": "reasoning", "content": "The weather tool reports rain and a temperature of 18 C."}],
       "model": "claude-haiku-4-5-20251001",
       "model_provider": "anthropic",
-      "tokens": {"input_tokens": 24, "output_tokens": 11, "cached_input_tokens": 0, "reasoning_tokens": 0},
+      "tokens": {"input_tokens": 24, "output_tokens": 11, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "reasoning_tokens": 0},
       "attributes": {},
       "metadata": {}
     }
