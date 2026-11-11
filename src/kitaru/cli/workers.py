@@ -283,17 +283,28 @@ class ForegroundWorkerProcess:
     def _request_stop(self, reason: _TerminationReason) -> None:
         """Record the first signal and request a best-effort graceful drain."""
         self._stop_reason = reason
-        self.stop.set()
-        if self._loop is not None:
-            self._loop.call_soon_threadsafe(self.stop.set)
-        self._emit_signal_event("draining", reason)
+        self._apply_signal(self.stop.set, "draining", reason)
 
     def _request_cancel(self, reason: _TerminationReason) -> None:
         """Record the second signal and cancel every task the worker holds."""
         self._cancel_requested = True
-        if self._loop is not None:
-            self._loop.call_soon_threadsafe(self._worker.cancel_inflight)
-        self._emit_signal_event("canceling", reason)
+        self._apply_signal(self._worker.cancel_inflight, "canceling", reason)
+
+    def _apply_signal(
+        self, action: Callable[[], None], event: str, reason: _TerminationReason
+    ) -> None:
+        """Run a signal's action, then emit its lifecycle event, on the event loop."""
+
+        def apply() -> None:
+            action()
+            self._emit_signal_event(event, reason)
+
+        # Defer to the loop because CPython can run this handler inside a stdout
+        # flush, and writing the event there raises "reentrant call".
+        if self._loop is None:
+            apply()
+        else:
+            self._loop.call_soon_threadsafe(apply)
 
     def _emit_signal_event(self, event: str, reason: _TerminationReason) -> None:
         """Emit a signal lifecycle event, tolerating a closed output stream."""
