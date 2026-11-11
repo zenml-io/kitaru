@@ -1,0 +1,1 @@
+- Added `last_user_activity` to `GET /api/v1/info`. It reports when a user last used the server, and the current time while a task is claimed or running. It is null when unknown or not recorded. Worker traffic (registration, token renewal, the startup lookup of a pre-registered worker, claim polling, and heartbeats) does not count.
