@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -34,7 +35,14 @@ def installer(tmp_path):
     binary.write_text(
         '#!/bin/bash\nprintf "%s\\n" "$*" >> "$BINARY_CALLS"\n'
         '[ "${BROKEN_CLI:-0}" = 0 ] || { echo "fixture startup failed" >&2; exit 7; }\n'
-        'if [ "$*" = --help ] && [ "${HAS_OUTPUT:-0}" = 1 ]; then echo --output; fi\n'
+        'if [ "$*" = --version ]; then\n'
+        '  echo "${CLI_VERSION_STRING:-fixture}"; exit\nfi\n'
+        'if [ "$*" = --help ] && [ "${HAS_OUTPUT:-0}" = 1 ]; then\n'
+        "  echo --output\n"
+        '  if [ "${LONG_HELP:-0}" = 1 ]; then\n'
+        "    trap 'exit 120' PIPE\n"
+        "    printf '%262144s\\n' ''\n"
+        "  fi\nfi\n"
         "echo fixture\n"
     )
     binary.chmod(0o755)
@@ -42,18 +50,23 @@ def installer(tmp_path):
     uv.write_text(
         '#!/bin/bash\nprintf "%s\\n" "$*" >> "$CALLS"\n'
         'if [ -n "${UV_FAIL_COMMAND:-}" ] && [[ "$*" = "$UV_FAIL_COMMAND"* ]]; '
-        "then exit 8; fi\n"
+        'then echo "${UV_ERROR:-fixture uv failure}" >&2; exit 8; fi\n'
         'case "$*" in\n'
         '  --version) echo "uv 0.13.4" ;;\n'
         '  "tool dir --bin") echo "$BIN_DIR" ;;\n'
         '  "tool dir") echo "$TOOL_DIR" ;;\n'
+        '  "python pin") exit 1 ;;\n'
+        '  "python find"*) echo "$TEST_PYTHON" ;;\n'
         '  run*) echo "${BIN_DIR%/bin}" ;;\n'
         "  *) exit 0 ;;\nesac\n"
     )
     uv.chmod(0o755)
-    env = dict(os.environ)
-    for key in ("KITARU_PYTHON", "KITARU_VERSION", "KITARU_PRE", "KITARU_SCOPE"):
-        env.pop(key, None)
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key
+        in {"SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "TMPDIR"}
+    }
     env.update(
         PATH=f"{stub_dir}:/usr/bin:/bin",
         TEST_HOME=str(tmp_path / "home"),
@@ -64,6 +77,7 @@ def installer(tmp_path):
         BINARY_CALLS=str(tmp_path / "binary-calls"),
         BIN_DIR=str(bin_dir),
         TOOL_DIR=str(tool_dir),
+        TEST_PYTHON=sys.executable,
     )
     return script, env
 
@@ -309,6 +323,56 @@ def test_failed_global_install_or_upgrade_cannot_report_success(
     assert "Kitaru is installed" not in result.stdout
 
 
+@pytest.mark.parametrize("scope", ["--global", "--project"])
+@pytest.mark.parametrize(
+    "version_output",
+    ["0.27.7", "kitaru 0.27.7", "kitaru, version 0.27.7"],
+)
+def test_success_names_product_once(installer, tmp_path, scope, version_output):
+    installer[1]["CLI_VERSION_STRING"] = version_output
+    (tmp_path / "pyproject.toml").write_text('[project]\nname="fixture"\n')
+    result = run_installer(installer, tmp_path, scope)
+    assert result.returncode == 0, result.stderr
+    expected = "✓ kitaru 0.27.7 installed"
+    if scope == "--project":
+        expected += " into this project's environment"
+    assert expected in result.stdout.splitlines()
+
+
+@pytest.mark.parametrize(
+    "uv_error",
+    [
+        "No solution found: no version of kitaru[cli]==9.9.9 exists",
+        "Failed to download kitaru: network connection refused",
+    ],
+)
+def test_global_failure_preserves_cause_without_conflict_hint(
+    installer, tmp_path, uv_error
+):
+    installer[1].update(UV_FAIL_COMMAND="tool install", UV_ERROR=uv_error)
+    result = run_installer(installer, tmp_path, "--global", "--version=9.9.9")
+    assert result.returncode != 0
+    assert uv_error in result.stderr
+    assert "unmanaged" not in result.stderr
+    assert "original package manager" not in result.stderr
+    assert "Kitaru is installed" not in result.stdout
+
+
+def test_project_failure_preserves_build_error_without_lower_bound_hint(
+    installer, tmp_path
+):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname="fixture"\nrequires-python=">=3.11"\n'
+    )
+    uv_error = "Failed to build zstandard==0.25.0 on Python 3.15"
+    installer[1].update(UV_FAIL_COMMAND="add", UV_ERROR=uv_error)
+    result = run_installer(installer, tmp_path, "--project", "--with=kitaru-langgraph")
+    assert result.returncode != 0
+    assert uv_error in result.stderr
+    assert "Kitaru needs Python >= 3.11" not in result.stderr
+    assert "Kitaru is installed" not in result.stdout
+
+
 @pytest.mark.parametrize("supports_output", ["0", "1"])
 def test_setup_output_option_is_compatible_with_older_releases(
     installer, tmp_path, supports_output
@@ -328,6 +392,22 @@ def test_setup_output_option_is_compatible_with_older_releases(
     assert any("--output text setup" in call for call in calls) == (
         supports_output == "1"
     )
+
+
+def test_long_help_does_not_hide_output_option(installer, tmp_path):
+    script, env = installer
+    env.update(HAS_OUTPUT="1", LONG_HELP="1")
+    result = subprocess.run(
+        ["bash", str(script), "--global", "--no-mcp", "--no-modify-path"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    calls = Path(env["BINARY_CALLS"]).read_text().splitlines()
+    assert any("--output text setup" in call for call in calls)
 
 
 def test_legacy_skill_destinations_avoid_codex_copy(tmp_path):
