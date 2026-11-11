@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Server last user activity Alembic revision.
 
-Revision ID: 025_last_user_activity
-Revises: 024_token_completeness
+Revision ID: 026_last_user_activity
+Revises: 025_cache_write_input_tokens
 Create Date: 2026-11-05
 
 """
@@ -23,8 +23,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "025_last_user_activity"
-down_revision = "024_token_completeness"
+revision = "026_last_user_activity"
+down_revision = "025_cache_write_input_tokens"
 branch_labels = None
 depends_on = None
 
