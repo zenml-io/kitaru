@@ -20,6 +20,7 @@ from functools import partial
 
 from sqlalchemy import (
     ColumnElement,
+    exists,
     func,
     not_,
     or_,
@@ -430,6 +431,15 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
             .limit(limit)
         )
         return list((await self._session.scalars(statement)).all())
+
+    async def has_in_flight(self) -> bool:
+        """Report whether any task is claimed or running.
+
+        Returns:
+            Whether at least one task is in flight.
+        """
+        statement = select(exists().where(TaskORM.status.in_(IN_FLIGHT_STATUS_VALUES)))
+        return bool(await self._session.scalar(statement))
 
     async def stamp_heartbeats(
         self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime

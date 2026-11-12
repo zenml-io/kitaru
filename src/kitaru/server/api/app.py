@@ -97,6 +97,7 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.api.otel import configure_otel, instrument_engine, shutdown_otel
 from kitaru.server.api.task_sweeper import start_task_sweeper, stop_task_sweeper
 from kitaru.server.api.ui import get_ui_version, register_ui
+from kitaru.server.api.user_activity import UserActivityRecorder
 from kitaru.server.application.services.server_analytics import (
     ServerAnalytics,
     build_analytics_context,
@@ -364,11 +365,13 @@ def create_app(settings: APISettings) -> FastAPI:
         async for session in database.get_async_session():
             await register_default_plugins(SQLPluginRepository(session))
             await session.commit()
+        app.state.user_activity = UserActivityRecorder(database)
         sweep_task = start_task_sweeper(database, settings, analytics)
         try:
             yield
         finally:
             await stop_task_sweeper(sweep_task)
+            await app.state.user_activity.aclose()
             await analytics.aclose()
             if app.state.control_plane_client is not None:
                 await app.state.control_plane_client.close()
@@ -397,6 +400,8 @@ def create_app(settings: APISettings) -> FastAPI:
     app.state.control_plane_client = None
     # Replaced with the persisted server id at startup.
     app.state.server_id = None
+    # Replaced with a live recorder at startup.
+    app.state.user_activity = None
     # Replaced with a live store at startup when S3 blob storage is configured.
     app.state.s3_blob_data_store = None
     # Replaced with a live backend at startup when an ephemeral worker backend

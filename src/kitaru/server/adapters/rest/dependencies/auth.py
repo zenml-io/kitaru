@@ -49,8 +49,11 @@ from kitaru.server.adapters.rest.dependencies.request import (
     get_session,
 )
 from kitaru.server.adapters.rest.request_state import request_uses_read_engine
+from kitaru.server.adapters.rest.user_activity import is_not_user_activity
 from kitaru.server.api.config import APISettings
+from kitaru.server.api.user_activity import UserActivityRecorder
 from kitaru.server.application.models.auth import (
+    AccountPrincipal,
     AuthContext,
     TaskAuthContext,
     TaskPrincipal,
@@ -263,11 +266,31 @@ async def _resolve_auth_context(
         # Nothing after authentication uses the writer-bound auth session.
         # Close it here so its connection frees before the handler runs.
         await auth_session.close()
+    _record_user_activity(request, context)
     token = current_actor.set(context.account)
     try:
         yield context
     finally:
         current_actor.reset(token)
+
+
+def _record_user_activity(request: Request, context: AuthContext) -> None:
+    """Note a request as user activity when an account made it.
+
+    Worker and task credentials act for a machine, and an endpoint marked
+    ``not_user_activity`` is reached by an account credential on behalf of one.
+
+    Args:
+        request: Incoming request.
+        context: Resolved auth context.
+    """
+    recorder: UserActivityRecorder | None = request.app.state.user_activity
+    if recorder is None or not isinstance(context.principal, AccountPrincipal):
+        return
+    endpoint = request.scope.get("endpoint")
+    if endpoint is not None and is_not_user_activity(endpoint):
+        return
+    recorder.record()
 
 
 async def _authenticate(

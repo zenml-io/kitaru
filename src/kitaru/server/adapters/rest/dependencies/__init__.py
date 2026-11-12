@@ -81,6 +81,7 @@ from kitaru.server.adapters.rest.dependencies.services import (
     get_session_service,
     get_tag_service,
     get_task_policy,
+    get_user_activity_service,
     get_worker_service,
 )
 
@@ -140,6 +141,7 @@ __all__ = [
     "get_task_policy",
     "get_task_service",
     "get_ui_version_state",
+    "get_user_activity_service",
     "get_worker_service",
     "require_local_account_management",
 ]

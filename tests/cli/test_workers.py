@@ -20,10 +20,11 @@ import io
 import json
 import signal
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any, get_args
+from typing import Any, TextIO, get_args
 
 import httpx
 import pytest
@@ -43,6 +44,8 @@ from kitaru.cli.output import (
     CLIError,
     CommandResult,
     OutputContext,
+    emit_event,
+    emit_result,
     reset_output_context,
     set_output_context,
 )
@@ -106,7 +109,7 @@ def _response(name: str, *, live: bool) -> WorkerResponse:
     )
 
 
-def _output_context(stdout: io.StringIO, stderr: io.StringIO) -> OutputContext:
+def _output_context(stdout: TextIO, stderr: TextIO) -> OutputContext:
     return OutputContext(
         command="worker.start",
         mode="jsonl",
@@ -521,6 +524,62 @@ def test_closed_output_cannot_prevent_signal_drain(
         reset_output_context(token)
 
     assert process.stop.is_set()
+
+
+class _SignalDuringFlushRaw(io.RawIOBase):
+    """Raw pipe that delivers a signal while its buffered writer is flushing."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.written = bytearray()
+        self.on_first_write: Callable[[], None] | None = None
+
+    def writable(self) -> bool:
+        """Accept writes like a stdout pipe."""
+        return True
+
+    def write(self, data: Any) -> int:
+        """Record bytes, then run the pending handler under the writer's lock."""
+        self.written.extend(data)
+        handler, self.on_first_write = self.on_first_write, None
+        if handler is not None:
+            handler()
+        return len(data)
+
+
+async def test_signal_during_stdout_flush_still_drains() -> None:
+    """A signal that lands mid-flush must not write to the locked stdout."""
+    raw = _SignalDuringFlushRaw()
+    stdout = io.TextIOWrapper(io.BufferedWriter(raw), encoding="utf-8")
+    stderr = io.StringIO()
+
+    class ReadyWorker:
+        async def run(self, stop: asyncio.Event | None = None) -> None:
+            assert stop is not None
+            raw.on_first_write = process.handle_sigint
+            emit_event("ready")
+            await stop.wait()
+
+        def cancel_inflight(self) -> None:
+            """Not exercised by this test."""
+
+    token = set_output_context(_output_context(stdout, stderr))
+    try:
+        process = workers.ForegroundWorkerProcess(ReadyWorker(), {"name": "local"})
+        result = await process.run()
+        emit_result(result)
+    finally:
+        reset_output_context(token)
+
+    events = [json.loads(line) for line in raw.written.decode().splitlines()]
+    assert [event["event"] for event in events] == [
+        "starting",
+        "ready",
+        "draining",
+        "stopped",
+    ]
+    assert events[2]["item"] == {"reason": "sigint"}
+    assert result.exit_code == 130
 
 
 def test_worker_start_schema_describes_safe_graceful_signals() -> None:
