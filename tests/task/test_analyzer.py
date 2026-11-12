@@ -237,11 +237,12 @@ async def test_run_passes_all_session_ids_without_fetching_details(
     ]
 
 
-async def test_run_passes_a_fixed_session_list_without_listing(
+async def test_run_lists_the_sessions_of_a_session_group(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Pass a task's stored session list straight to the analyzer."""
+    """List a task's session group rather than its import."""
     session_ids = [uuid.uuid4() for _ in range(3)]
+    session_group_id = uuid.uuid4()
     details = AnalysisTaskDetails(
         analyzer_name="spread",
         params={},
@@ -249,19 +250,26 @@ async def test_run_passes_a_fixed_session_list_without_listing(
             entrypoint="package:analyze", requirement="package==1.0"
         ),
         agent_id=uuid.uuid4(),
-        session_ids=session_ids,
+        import_id=uuid.uuid4(),
+        session_group_id=session_group_id,
     )
 
     class Tasks:
         async def get_spec(self, requested_task_id: uuid.UUID) -> Any:
             return SimpleNamespace(details=details)
 
-    async def reject_listing(params: SessionListParams) -> None:
-        pytest.fail("The analyzer runner listed sessions for a fixed session list")
+    listed: list[SessionListParams] = []
+
+    async def list_sessions(params: SessionListParams) -> Page[SessionResponse]:
+        listed.append(params)
+        return Page(
+            items=[SessionResponse.model_construct(id=item) for item in session_ids],
+            next_cursor=None,
+        )
 
     client: Any = SimpleNamespace(tasks=Tasks())
     client.sessions = SessionsResource(client)
-    monkeypatch.setattr(client.sessions, "list", reject_listing)
+    monkeypatch.setattr(client.sessions, "list", list_sessions)
     received: list[list[uuid.UUID]] = []
 
     def analyze(received_ids: list[uuid.UUID]) -> list[InsightInput]:
@@ -274,6 +282,12 @@ async def test_run_passes_a_fixed_session_list_without_listing(
     await analyzer_module.run(client, str(uuid.uuid4()))
 
     assert received == [session_ids]
+    (params,) = listed
+    assert json.loads(params.model_dump(mode="json")["filter"]) == {
+        "field": "session_group_id",
+        "op": "eq",
+        "value": str(session_group_id),
+    }
 
 
 @pytest.mark.parametrize("source", ["script", "package"])

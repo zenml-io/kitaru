@@ -425,10 +425,9 @@ class JobService:
     async def create_analyses(self, command: AnalysisCreate, actor: AuthContext) -> Job:
         """Create a job running every analyzer over one agent's selected sessions.
 
-        The selection is resolved once, here, and every task stores the
-        resulting session list, so a job that waits in the queue still reads
-        the sessions that matched when it was created. Sessions still in
-        progress are left out.
+        The selection is resolved once, here, into a session group every task
+        reads, so a job that waits in the queue still reads the sessions that
+        matched when it was created. Sessions still in progress are left out.
 
         Args:
             command: Agent, session filter, and analyzers to run.
@@ -472,18 +471,20 @@ class JobService:
         # name an import exactly when they describe that import's sessions.
         import_ids = {session.import_id for session in sessions}
         import_id = import_ids.pop() if len(import_ids) == 1 else None
-        session_ids = [session.id for session in sessions]
         job = await self.create_job(JobKind.ANALYSIS, actor)
+        session_group_id = await self._sessions.create_group(
+            job.id, [session.id for session in sessions]
+        )
         # The job was just created in this call and cannot have settled yet, so
         # the tasks skip add_tasks' settled check.
         tasks: list[Task] = [
             await build_analysis_task(
                 analyzer,
                 job.id,
-                len(session_ids),
+                len(sessions),
                 agent_id=command.agent_id,
                 import_id=import_id,
-                session_ids=session_ids,
+                session_group_id=session_group_id,
             )
             for analyzer in analyzers
         ]

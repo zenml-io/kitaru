@@ -534,7 +534,7 @@
                 "type": "null"
               }
             ],
-            "description": "Import whose sessions are analyzed when no session list is set.",
+            "description": "Import whose sessions are analyzed when no session group is set.",
             "title": "Import Id"
           },
           "kind": {
@@ -568,21 +568,18 @@
             ],
             "title": "Plugin"
           },
-          "session_ids": {
+          "session_group_id": {
             "anyOf": [
               {
-                "items": {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                "type": "array"
+                "format": "uuid",
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Sessions analyzed, fixed when the task was created.",
-            "title": "Session Ids"
+            "description": "Group of sessions analyzed, fixed when the task was created.",
+            "title": "Session Group Id"
           }
         },
         "required": [

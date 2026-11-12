@@ -40,9 +40,8 @@ def test_import_analysis_reports_an_import_selection() -> None:
     assert properties["selection"] == "import"
 
 
-def test_session_list_analysis_reports_a_sessions_selection() -> None:
-    """Mark a task over a fixed session list apart from an import analysis."""
-    task = _task(import_id=uuid.uuid4(), session_ids=[uuid.uuid4() for _ in range(3)])
+def test_session_group_analysis_reports_a_sessions_selection() -> None:
+    """Mark a task over a session group apart from an import analysis."""
+    task = _task(import_id=uuid.uuid4(), session_group_id=uuid.uuid4())
     properties = build_analysis_completed_properties(task, None, None)
     assert properties["selection"] == "sessions"
-    assert properties["session_count"] == 3

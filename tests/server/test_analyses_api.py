@@ -126,12 +126,19 @@ async def _get_analysis_tasks(
     return [task for task in tasks if isinstance(task, AnalysisTask)]
 
 
+def _get_group_sessions(
+    session_repository: FakeSessionRepository, task: AnalysisTask
+) -> set[uuid.UUID]:
+    assert task.session_group_id is not None
+    return session_repository._groups[task.session_group_id]
+
+
 async def test_create_analyses_fixes_the_agents_finished_sessions(
     client: httpx.AsyncClient,
     session_repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
 ) -> None:
-    """Store the agent's finished sessions on the task, without an import."""
+    """Group the agent's finished sessions for the task, without an import."""
     finished = {await _create_session(session_repository, days=day) for day in range(3)}
     await _create_session(session_repository, status=SessionStatus.IN_PROGRESS)
     await _create_session(session_repository, agent_id=uuid.uuid4())
@@ -149,8 +156,7 @@ async def test_create_analyses_fixes_the_agents_finished_sessions(
     (task,) = await _get_analysis_tasks(task_repository, response.json()["id"])
     assert task.agent_id == AGENT_ID
     assert task.import_id is None
-    assert task.session_ids is not None
-    assert set(task.session_ids) == finished
+    assert _get_group_sessions(session_repository, task) == finished
     assert task.status is TaskStatus.PENDING
 
 
@@ -190,7 +196,7 @@ async def test_create_analyses_applies_the_filter(
 
     assert response.status_code == 201
     (task,) = await _get_analysis_tasks(task_repository, response.json()["id"])
-    assert task.session_ids == [late]
+    assert _get_group_sessions(session_repository, task) == {late}
     assert task.import_id == import_id
 
 
@@ -245,8 +251,7 @@ async def test_create_analyses_accepts_an_id_list_split_across_conditions(
 
     assert response.status_code == 201
     (task,) = await _get_analysis_tasks(task_repository, response.json()["id"])
-    assert task.session_ids is not None
-    assert set(task.session_ids) == set(session_ids)
+    assert _get_group_sessions(session_repository, task) == set(session_ids)
 
 
 async def test_create_analyses_skips_below_the_session_minimum(

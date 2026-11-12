@@ -28,10 +28,7 @@ class GrantKind(StrEnum):
     SESSION = "session"
     BLOB = "blob"
     IMPORT = "import"
-    # Names a task whose stored session list the principal may read. The
-    # server reads the list when it authenticates the token, so the token
-    # stays small however many sessions the list holds.
-    TASK_SESSIONS = "task_sessions"
+    SESSION_GROUP = "session_group"
 
 
 class AccountPrincipal(FrozenModel):

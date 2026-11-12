@@ -221,7 +221,7 @@ class SessionNodeService:
             session = await self._sessions.get(
                 session_node_filter.session_id, include_payloads=False
             )
-            check_task_session_read(session, actor)
+            await check_task_session_read(session, actor, self._sessions)
         nodes, next_cursor = await self._repository.query(session_node_filter)
         if session_node_filter.include_payloads:
             await self._resolve_payloads(nodes)
@@ -252,7 +252,7 @@ class SessionNodeService:
         """
         if isinstance(actor.principal, TaskPrincipal):
             session = await self._sessions.get(session_id, include_payloads=False)
-            check_task_session_read(session, actor)
+            await check_task_session_read(session, actor, self._sessions)
         nodes = await self._repository.list_all(session_id, include_payloads)
         if include_payloads:
             await self._resolve_payloads(nodes)

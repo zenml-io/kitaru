@@ -146,18 +146,18 @@ async def build_analysis_task(
     *,
     agent_id: uuid.UUID,
     import_id: uuid.UUID | None,
-    session_ids: list[uuid.UUID] | None = None,
+    session_group_id: uuid.UUID | None = None,
 ) -> AnalysisTask:
-    """Build the task running an analyzer over an import or a session list.
+    """Build the task running an analyzer over an import or a session group.
 
     Args:
         analyzer: Resolved analyzer config.
         job_id: Job the task belongs to.
         eligible_session_count: Number of eligible sessions in scope.
         agent_id: Agent the sessions and insights belong to.
-        import_id: Import the analyzer reads, or the import its session list
-            was drawn from.
-        session_ids: Fixed session list the analyzer reads instead of the
+        import_id: Import the analyzer reads, or the import every session of
+            its group came from.
+        session_group_id: Session group the analyzer reads instead of the
             whole import.
 
     Returns:
@@ -168,7 +168,7 @@ async def build_analysis_task(
         plugin_version_id=analyzer.analyzer_version_id,
         agent_id=agent_id,
         import_id=import_id,
-        session_ids=session_ids,
+        session_group_id=session_group_id,
         connection_id=analyzer.connection_id,
         params=analyzer.params,
         labels=get_plugin_task_labels(

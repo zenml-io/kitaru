@@ -116,16 +116,18 @@ async def _get_session_ids(
         details: Analysis task details.
 
     Returns:
-        The task's fixed session list, or every session of its import.
+        Every session of the task's session group, or of its import.
     """
-    if details.session_ids is not None:
-        return details.session_ids
-    params = SessionListParams(
-        filter=FilterCondition(
-            field="import_id", op=FilterOp.EQ, value=str(details.import_id)
-        ),
-        size=1000,
+    scope = (
+        FilterCondition(field="import_id", op=FilterOp.EQ, value=str(details.import_id))
+        if details.session_group_id is None
+        else FilterCondition(
+            field="session_group_id",
+            op=FilterOp.EQ,
+            value=str(details.session_group_id),
+        )
     )
+    params = SessionListParams(filter=scope, size=1000)
     return [session.id async for session in client.sessions.iter(params)]
 
 

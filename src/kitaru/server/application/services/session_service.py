@@ -294,7 +294,7 @@ class SessionService:
             Stored session.
         """
         session = await self._repository.get(session_id, include_payloads=True)
-        check_task_session_read(session, actor)
+        await check_task_session_read(session, actor, self._repository)
         await self._payload_store.resolve(
             [p for p in (session.inputs, session.outputs) if p is not None]
         )
@@ -323,7 +323,7 @@ class SessionService:
             Baseline session the replay ran against.
         """
         session = await self._repository.get(session_id, include_payloads=False)
-        check_task_session_read(session, actor)
+        await check_task_session_read(session, actor, self._repository)
         replay = await self._replays.get_by_result_session_id(session_id)
         if replay is None:
             raise SessionBaselineNotFound(session_id)

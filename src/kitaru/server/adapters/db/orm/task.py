@@ -140,6 +140,7 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     plugin_version_id: Mapped[uuid.UUID | None]
     input_session_id: Mapped[uuid.UUID | None]
     import_id: Mapped[uuid.UUID | None]
+    session_group_id: Mapped[uuid.UUID | None]
     connection_id: Mapped[uuid.UUID | None]
     agent_id: Mapped[uuid.UUID | None]
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
@@ -149,7 +150,6 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     env: Mapped[dict[str, str]] = mapped_column(JSONB)
     worker_id: Mapped[uuid.UUID | None]
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
-    session_ids: Mapped[list[str] | None] = mapped_column(JSONB(none_as_null=True))
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancel_requested_at: Mapped[datetime | None] = mapped_column(
@@ -202,11 +202,7 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             row.plugin_version_id = task.plugin_version_id
             row.agent_id = task.agent_id
             row.import_id = task.import_id
-            row.session_ids = (
-                None
-                if task.session_ids is None
-                else [str(session_id) for session_id in task.session_ids]
-            )
+            row.session_group_id = task.session_group_id
             row.connection_id = task.connection_id
             row.inputs = task.params
         return row
@@ -282,11 +278,7 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                 plugin_version_id=self.plugin_version_id,
                 agent_id=self.agent_id,
                 import_id=self.import_id,
-                session_ids=(
-                    None
-                    if self.session_ids is None
-                    else [uuid.UUID(value) for value in self.session_ids]
-                ),
+                session_group_id=self.session_group_id,
                 connection_id=self.connection_id,
                 params=self.inputs if self.inputs is not None else {},
                 **shared,

@@ -129,7 +129,7 @@ def test_kinds() -> None:
 
 def test_analysis_task_requires_an_import_or_a_session_list() -> None:
     """Reject an analysis task that names neither an import nor sessions."""
-    with pytest.raises(ValueError, match="needs an import or a session list"):
+    with pytest.raises(ValueError, match="needs an import or a session group"):
         AnalysisTask(
             job_id=uuid.uuid4(), plugin_version_id=uuid.uuid4(), agent_id=uuid.uuid4()
         )
@@ -137,7 +137,7 @@ def test_analysis_task_requires_an_import_or_a_session_list() -> None:
         job_id=uuid.uuid4(),
         plugin_version_id=uuid.uuid4(),
         agent_id=uuid.uuid4(),
-        session_ids=[uuid.uuid4()],
+        session_group_id=uuid.uuid4(),
     )
     assert task.import_id is None
 

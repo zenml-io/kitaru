@@ -34,12 +34,10 @@ from kitaru.server.application.models.auth import (
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.api_key import encode_api_key
 from kitaru.server.domain.keys import generate_secret, hash_secret
-from kitaru.server.domain.task import AnalysisTask
 from kitaru_test_support import (
     FakeAccountRepository,
     FakeApiKeyRepository,
     FakePasswordHasher,
-    FakeTaskRepository,
     create_api_key,
 )
 
@@ -490,70 +488,6 @@ async def test_task_token_carries_grants(
 
     assert isinstance(context.principal, TaskPrincipal)
     assert context.principal.has_grant(GrantKind.SESSION, session_id)
-
-
-async def test_task_token_expands_a_task_session_list_grant(
-    account_repository: FakeAccountRepository,
-    api_key_repository: FakeApiKeyRepository,
-) -> None:
-    """Resolve a task session-list grant into the sessions the task stores."""
-    account = await create_account(account_repository)
-    tasks = FakeTaskRepository()
-    session_ids = [uuid.uuid4(), uuid.uuid4()]
-    task = await tasks.create(
-        AnalysisTask(
-            job_id=uuid.uuid4(),
-            plugin_version_id=uuid.uuid4(),
-            agent_id=uuid.uuid4(),
-            session_ids=session_ids,
-        )
-    )
-    service = AuthService(
-        settings=local_settings(),
-        account_repository=account_repository,
-        api_key_repository=api_key_repository,
-        password_hasher=FakePasswordHasher(),
-        task_repository=tasks,
-    )
-    token = service.issue_task_token(
-        TaskSubject(
-            task_id=task.id,
-            attempt=1,
-            worker_id=uuid.uuid4(),
-            account_id=account.id,
-            job_id=task.job_id,
-            grants={GrantKind.TASK_SESSIONS: frozenset({task.id})},
-        ),
-        timeout_seconds=3600,
-    ).token
-
-    context = await service.resolve(token)
-
-    assert isinstance(context.principal, TaskPrincipal)
-    assert context.principal.grants == {GrantKind.SESSION: frozenset(session_ids)}
-
-
-async def test_task_session_list_grant_needs_a_task_repository(
-    service: AuthService,
-    account_repository: FakeAccountRepository,
-) -> None:
-    """Reject a task session-list grant when no task repository can expand it."""
-    account = await create_account(account_repository)
-    task_id = uuid.uuid4()
-    token = service.issue_task_token(
-        TaskSubject(
-            task_id=task_id,
-            attempt=1,
-            worker_id=uuid.uuid4(),
-            account_id=account.id,
-            job_id=uuid.uuid4(),
-            grants={GrantKind.TASK_SESSIONS: frozenset({task_id})},
-        ),
-        timeout_seconds=3600,
-    ).token
-
-    with pytest.raises(AuthenticationError, match="not configured"):
-        await service.resolve(token)
 
 
 async def test_task_token_grants_default_to_empty(

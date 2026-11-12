@@ -4536,7 +4536,7 @@ export interface components {
             analyzer_name: string;
             /**
              * Import Id
-             * @description Import whose sessions are analyzed when no session list is set.
+             * @description Import whose sessions are analyzed when no session group is set.
              */
             import_id?: string | null;
             /**
@@ -4557,10 +4557,10 @@ export interface components {
              */
             plugin: components["schemas"]["ScriptPluginSpec"] | components["schemas"]["PackagePluginSpec"];
             /**
-             * Session Ids
-             * @description Sessions analyzed, fixed when the task was created.
+             * Session Group Id
+             * @description Group of sessions analyzed, fixed when the task was created.
              */
-            session_ids?: string[] | null;
+            session_group_id?: string | null;
         };
         /**
          * AnalyzerConfig

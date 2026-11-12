@@ -50,6 +50,11 @@ from kitaru.server.adapters.db.orm.session import (
     SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT,
     SessionORM,
 )
+from kitaru.server.adapters.db.orm.session_group import (
+    SESSION_GROUP_SESSION_SESSION_ID_FOREIGN_KEY,
+    SessionGroupORM,
+    SessionGroupSessionORM,
+)
 from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session import SessionFilter
@@ -98,6 +103,29 @@ def _compile_cohort_version_condition(
     return membership_exists.exists()
 
 
+def _compile_session_group_condition(
+    condition: FilterCondition,
+) -> ColumnElement[bool]:
+    """Compile a session group condition into an EXISTS predicate.
+
+    Args:
+        condition: Validated session group condition.
+
+    Returns:
+        SQL predicate.
+    """
+    ids = condition.value if condition.op is FilterOp.IN else (condition.value,)
+    membership_exists = (
+        select(SessionGroupSessionORM.session_id)
+        .where(
+            SessionGroupSessionORM.session_id == SessionORM.id,
+            SessionGroupSessionORM.session_group_id.in_(ids),
+        )
+        .correlate(SessionORM)
+    )
+    return membership_exists.exists()
+
+
 def _compile_has_evaluation_condition(
     condition: FilterCondition,
 ) -> ColumnElement[bool]:
@@ -137,6 +165,7 @@ SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "name": SessionORM.name,
     "tag": build_tag_condition_binding(TagResourceType.SESSION, SessionORM.id),
     "cohort_version_id": _compile_cohort_version_condition,
+    "session_group_id": _compile_session_group_condition,
     "experiment_run_id": _scopes_to_experiment_run,
     "has_evaluation": _compile_has_evaluation_condition,
     "started_at": SessionORM.started_at,
@@ -322,6 +351,35 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         )
         exclude = {column.key for column in deferred}
         return [row.to_domain(exclude=exclude) for row in rows], next_cursor
+
+    async def create_group(
+        self, job_id: uuid.UUID, session_ids: Sequence[uuid.UUID]
+    ) -> uuid.UUID:
+        """Store a fixed group of sessions for the tasks of a job to read.
+
+        Args:
+            job_id: Id of the job the group belongs to.
+            session_ids: Ids of the member sessions.
+
+        Raises:
+            SessionNotFound: No session has one of the member session ids.
+
+        Returns:
+            Id of the stored group.
+        """
+        group = SessionGroupORM(job_id=job_id)
+        self._session.add(group)
+        await self._flush()
+        self._session.add_all(
+            SessionGroupSessionORM(session_group_id=group.id, session_id=session_id)
+            for session_id in session_ids
+        )
+        # The caller reads the sessions before this insert, so a session
+        # foreign key violation means one was deleted concurrently.
+        await self._flush(
+            {SESSION_GROUP_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound()}
+        )
+        return group.id
 
     async def get_many(
         self, session_ids: Sequence[uuid.UUID], include_payloads: bool

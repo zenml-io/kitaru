@@ -79,7 +79,7 @@ uv run kitaru session analyze \
   --wait
 ```
 
-The server resolves the selection when it creates the job and stores the matching session list on each analysis task. A job that waits in the queue therefore reads the sessions that matched when you ran the command, not the ones that match when a worker picks it up. Sessions still in progress are left out. A selection that matches no finished session, or more than the server's cap (1,000 by default, set with `KITARU_SERVER_ANALYSIS_SESSION_LIMIT`), is rejected before any job is created. The analyzer's own session minimum still applies: below it, the task is recorded as skipped.
+The server resolves the selection when it creates the job and stores the matching sessions as a fixed group that every analysis task of the job reads. A job that waits in the queue therefore reads the sessions that matched when you ran the command, not the ones that match when a worker picks it up. A session deleted in the meantime drops out of the group. Sessions still in progress are left out. A selection that matches no finished session, or more than the server's cap (1,000 by default, set with `KITARU_SERVER_ANALYSIS_SESSION_LIMIT`), is rejected before any job is created. The analyzer's own session minimum still applies: below it, the task is recorded as skipped.
 
 Insights from a session analysis store an `import_id` only when every analyzed session came from that one import. Otherwise they have none.
 
