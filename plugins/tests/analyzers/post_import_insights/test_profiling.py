@@ -2054,7 +2054,7 @@ def test_outcome_briefing_states_failed_share_and_cohort() -> None:
     assert sections["What is odd"].startswith("2 sessions out of 4 analyzed (50%)")
     assert "1 are recorded completed" in sections["What is odd"]
     assert "3 distinct recorded statuses" in sections["What is odd"]
-    assert "completed session from the same import" in sections["Where to look first"]
+    assert "completed analyzed session" in sections["Where to look first"]
     assert sections["Candidate cohort"] == (
         "sessions whose recorded status is failed (the 2 listed)."
     )
@@ -2073,10 +2073,8 @@ def test_all_failed_outcome_briefing_asks_for_an_external_comparison() -> None:
     )
     sections = _briefing_sections(candidate.investigation_prompt)
 
-    assert "No completed session exists" in sections["Where to look first"]
-    assert (
-        "completed session from the same import" not in sections["Where to look first"]
-    )
+    assert "None of the analyzed sessions completed" in sections["Where to look first"]
+    assert "completed analyzed session" not in sections["Where to look first"]
 
 
 @pytest.mark.parametrize(
