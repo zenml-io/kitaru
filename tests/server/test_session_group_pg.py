@@ -89,7 +89,7 @@ async def test_group_follows_session_and_job_deletes() -> None:
 
 
 async def test_create_group_rejects_a_missing_session() -> None:
-    """Refuse a group naming a session that does not exist."""
+    """Refuse a group naming a missing session and keep the transaction usable."""
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
     async with pg_session_with_engine() as (session, engine):
@@ -97,7 +97,8 @@ async def test_create_group_rejects_a_missing_session() -> None:
         job = await SQLJobRepository(session).create(
             Job(owner_id=owner.id, kind=JobKind.ANALYSIS, status=JobStatus.PENDING)
         )
+        sessions = SQLSessionRepository(session, engine)
         with pytest.raises(SessionNotFound):
-            await SQLSessionRepository(session, engine).create_group(
-                job.id, [uuid.uuid4()]
-            )
+            await sessions.create_group(job.id, [uuid.uuid4()])
+        # The failed insert must leave the surrounding transaction usable.
+        assert not await sessions.is_in_group(uuid.uuid4(), [uuid.uuid4()])

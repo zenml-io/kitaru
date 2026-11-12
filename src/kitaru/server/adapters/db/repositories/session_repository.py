@@ -18,6 +18,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import ColumnElement, CursorResult, exists, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import defer
 
@@ -350,15 +351,28 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         """
         group = SessionGroupORM(job_id=job_id)
         await self._add(group)
-        self._session.add_all(
+        links = [
             SessionGroupSessionORM(session_group_id=group.id, session_id=session_id)
             for session_id in session_ids
-        )
-        # The caller reads the sessions before this insert, so a session
-        # foreign key violation means one was deleted concurrently.
-        await self._flush(
-            {SESSION_GROUP_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound()}
-        )
+        ]
+        # Add the links inside the savepoint: opening one flushes pending
+        # rows first, so links added before it would fail outside it and
+        # leave the surrounding transaction unusable.
+        try:
+            async with self._session.begin_nested():
+                self._session.add_all(links)
+                await self._session.flush()
+        except IntegrityError as exc:
+            # The caller reads the sessions before this insert, so a session
+            # foreign key violation means one was deleted concurrently.
+            self._raise_translated(
+                exc,
+                {
+                    SESSION_GROUP_SESSION_SESSION_ID_FOREIGN_KEY: (
+                        lambda: SessionNotFound()
+                    )
+                },
+            )
         return group.id
 
     async def is_in_group(
