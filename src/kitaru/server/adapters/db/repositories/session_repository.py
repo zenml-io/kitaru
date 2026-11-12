@@ -14,10 +14,10 @@
 """SQL session repository."""
 
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import ColumnElement, CursorResult, select, update
+from sqlalchemy import ColumnElement, CursorResult, exists, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import defer
 
@@ -103,29 +103,6 @@ def _compile_cohort_version_condition(
     return membership_exists.exists()
 
 
-def _compile_session_group_condition(
-    condition: FilterCondition,
-) -> ColumnElement[bool]:
-    """Compile a session group condition into an EXISTS predicate.
-
-    Args:
-        condition: Validated session group condition.
-
-    Returns:
-        SQL predicate.
-    """
-    ids = condition.value if condition.op is FilterOp.IN else (condition.value,)
-    membership_exists = (
-        select(SessionGroupSessionORM.session_id)
-        .where(
-            SessionGroupSessionORM.session_id == SessionORM.id,
-            SessionGroupSessionORM.session_group_id.in_(ids),
-        )
-        .correlate(SessionORM)
-    )
-    return membership_exists.exists()
-
-
 def _compile_has_evaluation_condition(
     condition: FilterCondition,
 ) -> ColumnElement[bool]:
@@ -165,7 +142,11 @@ SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "name": SessionORM.name,
     "tag": build_tag_condition_binding(TagResourceType.SESSION, SessionORM.id),
     "cohort_version_id": _compile_cohort_version_condition,
-    "session_group_id": _compile_session_group_condition,
+    "session_group_id": build_scope_condition_binding(
+        local_column=SessionORM.id,
+        related_key=SessionGroupSessionORM.session_id,
+        scope_column=SessionGroupSessionORM.session_group_id,
+    ),
     "experiment_run_id": _scopes_to_experiment_run,
     "has_evaluation": _compile_has_evaluation_condition,
     "started_at": SessionORM.started_at,
@@ -368,8 +349,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             Id of the stored group.
         """
         group = SessionGroupORM(job_id=job_id)
-        self._session.add(group)
-        await self._flush()
+        await self._add(group)
         self._session.add_all(
             SessionGroupSessionORM(session_group_id=group.id, session_id=session_id)
             for session_id in session_ids
@@ -380,6 +360,26 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             {SESSION_GROUP_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound()}
         )
         return group.id
+
+    async def is_in_group(
+        self, session_id: uuid.UUID, group_ids: Collection[uuid.UUID]
+    ) -> bool:
+        """Whether a session belongs to any of the given session groups.
+
+        Args:
+            session_id: Id of the session.
+            group_ids: Ids of the session groups.
+
+        Returns:
+            Whether the session is a member of at least one group.
+        """
+        membership = select(
+            exists().where(
+                SessionGroupSessionORM.session_id == session_id,
+                SessionGroupSessionORM.session_group_id.in_(group_ids),
+            )
+        )
+        return bool(await self._session.scalar(membership))
 
     async def get_many(
         self, session_ids: Sequence[uuid.UUID], include_payloads: bool

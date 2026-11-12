@@ -278,8 +278,7 @@ class SessionService:
     async def get_session(self, session_id: uuid.UUID, actor: AuthContext) -> Session:
         """Get a session by id.
 
-        A task principal reads a session it owns or holds as its task's
-        input session.
+        A task principal reads a session it owns or holds a grant covering.
 
         Args:
             session_id: Id of the session.
@@ -287,8 +286,8 @@ class SessionService:
 
         Raises:
             SessionNotFound: No session has this id.
-            SessionAccessDenied: A task principal owns neither the session nor
-                holds it as its task's input session.
+            SessionAccessDenied: A task principal neither owns the session nor
+                holds a grant covering it.
 
         Returns:
             Stored session.
@@ -315,8 +314,8 @@ class SessionService:
         Raises:
             SessionNotFound: No session has this id, or the baseline it
                 resolves to is gone.
-            SessionAccessDenied: A task principal owns neither the session nor
-                holds it as its task's input session.
+            SessionAccessDenied: A task principal neither owns the session nor
+                holds a grant covering it.
             SessionBaselineNotFound: The session was not produced by a replay.
 
         Returns:

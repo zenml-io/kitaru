@@ -201,8 +201,8 @@ class SessionNodeService:
     ) -> tuple[list[SessionNode], str | None]:
         """List the nodes of a session, ordered by position ascending.
 
-        A task principal reads only a session it owns or holds as its
-        task's input session.
+        A task principal reads only a session it owns or holds a grant
+        covering.
 
         Args:
             session_node_filter: Filter and pagination parameters.
@@ -211,8 +211,8 @@ class SessionNodeService:
         Raises:
             SessionNotFound: A task principal names a session that does not
                 exist.
-            SessionAccessDenied: A task principal owns neither the session nor
-                holds it as its task's input session.
+            SessionAccessDenied: A task principal neither owns the session nor
+                holds a grant covering it.
 
         Returns:
             Page of matching nodes and the next cursor.
@@ -232,8 +232,8 @@ class SessionNodeService:
     ) -> list[SessionNode]:
         """Read every node of a session, ordered by position ascending.
 
-        A task principal reads only a session it owns or holds as its
-        task's input session.
+        A task principal reads only a session it owns or holds a grant
+        covering.
 
         Args:
             session_id: Id of the session whose nodes to read.
@@ -244,8 +244,8 @@ class SessionNodeService:
         Raises:
             SessionNotFound: A task principal names a session that does not
                 exist.
-            SessionAccessDenied: A task principal owns neither the session nor
-                holds it as its task's input session.
+            SessionAccessDenied: A task principal neither owns the session nor
+                holds a grant covering it.
 
         Returns:
             Every node of the session.

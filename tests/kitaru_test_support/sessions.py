@@ -14,7 +14,7 @@
 """In-memory fakes for tags and sessions."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -561,6 +561,22 @@ class FakeSessionRepository:
         group_id = uuid.uuid4()
         self._groups[group_id] = set(session_ids)
         return group_id
+
+    async def is_in_group(
+        self, session_id: uuid.UUID, group_ids: Collection[uuid.UUID]
+    ) -> bool:
+        """Whether a session belongs to any of the given session groups.
+
+        Args:
+            session_id: Id of the session.
+            group_ids: Ids of the session groups.
+
+        Returns:
+            Whether the session is a member of at least one group.
+        """
+        return any(
+            session_id in self._groups.get(group_id, ()) for group_id in group_ids
+        )
 
     def _evaluate_cohort_version_condition(
         self, session: Session, condition: FilterCondition

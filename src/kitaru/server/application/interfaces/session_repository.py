@@ -14,7 +14,7 @@
 """Session repository interface."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Protocol
 
 from kitaru.server.application.models.session import SessionFilter
@@ -145,6 +145,20 @@ class SessionRepository(Protocol):
 
         Returns:
             Id of the stored group.
+        """
+        ...
+
+    async def is_in_group(
+        self, session_id: uuid.UUID, group_ids: Collection[uuid.UUID]
+    ) -> bool:
+        """Whether a session belongs to any of the given session groups.
+
+        Args:
+            session_id: Id of the session.
+            group_ids: Ids of the session groups.
+
+        Returns:
+            Whether the session is a member of at least one group.
         """
         ...
 

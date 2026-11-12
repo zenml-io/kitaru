@@ -213,13 +213,12 @@ def build_analysis_completed_properties(
     }
     # A task with a session group came from a session analysis request; one
     # without reads a whole import, whether queued by the import or later.
-    properties["selection"] = "import" if task.session_group_id is None else "sessions"
-    if (
-        task.session_group_id is None
-        and import_ is not None
-        and import_.stats is not None
-    ):
-        properties["session_count"] = import_.stats.created
+    if task.session_group_id is not None:
+        properties["selection"] = "sessions"
+    else:
+        properties["selection"] = "import"
+        if import_ is not None and import_.stats is not None:
+            properties["session_count"] = import_.stats.created
     if isinstance(task.result, list):
         properties["insight_count"] = len(task.result)
     return properties

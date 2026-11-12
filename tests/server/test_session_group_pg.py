@@ -76,6 +76,8 @@ async def test_group_follows_session_and_job_deletes() -> None:
             return {member.id for member in members}
 
         assert await list_group() == {kept.id, deleted.id}
+        assert await sessions.is_in_group(kept.id, [group_id])
+        assert not await sessions.is_in_group(outside.id, [group_id])
 
         await sessions.delete(deleted.id)
         assert await list_group() == {kept.id}

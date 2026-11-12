@@ -149,26 +149,10 @@ async def check_task_session_read(
         GrantKind.IMPORT, session.import_id
     ):
         return
+    # A session row does not name its groups, so membership takes a query.
     group_ids = principal.grants.get(GrantKind.SESSION_GROUP)
-    if group_ids:
-        members, _ = await sessions.query(
-            SessionFilter(
-                expression=AndExpression(
-                    operands=(
-                        FilterCondition(field="id", op=FilterOp.EQ, value=session.id),
-                        FilterCondition(
-                            field="session_group_id",
-                            op=FilterOp.IN,
-                            value=sorted(group_ids),
-                        ),
-                    )
-                ),
-                size=1,
-            ),
-            include_payloads=False,
-        )
-        if members:
-            return
+    if group_ids and await sessions.is_in_group(session.id, group_ids):
+        return
     raise SessionAccessDenied(session.id)
 
 

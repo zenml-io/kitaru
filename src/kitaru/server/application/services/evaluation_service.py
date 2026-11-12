@@ -108,8 +108,8 @@ class EvaluationService:
         """Create manual evaluations on a session.
 
         The stored rows carry no evaluator_version_id or task_id. A task
-        principal creates into a session it owns or holds as its task's
-        input session.
+        principal creates into a session it owns or holds a grant
+        covering.
 
         Args:
             session_id: Id of the session to create evaluations on.
@@ -118,8 +118,8 @@ class EvaluationService:
 
         Raises:
             SessionNotFound: No session has this id.
-            SessionAccessDenied: A task principal owns neither the session nor
-                holds it as its task's input session.
+            SessionAccessDenied: A task principal neither owns the session nor
+                holds a grant covering it.
             SessionNotEvaluatable: The session is in progress.
             DuplicateEvaluationNameInBatch: The request names the same
                 evaluation twice.
