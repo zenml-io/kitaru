@@ -38,7 +38,7 @@ The adapter subpath provides lifecycle, normalized-step, replay-override, and to
 
 ## Shared recording and replay boundary
 
-The shared code creates and completes Kitaru sessions, allocates node indexes, writes each LLM node before its local tool children, applies static/history/passthrough policy decisions, and preserves the first runtime failure while attempting best-effort failure recording. Each adapter still determines what its framework exposes and how framework events become normalized steps.
+The shared code creates and completes Kitaru sessions, gives each node a session-unique external id (`run` for the root, the provider response id or a random UUID for a model step, and the call id for a tool), writes each LLM node before its local tool children, applies static/history/passthrough policy decisions, and preserves the first runtime failure while attempting best-effort failure recording. Each adapter still determines what its framework exposes and how framework events become normalized steps.
 
 History matching is guaranteed only within the same adapter contract. Frameworks can validate, default, or serialize tool inputs differently, so a history key recorded by one adapter is not guaranteed to match a replay through another adapter.
 
@@ -50,4 +50,4 @@ Replay is execution, not a transaction. A passthrough tool can complete an exter
 
 Adapter calls can send task inputs, tool inputs and outputs, model metadata, and result summaries to Kitaru. The shared tool-payload recorder replaces values under the credential keys `authorization`, `token`, `secret`, `password`, `api_key`, `apikey`, and `cookie` with `[redacted]`. The Mastra memory replay agent uses its own conversion instead: it records such keys as they are unless its `isSecretKey` names them, and always hides transport keys such as `authorization`, `cookie`, and `headers`. This key-name rule is only a safety net, not semantic classification, so keep secrets and unnecessary personal data out of recorded values. Individual adapters may impose stricter size and shape limits before values cross the recording boundary.
 
-Node indexes preserve the order in which an adapter submits completed model steps, with each model node stored before its tool children. They do not prove provider-side start order or wall-clock ordering among concurrent operations. Consult the framework adapter README for its callback, concurrency, input, and privacy limits.
+The server's stored node order preserves the order in which an adapter submits completed model steps, with each model node stored before its tool children. They do not prove provider-side start order or wall-clock ordering among concurrent operations. Consult the framework adapter README for its callback, concurrency, input, and privacy limits.
