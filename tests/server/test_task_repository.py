@@ -332,6 +332,23 @@ async def test_analysis_task_round_trips_its_fields(setup: Setup) -> None:
     assert loaded == created
 
 
+async def test_analysis_task_round_trips_its_session_group(setup: Setup) -> None:
+    """A session-group analysis task round-trips its group without an import."""
+    session_group_id = uuid.uuid4()
+    created = await setup.tasks.create(
+        AnalysisTask(
+            job_id=setup.job_id,
+            plugin_version_id=setup.plugin_version_id,
+            agent_id=setup.agent_id,
+            session_group_id=session_group_id,
+        )
+    )
+    assert isinstance(created, AnalysisTask)
+    assert created.import_id is None
+    assert created.session_group_id == session_group_id
+    assert await setup.tasks.get(created.id) == created
+
+
 async def test_list_by_job_orders_by_id(setup: Setup) -> None:
     """List a job's tasks in creation order."""
     first = await setup.tasks.create(_agent_task(setup))

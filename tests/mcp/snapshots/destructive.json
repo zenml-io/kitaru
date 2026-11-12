@@ -13828,9 +13828,172 @@
       "openWorldHint": true,
       "readOnlyHint": false
     },
-    "description": "Start an evaluation batch or experiment run and return immediately.",
+    "description": "Start an evaluation batch, an analysis, or an experiment run; return at once.",
     "inputSchema": {
       "$defs": {
+        "AnalysisStart": {
+          "additionalProperties": false,
+          "description": "Run analyzers once over one agent's finished sessions matching a filter.\n\nWithout a filter, every finished session of the agent is analyzed. The\nserver fixes the matching sessions when it creates the job.",
+          "properties": {
+            "agent_id": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "analyzers": {
+              "items": {
+                "$ref": "#/$defs/AnalyzerConfig"
+              },
+              "maxItems": 20,
+              "minItems": 1,
+              "title": "Analyzers",
+              "type": "array"
+            },
+            "filter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Session filter selecting the sessions, e.g. id in a list, tag, cohort_version_id, import_id, or a started_at range.",
+              "title": "Filter"
+            },
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
+            },
+            "operation": {
+              "const": "analysis",
+              "title": "Operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "agent_id",
+            "analyzers"
+          ],
+          "title": "AnalysisStart",
+          "type": "object"
+        },
+        "AnalyzerConfig": {
+          "additionalProperties": false,
+          "description": "Analyzer config.",
+          "properties": {
+            "analyzer": {
+              "description": "Analyzer name.",
+              "title": "Analyzer",
+              "type": "string"
+            },
+            "connection_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Credential connection; defaults to the provider's default.",
+              "title": "Connection Id"
+            },
+            "min_sessions": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Session minimum (built-in insights: 5; others: 1).",
+              "title": "Min Sessions"
+            },
+            "params": {
+              "additionalProperties": true,
+              "description": "Plugin arguments.",
+              "title": "Params",
+              "type": "object"
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Analyzer version; defaults to latest.",
+              "title": "Version"
+            }
+          },
+          "required": [
+            "analyzer"
+          ],
+          "title": "AnalyzerConfig",
+          "type": "object"
+        },
+        "AndFilter": {
+          "additionalProperties": false,
+          "description": "And filter.",
+          "properties": {
+            "and": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "And",
+              "type": "array"
+            }
+          },
+          "required": [
+            "and"
+          ],
+          "title": "AndFilter",
+          "type": "object"
+        },
         "BaselineEvaluationMode": {
           "description": "Baseline evaluation mode.",
           "enum": [
@@ -13968,12 +14131,120 @@
           ],
           "title": "ExperimentRunStart",
           "type": "object"
+        },
+        "FilterCondition": {
+          "additionalProperties": false,
+          "description": "Filter condition.",
+          "properties": {
+            "field": {
+              "description": "Field to filter on.",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "title": "Field",
+              "type": "string"
+            },
+            "op": {
+              "$ref": "#/$defs/FilterOp",
+              "description": "Comparison operator."
+            },
+            "value": {
+              "default": null,
+              "description": "Comparison value.",
+              "title": "Value"
+            }
+          },
+          "required": [
+            "field",
+            "op"
+          ],
+          "title": "FilterCondition",
+          "type": "object"
+        },
+        "FilterOp": {
+          "description": "Filter condition operator.",
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "in",
+            "is_null",
+            "startswith",
+            "endswith",
+            "contains"
+          ],
+          "title": "FilterOp",
+          "type": "string"
+        },
+        "NotFilter": {
+          "additionalProperties": false,
+          "description": "Not filter.",
+          "properties": {
+            "not": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                }
+              ],
+              "description": "Operand.",
+              "title": "Not"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "title": "NotFilter",
+          "type": "object"
+        },
+        "OrFilter": {
+          "additionalProperties": false,
+          "description": "Or filter.",
+          "properties": {
+            "or": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "Or",
+              "type": "array"
+            }
+          },
+          "required": [
+            "or"
+          ],
+          "title": "OrFilter",
+          "type": "object"
         }
       },
       "properties": {
         "request": {
           "discriminator": {
             "mapping": {
+              "analysis": "#/$defs/AnalysisStart",
               "evaluation": "#/$defs/EvaluationStart",
               "experiment_run": "#/$defs/ExperimentRunStart"
             },
@@ -13982,6 +14253,9 @@
           "oneOf": [
             {
               "$ref": "#/$defs/EvaluationStart"
+            },
+            {
+              "$ref": "#/$defs/AnalysisStart"
             },
             {
               "$ref": "#/$defs/ExperimentRunStart"
@@ -13999,6 +14273,116 @@
     "name": "kitaru_workflow_start",
     "outputSchema": {
       "$defs": {
+        "AnalysisStartReceipt": {
+          "additionalProperties": false,
+          "description": "Immediate receipt for a queued analysis job.",
+          "properties": {
+            "agent_id": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "analyzers": {
+              "items": {
+                "$ref": "#/$defs/AnalyzerConfig"
+              },
+              "title": "Analyzers",
+              "type": "array"
+            },
+            "filter": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Filter"
+            },
+            "operation": {
+              "const": "analysis",
+              "title": "Operation",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobResponse"
+            }
+          },
+          "required": [
+            "operation",
+            "agent_id",
+            "filter",
+            "analyzers",
+            "result"
+          ],
+          "title": "AnalysisStartReceipt",
+          "type": "object"
+        },
+        "AnalyzerConfig": {
+          "additionalProperties": false,
+          "description": "Analyzer config.",
+          "properties": {
+            "analyzer": {
+              "description": "Analyzer name.",
+              "title": "Analyzer",
+              "type": "string"
+            },
+            "connection_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Credential connection; defaults to the provider's default.",
+              "title": "Connection Id"
+            },
+            "min_sessions": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Session minimum (built-in insights: 5; others: 1).",
+              "title": "Min Sessions"
+            },
+            "params": {
+              "additionalProperties": true,
+              "description": "Plugin arguments.",
+              "title": "Params",
+              "type": "object"
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Analyzer version; defaults to latest.",
+              "title": "Version"
+            }
+          },
+          "required": [
+            "analyzer"
+          ],
+          "title": "AnalyzerConfig",
+          "type": "object"
+        },
         "BaselineEvaluationMode": {
           "description": "Baseline evaluation mode.",
           "enum": [
@@ -14482,6 +14866,9 @@
           "anyOf": [
             {
               "$ref": "#/$defs/EvaluationStartReceipt"
+            },
+            {
+              "$ref": "#/$defs/AnalysisStartReceipt"
             },
             {
               "$ref": "#/$defs/ExperimentRunStartReceipt"

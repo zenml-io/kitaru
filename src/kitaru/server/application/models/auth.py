@@ -28,6 +28,7 @@ class GrantKind(StrEnum):
     SESSION = "session"
     BLOB = "blob"
     IMPORT = "import"
+    SESSION_GROUP = "session_group"
 
 
 class AccountPrincipal(FrozenModel):

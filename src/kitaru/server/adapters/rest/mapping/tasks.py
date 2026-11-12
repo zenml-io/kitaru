@@ -209,6 +209,7 @@ def _details_to_response(spec: TaskSpec) -> TaskDetails:
             plugin=_plugin_spec_to_response(details.plugin),
             agent_id=details.agent_id,
             import_id=details.import_id,
+            session_group_id=details.session_group_id,
         )
     raise ValueError(f"Task {spec.task_id} details have no response mapping")
 

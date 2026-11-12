@@ -14,10 +14,11 @@
 """SQL session repository."""
 
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import ColumnElement, CursorResult, select, update
+from sqlalchemy import ColumnElement, CursorResult, exists, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import defer
 
@@ -49,6 +50,11 @@ from kitaru.server.adapters.db.orm.session import (
     SESSION_AGENT_VERSION_ID_FOREIGN_KEY,
     SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT,
     SessionORM,
+)
+from kitaru.server.adapters.db.orm.session_group import (
+    SESSION_GROUP_SESSION_SESSION_ID_FOREIGN_KEY,
+    SessionGroupORM,
+    SessionGroupSessionORM,
 )
 from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
@@ -137,6 +143,11 @@ SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "name": SessionORM.name,
     "tag": build_tag_condition_binding(TagResourceType.SESSION, SessionORM.id),
     "cohort_version_id": _compile_cohort_version_condition,
+    "session_group_id": build_scope_condition_binding(
+        local_column=SessionORM.id,
+        related_key=SessionGroupSessionORM.session_id,
+        scope_column=SessionGroupSessionORM.session_group_id,
+    ),
     "experiment_run_id": _scopes_to_experiment_run,
     "has_evaluation": _compile_has_evaluation_condition,
     "started_at": SessionORM.started_at,
@@ -322,6 +333,67 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         )
         exclude = {column.key for column in deferred}
         return [row.to_domain(exclude=exclude) for row in rows], next_cursor
+
+    async def create_group(
+        self, job_id: uuid.UUID, session_ids: Sequence[uuid.UUID]
+    ) -> uuid.UUID:
+        """Store a fixed group of sessions for the tasks of a job to read.
+
+        Args:
+            job_id: Id of the job the group belongs to.
+            session_ids: Ids of the member sessions.
+
+        Raises:
+            SessionNotFound: No session has one of the member session ids.
+
+        Returns:
+            Id of the stored group.
+        """
+        group = SessionGroupORM(job_id=job_id)
+        await self._add(group)
+        links = [
+            SessionGroupSessionORM(session_group_id=group.id, session_id=session_id)
+            for session_id in session_ids
+        ]
+        # Add the links inside the savepoint: opening one flushes pending
+        # rows first, so links added before it would fail outside it and
+        # leave the surrounding transaction unusable.
+        try:
+            async with self._session.begin_nested():
+                self._session.add_all(links)
+                await self._session.flush()
+        except IntegrityError as exc:
+            # The caller reads the sessions before this insert, so a session
+            # foreign key violation means one was deleted concurrently.
+            self._raise_translated(
+                exc,
+                {
+                    SESSION_GROUP_SESSION_SESSION_ID_FOREIGN_KEY: (
+                        lambda: SessionNotFound()
+                    )
+                },
+            )
+        return group.id
+
+    async def is_in_group(
+        self, session_id: uuid.UUID, group_ids: Collection[uuid.UUID]
+    ) -> bool:
+        """Whether a session belongs to any of the given session groups.
+
+        Args:
+            session_id: Id of the session.
+            group_ids: Ids of the session groups.
+
+        Returns:
+            Whether the session is a member of at least one group.
+        """
+        membership = select(
+            exists().where(
+                SessionGroupSessionORM.session_id == session_id,
+                SessionGroupSessionORM.session_group_id.in_(group_ids),
+            )
+        )
+        return bool(await self._session.scalar(membership))
 
     async def get_many(
         self, session_ids: Sequence[uuid.UUID], include_payloads: bool

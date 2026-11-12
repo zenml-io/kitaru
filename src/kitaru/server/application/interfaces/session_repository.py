@@ -14,7 +14,7 @@
 """Session repository interface."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Protocol
 
 from kitaru.server.application.models.session import SessionFilter
@@ -125,6 +125,40 @@ class SessionRepository(Protocol):
 
         Returns:
             Stored sessions keyed by id.
+        """
+        ...
+
+    async def create_group(
+        self, job_id: uuid.UUID, session_ids: Sequence[uuid.UUID]
+    ) -> uuid.UUID:
+        """Store a fixed group of sessions for the tasks of a job to read.
+
+        The group is deleted with its job, and a session deleted later
+        leaves the group.
+
+        Args:
+            job_id: Id of the job the group belongs to.
+            session_ids: Ids of the member sessions.
+
+        Raises:
+            SessionNotFound: No session has one of the member session ids.
+
+        Returns:
+            Id of the stored group.
+        """
+        ...
+
+    async def is_in_group(
+        self, session_id: uuid.UUID, group_ids: Collection[uuid.UUID]
+    ) -> bool:
+        """Whether a session belongs to any of the given session groups.
+
+        Args:
+            session_id: Id of the session.
+            group_ids: Ids of the session groups.
+
+        Returns:
+            Whether the session is a member of at least one group.
         """
         ...
 
