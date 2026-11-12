@@ -197,17 +197,18 @@ async def test_create_analyses_applies_the_filter(
     assert response.status_code == 201
     (task,) = await _get_analysis_tasks(task_repository, response.json()["id"])
     assert _get_group_sessions(session_repository, task) == {late}
-    assert task.import_id == import_id
+    assert task.import_id is None
 
 
-async def test_create_analyses_records_an_import_only_when_every_session_shares_it(
+async def test_create_analyses_never_records_an_import(
     client: httpx.AsyncClient,
     session_repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
 ) -> None:
-    """Leave the import unset when the sessions come from an import and live."""
-    await _create_session(session_repository, import_id=uuid.uuid4())
-    await _create_session(session_repository)
+    """Leave the import unset even when every session came from one import."""
+    import_id = uuid.uuid4()
+    await _create_session(session_repository, import_id=import_id)
+    await _create_session(session_repository, import_id=import_id)
 
     response = await client.post(
         "/api/v1/analyses",

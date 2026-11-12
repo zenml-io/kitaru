@@ -240,7 +240,7 @@ async def test_run_passes_all_session_ids_without_fetching_details(
 async def test_run_lists_the_sessions_of_a_session_group(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """List a task's session group rather than its import."""
+    """List the sessions of a task's session group."""
     session_ids = [uuid.uuid4() for _ in range(3)]
     session_group_id = uuid.uuid4()
     details = AnalysisTaskDetails(
@@ -250,7 +250,6 @@ async def test_run_lists_the_sessions_of_a_session_group(
             entrypoint="package:analyze", requirement="package==1.0"
         ),
         agent_id=uuid.uuid4(),
-        import_id=uuid.uuid4(),
         session_group_id=session_group_id,
     )
 

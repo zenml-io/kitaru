@@ -42,6 +42,6 @@ def test_import_analysis_reports_an_import_selection() -> None:
 
 def test_session_group_analysis_reports_a_sessions_selection() -> None:
     """Mark a task over a session group apart from an import analysis."""
-    task = _task(import_id=uuid.uuid4(), session_group_id=uuid.uuid4())
+    task = _task(session_group_id=uuid.uuid4())
     properties = build_analysis_completed_properties(task, None, None)
     assert properties["selection"] == "sessions"

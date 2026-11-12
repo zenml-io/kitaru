@@ -534,7 +534,7 @@
                 "type": "null"
               }
             ],
-            "description": "Import whose sessions are analyzed when no session group is set.",
+            "description": "Import whose sessions are analyzed, unset with a session group.",
             "title": "Import Id"
           },
           "kind": {

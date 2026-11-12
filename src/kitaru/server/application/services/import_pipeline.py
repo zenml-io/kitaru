@@ -155,10 +155,9 @@ async def build_analysis_task(
         job_id: Job the task belongs to.
         eligible_session_count: Number of eligible sessions in scope.
         agent_id: Agent the sessions and insights belong to.
-        import_id: Import the analyzer reads, or the import every session of
-            its group came from.
-        session_group_id: Session group the analyzer reads instead of the
-            whole import.
+        import_id: Import the analyzer reads, unset with a session group.
+        session_group_id: Session group the analyzer reads, unset with an
+            import.
 
     Returns:
         Analysis task, not yet stored.

@@ -467,10 +467,6 @@ class JobService:
             raise ValidationError(
                 f"No finished session of agent {command.agent_id} matches the filter"
             )
-        # Record an import only when every session came from it, so insights
-        # name an import exactly when they describe that import's sessions.
-        import_ids = {session.import_id for session in sessions}
-        import_id = import_ids.pop() if len(import_ids) == 1 else None
         job = await self.create_job(JobKind.ANALYSIS, actor)
         session_group_id = await self._sessions.create_group(
             job.id, [session.id for session in sessions]
@@ -483,7 +479,7 @@ class JobService:
                 job.id,
                 len(sessions),
                 agent_id=command.agent_id,
-                import_id=import_id,
+                import_id=None,
                 session_group_id=session_group_id,
             )
             for analyzer in analyzers

@@ -4536,7 +4536,7 @@ export interface components {
             analyzer_name: string;
             /**
              * Import Id
-             * @description Import whose sessions are analyzed when no session group is set.
+             * @description Import whose sessions are analyzed, unset with a session group.
              */
             import_id?: string | null;
             /**

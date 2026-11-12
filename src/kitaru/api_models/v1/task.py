@@ -282,7 +282,7 @@ class AnalysisTaskDetails(ResponseModel):
     agent_id: uuid.UUID = Field(description="Agent the insights belong to.")
     import_id: uuid.UUID | None = Field(
         default=None,
-        description="Import whose sessions are analyzed when no session group is set.",
+        description="Import whose sessions are analyzed, unset with a session group.",
     )
     session_group_id: uuid.UUID | None = Field(
         default=None,

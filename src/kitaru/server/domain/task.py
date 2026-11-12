@@ -677,9 +677,8 @@ class ImportTask(Task):
 class AnalysisTask(Task):
     """Analysis task.
 
-    The task reads the sessions of `session_group_id` when set, and otherwise
-    every session of `import_id`. With a group, `import_id` names the import
-    every session of the group came from, if there is one.
+    The task reads either every session of `import_id` or the sessions of
+    `session_group_id`, and names exactly one of the two.
     """
 
     plugin_version_id: uuid.UUID
@@ -691,8 +690,10 @@ class AnalysisTask(Task):
 
     @pydantic.model_validator(mode="after")
     def _require_scope(self) -> Self:
-        if self.import_id is None and self.session_group_id is None:
-            raise ValueError("An analysis task needs an import or a session group")
+        if (self.import_id is None) == (self.session_group_id is None):
+            raise ValueError(
+                "An analysis task needs either an import or a session group"
+            )
         return self
 
     def skip_if_insufficient_sessions(

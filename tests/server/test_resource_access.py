@@ -220,7 +220,7 @@ def test_analysis_spec_grants_its_import_and_script_blob() -> None:
 
 
 def test_analysis_spec_with_a_session_group_grants_the_group() -> None:
-    """Grant a session-group analyzer task its group, not its import."""
+    """Grant a session-group analyzer task its group."""
     agent_id = uuid.uuid4()
     session_group_id = uuid.uuid4()
     spec = TaskSpec(
@@ -231,7 +231,6 @@ def test_analysis_spec_with_a_session_group_grants_the_group() -> None:
             analyzer_name="trends",
             plugin=PackagePluginSpec(entrypoint="pkg:run", requirement="pkg==1"),
             agent_id=agent_id,
-            import_id=uuid.uuid4(),
             session_group_id=session_group_id,
         ),
     )
