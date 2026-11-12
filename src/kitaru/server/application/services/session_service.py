@@ -278,8 +278,7 @@ class SessionService:
     async def get_session(self, session_id: uuid.UUID, actor: AuthContext) -> Session:
         """Get a session by id.
 
-        A task principal reads a session it owns or holds as its task's
-        input session.
+        A task principal reads a session it owns or holds a grant covering.
 
         Args:
             session_id: Id of the session.
@@ -287,14 +286,14 @@ class SessionService:
 
         Raises:
             SessionNotFound: No session has this id.
-            SessionAccessDenied: A task principal owns neither the session nor
-                holds it as its task's input session.
+            SessionAccessDenied: A task principal neither owns the session nor
+                holds a grant covering it.
 
         Returns:
             Stored session.
         """
         session = await self._repository.get(session_id, include_payloads=True)
-        check_task_session_read(session, actor)
+        await check_task_session_read(session, actor, self._repository)
         await self._payload_store.resolve(
             [p for p in (session.inputs, session.outputs) if p is not None]
         )
@@ -315,15 +314,15 @@ class SessionService:
         Raises:
             SessionNotFound: No session has this id, or the baseline it
                 resolves to is gone.
-            SessionAccessDenied: A task principal owns neither the session nor
-                holds it as its task's input session.
+            SessionAccessDenied: A task principal neither owns the session nor
+                holds a grant covering it.
             SessionBaselineNotFound: The session was not produced by a replay.
 
         Returns:
             Baseline session the replay ran against.
         """
         session = await self._repository.get(session_id, include_payloads=False)
-        check_task_session_read(session, actor)
+        await check_task_session_read(session, actor, self._repository)
         replay = await self._replays.get_by_result_session_id(session_id)
         if replay is None:
             raise SessionBaselineNotFound(session_id)

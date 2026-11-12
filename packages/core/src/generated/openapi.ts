@@ -302,6 +302,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/analyses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Analyses
+         * @description Run analyzers over one agent's selected sessions, as one job.
+         *
+         *     Clients observe HTTP 201 on success, 404 when an analyzer, version, or
+         *     connection does not exist, and 422 when no finished session matches, more
+         *     sessions match than the cap allows, or the input is invalid.
+         *
+         *     Args:
+         *         body: Analysis create request.
+         *         service: Job service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Created job.
+         */
+        post: operations["create_analyses_api_v1_analyses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/analyzers": {
         parameters: {
             query?: never;
@@ -4463,6 +4495,30 @@ export interface components {
             run_spec?: components["schemas"]["RunSpec"] | null;
         };
         /**
+         * AnalysisCreateRequest
+         * @description Analysis create request.
+         *
+         *     Without a filter, every finished session of the agent is analyzed.
+         */
+        AnalysisCreateRequest: {
+            /**
+             * Agent Id
+             * Format: uuid
+             * @description Agent whose sessions are analyzed.
+             */
+            agent_id: string;
+            /**
+             * Analyzers
+             * @description Analyzers run across the selected sessions.
+             */
+            analyzers: components["schemas"]["AnalyzerConfig"][];
+            /**
+             * Filter
+             * @description Only sessions matching this session filter.
+             */
+            filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
+        };
+        /**
          * AnalysisTaskDetails
          * @description Analysis task details.
          */
@@ -4480,10 +4536,9 @@ export interface components {
             analyzer_name: string;
             /**
              * Import Id
-             * Format: uuid
-             * @description Import whose sessions are analyzed.
+             * @description Import whose sessions are analyzed, unset with a session group.
              */
-            import_id: string;
+            import_id?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -4501,6 +4556,11 @@ export interface components {
              * @description Analyzer plugin to load.
              */
             plugin: components["schemas"]["ScriptPluginSpec"] | components["schemas"]["PackagePluginSpec"];
+            /**
+             * Session Group Id
+             * @description Group of sessions analyzed, fixed when the task was created.
+             */
+            session_group_id?: string | null;
         };
         /**
          * AnalyzerConfig
@@ -11379,6 +11439,95 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentVersionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorBody"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    create_analyses_api_v1_analyses_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalysisCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobResponse"];
                 };
             };
             /** @description Bad Request */

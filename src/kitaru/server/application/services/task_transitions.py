@@ -426,17 +426,18 @@ class TaskTransitions:
                 ),
             )
 
-    async def _get_task_import(self, import_id: uuid.UUID) -> Import | None:
-        """Load the import behind an import task.
+    async def _get_task_import(self, import_id: uuid.UUID | None) -> Import | None:
+        """Load the import behind an import or analysis task.
 
         Args:
-            import_id: Id of the import the task ran.
+            import_id: Id of the import the task names, if any.
 
         Returns:
-            Stored import, or None without an import repository and None when
-            the import has been deleted since the task named it.
+            Stored import, or None without an import id, without an import
+            repository, and when the import has been deleted since the task
+            named it.
         """
-        if self._imports is None:
+        if import_id is None or self._imports is None:
             return None
         try:
             return await self._imports.get(import_id)

@@ -237,6 +237,58 @@ async def test_run_passes_all_session_ids_without_fetching_details(
     ]
 
 
+async def test_run_lists_the_sessions_of_a_session_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """List the sessions of a task's session group."""
+    session_ids = [uuid.uuid4() for _ in range(3)]
+    session_group_id = uuid.uuid4()
+    details = AnalysisTaskDetails(
+        analyzer_name="spread",
+        params={},
+        plugin=PackagePluginSpec(
+            entrypoint="package:analyze", requirement="package==1.0"
+        ),
+        agent_id=uuid.uuid4(),
+        session_group_id=session_group_id,
+    )
+
+    class Tasks:
+        async def get_spec(self, requested_task_id: uuid.UUID) -> Any:
+            return SimpleNamespace(details=details)
+
+    listed: list[SessionListParams] = []
+
+    async def list_sessions(params: SessionListParams) -> Page[SessionResponse]:
+        listed.append(params)
+        return Page(
+            items=[SessionResponse.model_construct(id=item) for item in session_ids],
+            next_cursor=None,
+        )
+
+    client: Any = SimpleNamespace(tasks=Tasks())
+    client.sessions = SessionsResource(client)
+    monkeypatch.setattr(client.sessions, "list", list_sessions)
+    received: list[list[uuid.UUID]] = []
+
+    def analyze(received_ids: list[uuid.UUID]) -> list[InsightInput]:
+        received.append(received_ids)
+        return []
+
+    monkeypatch.setattr(analyzer_module, "load_source_ref", lambda ref, label: analyze)
+    monkeypatch.setattr(analyzer_module, "write_task_result", lambda result: None)
+
+    await analyzer_module.run(client, str(uuid.uuid4()))
+
+    assert received == [session_ids]
+    (params,) = listed
+    assert json.loads(params.model_dump(mode="json")["filter"]) == {
+        "field": "session_group_id",
+        "op": "eq",
+        "value": str(session_group_id),
+    }
+
+
 @pytest.mark.parametrize("source", ["script", "package"])
 @pytest.mark.parametrize("async_callable", [False, True])
 async def test_analyzer_flow_end_to_end(

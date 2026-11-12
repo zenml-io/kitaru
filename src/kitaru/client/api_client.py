@@ -39,6 +39,7 @@ from kitaru.client.exceptions import (
 from kitaru.client.resources.accounts import AccountsResource
 from kitaru.client.resources.agent_versions import AgentVersionsResource
 from kitaru.client.resources.agents import AgentsResource
+from kitaru.client.resources.analyses import AnalysesResource
 from kitaru.client.resources.analyzers import AnalyzersResource
 from kitaru.client.resources.annotations import AnnotationsResource
 from kitaru.client.resources.api_keys import ApiKeysResource
@@ -187,6 +188,7 @@ class KitaruAPIClient:
         self.accounts = AccountsResource(self)
         self.agents = AgentsResource(self)
         self.agent_versions = AgentVersionsResource(self)
+        self.analyses = AnalysesResource(self)
         self.analyzers = AnalyzersResource(self)
         self.annotations = AnnotationsResource(self)
         self.api_keys = ApiKeysResource(self)
