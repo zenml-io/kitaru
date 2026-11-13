@@ -7,6 +7,7 @@ import math
 import os
 from collections.abc import Mapping
 from enum import StrEnum
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -35,6 +36,7 @@ class MCPSettings(BaseModel):
     handler_timeout: float = Field(default=120.0, gt=0)
     pool_size: int = Field(default=20, ge=1, le=1000)
     max_concurrency: int = Field(default=10, ge=1, le=1000)
+    viewers_dir: Path | None = None
     debug: bool = False
 
     @field_validator("server_url")
@@ -42,6 +44,14 @@ class MCPSettings(BaseModel):
     def _reject_blank_target(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
             raise ValueError("explicit server target must not be blank")
+        return value
+
+    @field_validator("viewers_dir", mode="before")
+    @classmethod
+    def _ignore_blank_viewers_dir(cls, value: object) -> object:
+        # An empty variable would otherwise become `Path(".")`, the host's cwd.
+        if isinstance(value, str) and not value.strip():
+            return None
         return value
 
     @model_validator(mode="after")
@@ -64,6 +74,7 @@ class MCPSettings(BaseModel):
             "handler_timeout": "KITARU_MCP_HANDLER_TIMEOUT",
             "pool_size": "KITARU_MCP_POOL_SIZE",
             "max_concurrency": "KITARU_MCP_MAX_CONCURRENCY",
+            "viewers_dir": "KITARU_MCP_VIEWERS_DIR",
             "debug": "KITARU_MCP_DEBUG",
         }
         for field, variable in mapping.items():

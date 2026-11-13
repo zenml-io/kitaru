@@ -14,7 +14,8 @@ from mcp.server.mcpserver import Context
 from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import BaseModel, ValidationError
 
-from kitaru.mcp.apps import FAILURE_MATRIX_URI, ui_meta
+from kitaru.api_models.v1.base import JsonValue
+from kitaru.mcp.apps import FAILURE_MATRIX_URI, SESSION_VIEWER_URI, ui_meta
 from kitaru.mcp.errors import (
     MCPOutputValidationError,
     error_result,
@@ -58,6 +59,14 @@ from kitaru.mcp.models.management import CohortsManageRequest, ExperimentsManage
 from kitaru.mcp.models.registry import RegistryReadRequest
 from kitaru.mcp.models.review import ReviewManageRequest, ReviewReadRequest
 from kitaru.mcp.models.sessions import SessionReadRequest, SessionReadResult
+from kitaru.mcp.models.viewer import (
+    SessionViewRequest,
+    SessionViewResult,
+    ViewerReadRequest,
+    ViewerReadResult,
+    ViewerWriteRequest,
+    ViewerWriteResult,
+)
 from kitaru.mcp.models.workflows import (
     DeleteRequest,
     SessionImportRequest,
@@ -81,6 +90,11 @@ from kitaru.mcp.tools.failure_matrix import handle_failure_cell, handle_failure_
 from kitaru.mcp.tools.registry import handle_registry_read
 from kitaru.mcp.tools.review import handle_review_manage, handle_review_read
 from kitaru.mcp.tools.sessions import handle_session_read
+from kitaru.mcp.tools.viewer import (
+    handle_session_view,
+    handle_viewer_read,
+    handle_viewer_write,
+)
 from kitaru.mcp.tools.workflow_start import handle_workflow_start
 from kitaru.mcp.tools.workflows import handle_session_import
 
@@ -217,6 +231,44 @@ async def failure_cell_tool(
     )
 
 
+async def session_view_tool(
+    request: SessionViewRequest, context: Context
+) -> SessionViewResult:
+    """Open one session in an interactive trace viewer where a reviewer annotates it.
+
+    Pass `session_id`, or `investigation_id` with `position` to review an
+    investigation's sessions with its questions and verdicts. `viewer` picks the
+    page: `default`, or a custom viewer saved as `<name>.html` in the viewers
+    folder. The result names the session; the viewer page reads its payloads
+    itself. Notes, answers, and verdicts the reviewer saves in the viewer go to
+    Kitaru; read them back with `kitaru_review_read`.
+    """
+    return cast(
+        SessionViewResult,
+        await _invoke(context, request, SessionViewResult, handle_session_view),
+    )
+
+
+async def viewer_read_tool(
+    request: ViewerReadRequest, context: Context
+) -> ViewerReadResult:
+    """Read a session for a viewer page, a viewer's HTML, or more of its nodes."""
+    return cast(
+        ViewerReadResult,
+        await _invoke(context, request, ViewerReadResult, handle_viewer_read),
+    )
+
+
+async def viewer_write_tool(
+    request: ViewerWriteRequest, context: Context
+) -> ViewerWriteResult:
+    """Save a reviewer's note, investigation answer, edit, or session verdict."""
+    return cast(
+        ViewerWriteResult,
+        await _invoke(context, request, ViewerWriteResult, handle_viewer_write),
+    )
+
+
 async def cohorts_manage_tool(
     request: CohortsManageRequest, context: Context
 ) -> CohortsManageResult:
@@ -328,10 +380,14 @@ async def _invoke(
 ) -> CallToolResult:
     state = cast(MCPServerState, context.request_context.lifespan_context)
     text: str | None = None
+    redacting = True
     try:
         data = await state.execute(lambda: handler(state, request))
         if isinstance(data, ToolSuccessPayload):
-            json_data = redact_data(data.data)
+            redacting = data.redact
+            json_data = (
+                redact_data(data.data) if redacting else cast(JsonValue, data.data)
+            )
             envelope = success_result(
                 result_type,
                 json_data,
@@ -357,7 +413,7 @@ async def _invoke(
             "Tool handler raised %s: %s", type(error).__name__, redact(str(error))
         )
         envelope = error_result(result_type, error)
-    return protocol_result(envelope, text)
+    return protocol_result(envelope, text, mask_credentials=redacting)
 
 
 TOOL_SPECS = (
@@ -421,6 +477,24 @@ TOOL_SPECS = (
         meta=ui_meta(FAILURE_MATRIX_URI, visibility=["app"]),
     ),
     ToolSpec(
+        "kitaru_session_view",
+        CapabilityMode.READ_ONLY,
+        _describe(session_view_tool),
+        _annotations(read_only=True, destructive=False, idempotent=True),
+        session_view_tool,
+        meta=ui_meta(SESSION_VIEWER_URI),
+    ),
+    ToolSpec(
+        "kitaru_viewer_read",
+        CapabilityMode.READ_ONLY,
+        _describe(viewer_read_tool),
+        _annotations(read_only=True, destructive=False, idempotent=True),
+        viewer_read_tool,
+        # Only viewer pages call these two; hosts keep them out of the model's
+        # tools so a saved note is one the reviewer wrote in the page.
+        meta=ui_meta(SESSION_VIEWER_URI, visibility=["app"]),
+    ),
+    ToolSpec(
         "kitaru_cohorts_manage",
         CapabilityMode.STANDARD,
         _describe(cohorts_manage_tool),
@@ -475,6 +549,14 @@ TOOL_SPECS = (
         _describe(connections_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         connections_manage_tool,
+    ),
+    ToolSpec(
+        "kitaru_viewer_write",
+        CapabilityMode.STANDARD,
+        _describe(viewer_write_tool),
+        _annotations(read_only=False, destructive=False, idempotent=False),
+        viewer_write_tool,
+        meta=ui_meta(SESSION_VIEWER_URI, visibility=["app"]),
     ),
     ToolSpec(
         "kitaru_workflow_cancel",

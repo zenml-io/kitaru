@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kitaru default viewer</title>
+<!--
+  The default Kitaru trace viewer, and the template for custom ones.
+
+  A viewer is one self-contained HTML file: inline <style> and <script> only,
+  no network. The session viewer page mounts it and provides `window.kitaru`.
+  Render in `kitaru.onSession(view => ...)`, which runs again whenever the
+  reviewer moves to another session. Make text annotatable with
+  `kitaru.renderText(el, { text, nodeId, path })`, and fields or whole nodes
+  with `kitaru.mark(el, { nodeId, path, kind: "field" | "node" })`.
+-->
+<style>
+.dv { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 28px; padding: 14px 16px; }
+@media (max-width: 860px) { .dv { grid-template-columns: minmax(0, 1fr); } .dv-side { order: -1; position: static !important; max-height: none !important; } }
+.dv-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.dv-side { position: sticky; top: 12px; align-self: start; max-height: calc(100vh - 24px); overflow: auto; }
+.dv-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.dv-head h1 { font-size: 16px; font-weight: 650; margin: 0; }
+.dv-meta { color: var(--kv-ink-3); font-size: 12.5px; flex: 1; }
+.dv-label { font-size: 11.5px; color: var(--kv-ink-3); margin-bottom: 4px; }
+.dv-prose { font-size: 13px; line-height: 1.55; }
+.dv-quiet { color: var(--kv-ink-2); }
+.dv-error { color: var(--kv-bad); }
+.dv-tree { list-style: none; margin: 0; padding: 0; }
+.dv-tree .dv-tree { margin-left: 7px; padding-left: 14px; border-left: 1px solid var(--kv-border); }
+.dv-node > summary { list-style: none; cursor: pointer; display: flex; gap: 8px; align-items: baseline; padding: 5px 0; font-size: 13px; }
+.dv-node > summary::-webkit-details-marker { display: none; }
+.dv-node > summary:hover .dv-name { color: var(--kv-brand-ink); }
+.dv-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--kv-ink-3); transform: translateY(-1px); }
+.dv-dot.llm_call { background: #7c6bd6; } .dv-dot.tool_call { background: #2f9e64; } .dv-dot.subagent_call { background: #d97706; }
+.dv-node.dv-failed .dv-dot { background: var(--kv-bad); }
+.dv-name { font-weight: 600; }
+.dv-type { color: var(--kv-ink-3); font-size: 11.5px; }
+.dv-sub { color: var(--kv-ink-3); font-size: 11.5px; margin-left: auto; white-space: nowrap; }
+.dv-body { display: flex; flex-direction: column; gap: 10px; padding: 2px 0 10px 15px; }
+.dv-text { max-height: 280px; overflow: auto; }
+.dv-raw summary { cursor: pointer; font-size: 11.5px; color: var(--kv-ink-3); }
+.dv-raw summary:hover { color: var(--kv-ink); }
+.dv-json { font: 11.5px/1.55 var(--kv-mono); padding: 6px 0 0 2px; max-height: 360px; overflow: auto; }
+.dv-json ul { list-style: none; margin: 0; padding-left: 14px; }
+.dv-json > ul { padding-left: 0; }
+.dv-key { color: var(--kv-ink-3); cursor: pointer; }
+.dv-key:hover { color: var(--kv-brand-ink); }
+.dv-scalar { color: #2a6fb0; }
+.dv-empty { color: var(--kv-ink-3); padding: 12px 0; }
+.dv-body .kv-btn { border: 0; padding: 0; background: none; color: var(--kv-ink-3); font-size: 11.5px; line-height: inherit; }
+.dv-body .kv-btn:hover:not(:disabled) { color: var(--kv-brand-ink); }
+</style>
+</head>
+<body>
+<div class="dv">
+  <main class="dv-main">
+    <header class="dv-head">
+      <h1 id="dv-title"></h1><span class="dv-meta" id="dv-meta"></span>
+      <button class="kv-link" id="dv-toggle">Collapse</button>
+      <button class="kv-icon" id="dv-full" title="Full screen" aria-label="Full screen">⤢</button>
+    </header>
+    <section id="dv-session"></section>
+    <ul class="dv-tree" id="dv-tree"></ul>
+  </main>
+  <aside class="dv-side" id="dv-side"></aside>
+</div>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const fmtMs = (a, b) => { if (!a || !b) return ""; const ms = new Date(b) - new Date(a); return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`; };
+
+  // A JSON value as a tree. String leaves are text anchors, so any string a
+  // node recorded can be highlighted; a click on a key notes the whole field.
+  function jsonTree(value, nodeId, path) {
+    if (value === null || typeof value !== "object") {
+      if (typeof value === "string") return kitaru.renderText(el("span"), { text: value, nodeId, path });
+      return kitaru.mark(el("span", "dv-scalar", JSON.stringify(value)), { nodeId, path, kind: "field" });
+    }
+    const list = el("ul");
+    const entries = Array.isArray(value) ? value.map((v, i) => [i, v]) : Object.entries(value);
+    if (!entries.length) list.append(el("li", "dv-scalar", Array.isArray(value) ? "[]" : "{}"));
+    for (const [key, child] of entries) {
+      const childPath = `${path}${kitaru.join(key)}`;
+      const keyEl = kitaru.mark(el("span", "dv-key", `${key}: `), { nodeId, path: childPath, kind: "field" });
+      keyEl.addEventListener("click", () => kitaru.ui.compose(kitaru.target(keyEl)));
+      const item = el("li"); item.append(keyEl, jsonTree(child, nodeId, childPath)); list.append(item);
+    }
+    return list;
+  }
+  function textBlock(label, found, nodeId, cls = "") {
+    const wrap = el("div");
+    wrap.append(el("div", "dv-label", label), kitaru.renderText(el("div", `dv-prose dv-text ${cls}`), { text: found.text, nodeId, path: found.path }));
+    return wrap;
+  }
+  // Raw payloads are built on first open: most stay closed, and every string
+  // in them would otherwise be a text anchor to paint on each save.
+  function rawPayload(label, value, nodeId, root) {
+    if (value == null || (typeof value === "object" && !Object.keys(value).length)) return null;
+    const details = el("details", "dv-raw");
+    details.append(el("summary", "", label));
+    details.addEventListener("toggle", () => {
+      if (!details.open || details.dataset.built) return;
+      details.dataset.built = "1";
+      const box = el("div", "dv-json"); box.append(jsonTree(value, nodeId, root)); details.append(box);
+      kitaru.reportSize();
+    });
+    return details;
+  }
+
+  function renderNode(node, children) {
+    const item = el("li");
+    const card = kitaru.mark(el("details", `dv-node${node.status === "failed" ? " dv-failed" : ""}`), { nodeId: node.id, kind: "node" });
+    const head = el("summary");
+    const actor = node.model || node.subagent_id || (node.tool_name !== node.name ? node.tool_name : null);
+    const sub = [actor, fmtMs(node.started_at, node.ended_at), node.tokens?.total_tokens ? `${node.tokens.total_tokens} tok` : ""].filter(Boolean).join(" · ");
+    head.append(el("i", `dv-dot ${node.node_type}`), el("span", "dv-name", node.name), el("span", "dv-type", node.node_type.replace("_call", "")), el("span", "dv-sub", sub));
+    card.append(head);
+    const body = el("div", "dv-body");
+    for (const [part, label] of [["system", "System"], ["input", "Input"], ["output", "Output"], ["reasoning", "Reasoning"], ["error", "Error"]]) {
+      const found = kitaru.nodeText(node, part);
+      if (found) body.append(textBlock(label, found, node.id, part === "error" ? "dv-error" : part === "system" ? "dv-quiet" : ""));
+    }
+    const raw = el("div", "kv-row");
+    for (const key of ["inputs", "outputs", "attributes"]) { const d = rawPayload(key, node[key], node.id, `/${key}`); if (d) raw.append(d); }
+    raw.append(kitaru.ui.noteButton({ nodeId: node.id, kind: "node" }, { label: "note", title: `Note on ${node.name}` }));
+    raw.style.alignItems = "flex-start"; raw.style.gap = "14px"; raw.style.flexWrap = "wrap";
+    body.append(raw);
+    card.append(body);
+    card.open = node.status === "failed" || node.node_type !== "span";
+    item.append(card);
+    if (children.length) { const sub = el("ul", "dv-tree"); sub.append(...children); item.append(sub); }
+    return item;
+  }
+
+  function render(view) {
+    const s = view.session;
+    $("dv-title").textContent = s.name || `Session #${s.number}`;
+    $("dv-meta").textContent = [s.status, `${view.nodes.length}${view.nodes_truncated ? "+" : ""} nodes`, `${s.llm_call_count} LLM`, `${s.tool_call_count} tools`, s.cost ? `$${Number(s.cost).toFixed(4)}` : "", s.framework || ""].filter(Boolean).join(" · ");
+    const sessionPart = $("dv-session");
+    sessionPart.replaceChildren(...[["input", "Input"], ["output", "Output"], ["error", "Error"]].map(([part, label]) => { const found = kitaru.sessionText(part); return found && textBlock(label, found, null, part === "error" ? "dv-error" : ""); }).filter(Boolean));
+    sessionPart.style.display = "grid"; sessionPart.style.gap = "12px";
+    const byParent = new Map(), ids = new Set(view.nodes.map((n) => n.external_id));
+    for (const n of view.nodes) { const p = n.parent_external_id && ids.has(n.parent_external_id) ? n.parent_external_id : ""; if (!byParent.has(p)) byParent.set(p, []); byParent.get(p).push(n); }
+    const build = (parent) => (byParent.get(parent) || []).map((n) => renderNode(n, build(n.external_id)));
+    const roots = build("");
+    $("dv-tree").replaceChildren(...(roots.length ? roots : [el("li", "dv-empty", "This session has no nodes.")]));
+  }
+
+  let open = true;
+  $("dv-toggle").addEventListener("click", () => {
+    open = !open;
+    document.querySelectorAll(".dv-node").forEach((d) => { d.open = open; });
+    $("dv-toggle").textContent = open ? "Collapse" : "Expand";
+    kitaru.reportSize();
+  });
+  $("dv-full").addEventListener("click", () => kitaru.toggleFullscreen());
+  kitaru.ui.reviewPanel($("dv-side"));
+  kitaru.ui.enableSelectionNotes();
+  kitaru.onSession(render);
+})();
+</script>
+</body>
+</html>
