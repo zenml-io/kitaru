@@ -28,6 +28,7 @@ from kitaru.cli.command_registry import (
     register_command,
 )
 from kitaru.cli.config import CONFIG_KEYS, read_config, write_config
+from kitaru.cli.install_report import report_install
 from kitaru.cli.invocation_context import get_invocation
 from kitaru.cli.output import CLIError, CommandResult, emit_event, get_output_context
 from kitaru.cli.schema import ParameterSpec, describe_schema
@@ -387,12 +388,14 @@ async def setup(
 ) -> CommandResult:
     """Wire skills and the MCP server into installed coding agents."""
     invocation = get_invocation()
-    return await setup_commands.setup(
+    result = await setup_commands.setup(
         server=invocation.server,
         mode=mode,
         install_skills=not no_skills,
         register_mcp=not no_mcp,
     )
+    await report_install(result.item["install"])
+    return result
 
 
 @register_command(
