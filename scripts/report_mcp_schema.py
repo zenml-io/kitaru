@@ -11,19 +11,22 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from kitaru.mcp.apps import is_model_visible
 from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
 
 SNAPSHOT_DIRECTORY = Path(__file__).parents[1] / "tests" / "mcp" / "snapshots"
 METRICS_PATH = SNAPSHOT_DIRECTORY / "metrics.json"
 EXPECTED_TOOL_COUNTS = {
-    CapabilityMode.READ_ONLY: 8,
-    CapabilityMode.STANDARD: 16,
-    CapabilityMode.DESTRUCTIVE: 18,
+    CapabilityMode.READ_ONLY: 10,
+    CapabilityMode.STANDARD: 19,
+    CapabilityMode.DESTRUCTIVE: 21,
 }
-MAX_TOOLS = 18
+# Hosts that support MCP Apps keep app-only tools out of the model's tool list,
+# so the context budgets below count only the tools the model sees.
+MAX_MODEL_TOOLS = 18
 MAX_TOOL_SCHEMA_BYTES = 45 * 1024
-MAX_DESTRUCTIVE_DISCOVERY_BYTES = 239 * 1024
+MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES = 239 * 1024
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -91,32 +94,41 @@ async def _collect() -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
                 ),
             }
         discovery_bytes = len(_canonical_bytes({"tools": dumped}))
+        model_tools = [tool for tool in dumped if is_model_visible(tool.get("_meta"))]
+        model_discovery_bytes = len(_canonical_bytes({"tools": model_tools}))
         expected_count = EXPECTED_TOOL_COUNTS[mode]
         if len(dumped) != expected_count:
             raise ValueError(
                 f"{mode.value}: expected {expected_count} tools, found {len(dumped)}"
             )
-        if len(dumped) > MAX_TOOLS:
-            raise ValueError(f"{mode.value}: {len(dumped)} tools exceed {MAX_TOOLS}")
+        if len(model_tools) > MAX_MODEL_TOOLS:
+            raise ValueError(
+                f"{mode.value}: {len(model_tools)} model-visible tools exceed "
+                f"{MAX_MODEL_TOOLS}"
+            )
         if (
             mode is CapabilityMode.DESTRUCTIVE
-            and discovery_bytes > MAX_DESTRUCTIVE_DISCOVERY_BYTES
+            and model_discovery_bytes > MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES
         ):
             raise ValueError(
-                f"destructive: {discovery_bytes} discovery bytes exceed "
-                f"{MAX_DESTRUCTIVE_DISCOVERY_BYTES}"
+                f"destructive: {model_discovery_bytes} model-visible discovery bytes "
+                f"exceed {MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES}"
             )
         mode_metrics[mode.value] = {
             "tool_count": len(dumped),
+            "model_tool_count": len(model_tools),
             "discovery_response_bytes": discovery_bytes,
+            "model_discovery_response_bytes": model_discovery_bytes,
             "tools": tool_metrics,
         }
     metrics = {
         "schema_version": "1",
         "budgets": {
-            "maximum_tools": MAX_TOOLS,
+            "maximum_model_tools": MAX_MODEL_TOOLS,
             "maximum_tool_schema_bytes": MAX_TOOL_SCHEMA_BYTES,
-            "maximum_destructive_discovery_bytes": MAX_DESTRUCTIVE_DISCOVERY_BYTES,
+            "maximum_destructive_model_discovery_bytes": (
+                MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES
+            ),
         },
         "modes": mode_metrics,
     }
@@ -156,8 +168,10 @@ def _check(snapshots: dict[str, list[dict[str, Any]]], metrics: dict[str, Any]) 
 def _print_report(metrics: dict[str, Any]) -> None:
     for mode, values in metrics["modes"].items():
         print(
-            f"{mode}: {values['tool_count']} tools, "
-            f"{values['discovery_response_bytes']} discovery bytes"
+            f"{mode}: {values['tool_count']} tools "
+            f"({values['model_tool_count']} model-visible), "
+            f"{values['discovery_response_bytes']} discovery bytes "
+            f"({values['model_discovery_response_bytes']} model-visible)"
         )
         for name, tool in values["tools"].items():
             print(

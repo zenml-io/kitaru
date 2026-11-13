@@ -14,7 +14,7 @@
 """Shared in-process MCP server builders and SDK client fakes."""
 
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Generator
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -37,11 +37,18 @@ from kitaru.mcp.settings import CapabilityMode, MCPSettings
 
 
 def build_server_context(
-    client: object, *, mode: CapabilityMode = CapabilityMode.READ_ONLY
+    client: object,
+    *,
+    mode: CapabilityMode = CapabilityMode.READ_ONLY,
+    settings: MCPSettings | None = None,
 ) -> tuple[MCPServer[MCPServerState], Context[MCPServerState, Any]]:
-    """Build a server and request context bound to a fake SDK client."""
-    state = MCPServerState(MCPSettings(), cast(Any, client))
-    server = create_server(MCPSettings(mode=mode))
+    """Build a server and request context bound to a fake SDK client.
+
+    Pass `settings` when a handler reads more than the capability mode, such
+    as the viewers folder; the handlers then see the same settings.
+    """
+    state = MCPServerState(settings or MCPSettings(), cast(Any, client))
+    server = create_server(settings or MCPSettings(mode=mode))
     request_context = ServerRequestContext(
         session=cast(Any, None),
         lifespan_context=state,
@@ -51,12 +58,32 @@ def build_server_context(
     return server, Context(request_context=request_context, mcp_server=server)
 
 
+class _Missing:
+    """A missing SDK call, awaited like `get` or iterated like `iter_sessions`."""
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    def _error(self) -> MCPToolError:
+        return MCPToolError("not_found", f"null client has no data for {self._name}")
+
+    def __await__(self) -> Generator[None, None, object]:
+        raise self._error()
+        yield  # Makes this a generator, as `__await__` must return an iterator.
+
+    def __aiter__(self) -> "_Missing":
+        return self
+
+    async def __anext__(self) -> object:
+        raise self._error()
+
+
 class _NullResource:
     """Resource whose every method reports the target as missing."""
 
-    def __getattr__(self, name: str) -> Callable[..., Awaitable[object]]:
-        async def _missing(*_args: object, **_kwargs: object) -> object:
-            raise MCPToolError("not_found", f"null client has no data for {name}")
+    def __getattr__(self, name: str) -> Callable[..., _Missing]:
+        def _missing(*_args: object, **_kwargs: object) -> _Missing:
+            return _Missing(name)
 
         return _missing
 

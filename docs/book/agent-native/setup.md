@@ -64,6 +64,8 @@ Tools are gated by a **capability mode**, either `read-only` (the default), `sta
 | `kitaru_docs_search` | read-only | Search bundled Kitaru guides and return short excerpts with links to the published pages |
 | `kitaru_failure_matrix` | read-only | Show where a group of sessions first goes wrong, as an interactive [transition failure matrix](#transition-failure-matrix) |
 | `kitaru_failure_matrix_cell` | read-only | List the sessions behind one matrix cell; the matrix view calls it, and hosts that support MCP Apps hide it from the assistant |
+| `kitaru_session_view` | read-only | Open a session, or an investigation's sessions, in an interactive [trace viewer](#trace-viewers): the built-in one or one you wrote |
+| `kitaru_viewer_read` | read-only | Read a session, a viewer page, and further nodes for an open viewer; viewer pages call it, and hosts that support MCP Apps hide it from the assistant |
 | `kitaru_cohorts_manage` | standard | Create or update cohorts and cohort versions |
 | `kitaru_experiments_manage` | standard | Create or update experiments |
 | `kitaru_session_import` | standard | Import sessions from an already-uploaded blob |
@@ -71,6 +73,7 @@ Tools are gated by a **capability mode**, either `read-only` (the default), `sta
 | `kitaru_workflow_start` | standard | Start a session evaluation, a session analysis, or an experiment run, return immediately |
 | `kitaru_evaluators_manage` | standard | Create or update evaluators from an existing blob or pinned package |
 | `kitaru_connections_manage` | standard | Create or update [provider connections](../guides/provider-connections.md) and select provider defaults |
+| `kitaru_viewer_write` | standard | Save the notes, investigation answers, and verdicts a reviewer writes in a viewer; viewer pages call it, and hosts that support MCP Apps hide it from the assistant |
 | `kitaru_workflow_cancel` | destructive | Cancel a job or experiment run |
 | `kitaru_delete` | destructive | Delete a cohort, experiment, investigation, annotation, evaluator, version, connection, run, or tag; unlink an exact tag-resource tuple |
 
@@ -93,6 +96,12 @@ Tag operations follow the same split. In `read-only`, `kitaru_registry_read` can
 Worker inspection is read-only by design. Use `kitaru_registry_read` with `kind: "worker"` to list workers, or `operation: "get_worker"` with an exact worker UUID. The returned `live` and `last_seen_at` fields report recent heartbeat observations; they do not guarantee that a worker will claim a particular task. Worker registration, task assignment, credentials, and lifecycle control remain outside MCP.
 
 `kitaru_review_manage` accepts `pending`, `in_progress`, or `completed` when updating an investigation. This does not bypass server transition rules: for example, the server can still reject moving a completed investigation back to pending. A linked session's verdict remains a separate field and does not accept `pending`.
+
+### Trace viewers
+
+Ask your assistant to "open investigation `<id>` in the viewer" and it calls `kitaru_session_view`. In chat hosts that support MCP Apps and pass the viewer's tool calls on to the server, such as the ChatGPT desktop app, the session appears inside the conversation. The reviewer selects text or clicks an item to add a note, answers the investigation's questions, sets each session's verdict, and moves between sessions. Everything they save goes to Kitaru as ordinary annotations and verdicts, so the assistant reads them back with `kitaru_review_read`. Claude Code shows only the tool's text summary, or a frame that cannot load the session, so review from a chat host.
+
+The `viewer` argument picks the page: `default` shows any session as a list of steps, and a custom viewer is one HTML file in `~/.config/kitaru/viewers` (or the folder `--viewers-dir` or `KITARU_MCP_VIEWERS_DIR` names), drawn for one agent's domain. The `kitaru-trace-viewer` skill builds one from your sessions. Saving notes needs `standard` mode. See [Review sessions in a custom trace viewer](../guides/custom-trace-viewers.md).
 
 ## Install the agent skills
 
@@ -147,6 +156,7 @@ Before creating remote state or using worker or model compute, the skill explain
 | [`kitaru-replay-experiment`](../guides/replay-and-overrides.md) | Testing one candidate change against an accepted cohort with pinned evaluators, and reading whether the evidence improved, regressed, traded off, or stayed inconclusive |
 | [`kitaru-adapter-builder`](../adapters/README.md) | Building a Python or TypeScript [adapter](../adapters/README.md) for a framework that Kitaru does not support yet, with explicit recording and replay capabilities |
 | [`kitaru-importer-builder`](../guides/importing-sessions.md) | Building and locally validating an importer for an unsupported provider export; registration requires separate approval |
+| [`kitaru-trace-viewer`](../guides/custom-trace-viewers.md) | Building a custom trace viewer that shows your agent's sessions the way a domain expert reads them, checking it in a local preview, and opening sessions or an investigation in it for review |
 
 The replay skill stops short of the deployment decision: it reports what the evidence supports and leaves the call to you. The two builder skills default to finishing on your machine, and register or upload only when you ask for each step.
 

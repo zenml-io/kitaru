@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Kitaru session viewer</title>
+<style>
+/* Tokens every viewer may use. They read the host's MCP Apps variables first
+   and fall back to Kitaru's palette, in light and dark. */
+:root {
+  --k-card: #ffffff; --k-subtle: #fafaf8; --k-ink: #1a1714; --k-ink-2: #6b6560; --k-ink-3: #a39e98; --k-border: #e5e2dc;
+  --kv-card: var(--color-background-primary, var(--k-card));
+  --kv-subtle: var(--color-background-secondary, var(--k-subtle));
+  --kv-ink: var(--color-text-primary, var(--k-ink));
+  --kv-ink-2: var(--color-text-secondary, var(--k-ink-2));
+  --kv-ink-3: var(--color-text-tertiary, var(--k-ink-3));
+  --kv-border: var(--color-border-primary, var(--k-border));
+  --kv-sans: var(--font-sans, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif);
+  --kv-mono: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  --kv-brand: #f17829; --kv-brand-ink: #b8520f; --kv-brand-soft: #fcebdc;
+  --kv-good: #1f7a36; --kv-bad: #b42330; --kv-warn: #a86a00;
+  --kv-note: rgba(241, 120, 41, .28); --kv-note-line: #f17829;
+  --kv-shadow: 0 1px 2px rgba(26,23,20,.05), 0 8px 24px rgba(26,23,20,.10);
+  --kv-radius: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --k-card: #1c1a17; --k-subtle: #181614; --k-ink: #f3efe9; --k-ink-2: #b3aca4; --k-ink-3: #7d766f; --k-border: #34302b;
+    --kv-brand-ink: #f59a5c; --kv-brand-soft: #33241a; --kv-good: #5cc27a; --kv-bad: #ff7b7b; --kv-warn: #e6b450;
+    --kv-note: rgba(241, 120, 41, .35); --kv-shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"] {
+  --k-card: #1c1a17; --k-subtle: #181614; --k-ink: #f3efe9; --k-ink-2: #b3aca4; --k-ink-3: #7d766f; --k-border: #34302b;
+  --kv-brand-ink: #f59a5c; --kv-brand-soft: #33241a; --kv-good: #5cc27a; --kv-bad: #ff7b7b; --kv-warn: #e6b450;
+  --kv-note: rgba(241, 120, 41, .35); --kv-shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.4);
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: transparent; }
+body { color: var(--kv-ink); font-family: var(--kv-sans); font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased; position: relative; }
+button { font: inherit; color: inherit; }
+
+.kv-status { margin: 16px; padding: 12px 14px; border: 1px solid var(--kv-border); border-radius: var(--kv-radius); background: var(--kv-subtle); color: var(--kv-ink-2); display: flex; align-items: center; gap: 10px; }
+.kv-status::before { content: ""; width: 14px; height: 14px; flex: none; background: url("{{KITARU_LOGO}}") center / contain no-repeat; opacity: .8; }
+.kv-error { color: var(--kv-bad); border-color: color-mix(in srgb, var(--kv-bad) 40%, var(--kv-border)); }
+
+/* Anchors: what the reviewer can point at. */
+.kv-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.kv-note { background: var(--kv-note); box-shadow: inset 0 -2px 0 var(--kv-note-line); border-radius: 2px; cursor: help; }
+[data-annot-noted] { position: relative; }
+[data-annot-noted]::after { content: attr(data-annot-noted); position: absolute; top: -6px; right: -6px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--kv-brand); color: #fff; font: 600 10px/16px var(--kv-sans); text-align: center; pointer-events: none; }
+[data-annot-flash] { outline: 2px solid var(--kv-brand); outline-offset: 2px; transition: outline-color 1.4s; }
+
+/* Review kit: quiet controls that sit beside a viewer, not on top of it. */
+.kv-btn { border: 1px solid var(--kv-border); background: transparent; border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 12.5px; line-height: 18px; }
+.kv-btn:hover:not(:disabled) { border-color: var(--kv-ink-3); }
+.kv-btn:disabled { opacity: .45; cursor: default; }
+.kv-primary { background: var(--kv-ink); border-color: var(--kv-ink); color: var(--kv-card); font-weight: 550; }
+.kv-primary:hover:not(:disabled) { background: var(--kv-brand-ink); border-color: var(--kv-brand-ink); }
+.kv-link { border: 0; background: none; padding: 0; color: var(--kv-ink-2); cursor: pointer; font-size: 12px; text-align: left; }
+.kv-link:hover:not(:disabled) { color: var(--kv-brand-ink); }
+.kv-link:disabled { color: var(--kv-ink-3); cursor: default; }
+.kv-icon { border: 0; background: none; padding: 0 4px; font-size: 16px; line-height: 1; color: var(--kv-ink-2); cursor: pointer; }
+.kv-icon:disabled { opacity: .3; cursor: default; }
+.kv-row { display: flex; gap: 8px; align-items: center; }
+.kv-wrap { flex-wrap: wrap; }
+.kv-end { justify-content: flex-end; }
+.kv-muted { color: var(--kv-ink-2); }
+.kv-hint { color: var(--kv-ink-3); font-size: 12px; }
+.kv-label { display: flex; justify-content: space-between; align-items: baseline; font-size: 11.5px; color: var(--kv-ink-3); }
+.kv-input { width: 100%; border: 1px solid var(--kv-border); border-radius: 6px; padding: 6px 8px; background: transparent; color: var(--kv-ink); font: inherit; font-size: 13px; resize: vertical; }
+.kv-input:focus { outline: none; border-color: var(--kv-ink-3); }
+.kv-quote, .kv-note-quote { font-family: var(--kv-mono); font-size: 11.5px; color: var(--kv-ink-2); border-left: 2px solid var(--kv-brand); padding-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kv-panel { display: flex; flex-direction: column; gap: 18px; font-size: 13px; }
+.kv-section { display: flex; flex-direction: column; gap: 6px; }
+.kv-question { font-weight: 550; }
+.kv-banner { font-size: 12px; color: var(--kv-warn); }
+.kv-nav { display: flex; align-items: center; gap: 4px; }
+.kv-nav-name { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kv-dots { display: inline-flex; gap: 5px; align-items: center; }
+.kv-dot { width: 9px; height: 9px; padding: 0; border-radius: 50%; border: 1.5px solid var(--kv-ink-3); background: transparent; cursor: pointer; }
+.kv-dot.kv-current { border-color: var(--kv-ink); box-shadow: 0 0 0 2px var(--kv-card), 0 0 0 3.5px var(--kv-ink-3); }
+.kv-dot.kv-acceptable { background: var(--kv-good); border-color: var(--kv-good); }
+.kv-dot.kv-problematic { background: var(--kv-bad); border-color: var(--kv-bad); }
+.kv-dot.kv-uncertain { background: var(--kv-warn); border-color: var(--kv-warn); }
+.kv-seg { display: flex; border: 1px solid var(--kv-border); border-radius: 7px; overflow: hidden; }
+.kv-seg button { flex: 1; border: 0; background: transparent; padding: 4px 0; font-size: 12.5px; text-transform: capitalize; cursor: pointer; color: var(--kv-ink-2); }
+.kv-seg button + button { border-left: 1px solid var(--kv-border); }
+.kv-seg button:hover:not(:disabled) { color: var(--kv-ink); }
+.kv-seg button:disabled { cursor: default; }
+.kv-seg .kv-on { color: #fff; font-weight: 550; }
+.kv-seg .kv-on.kv-acceptable { background: var(--kv-good); }
+.kv-seg .kv-on.kv-problematic { background: var(--kv-bad); }
+.kv-seg .kv-on.kv-uncertain { background: var(--kv-warn); }
+.kv-note-row { display: flex; flex-direction: column; gap: 3px; padding: 7px 0; border-top: 1px solid var(--kv-border); cursor: pointer; }
+.kv-note-row:hover .kv-edit { visibility: visible; }
+.kv-note-meta { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--kv-ink-3); }
+.kv-edit { visibility: hidden; font-size: 11.5px; }
+.kv-note-text { white-space: pre-wrap; }
+.kv-note-edit { display: flex; flex-direction: column; gap: 6px; }
+.kv-foot { gap: 14px; }
+.kv-composer { position: absolute; z-index: 20; width: min(320px, calc(100vw - 16px)); display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--kv-border); border-radius: 9px; background: var(--kv-card); box-shadow: var(--kv-shadow); }
+.kv-composer .kv-row { justify-content: flex-end; }
+.kv-composer-title { font-size: 12px; color: var(--kv-ink-2); }
+.kv-float { position: absolute; z-index: 19; box-shadow: var(--kv-shadow); padding: 2px 9px; font-size: 12px; }
+.kv-toast { position: fixed; z-index: 30; left: 50%; bottom: 14px; transform: translateX(-50%); padding: 5px 12px; border-radius: 7px; background: var(--kv-ink); color: var(--kv-card); font-size: 12.5px; box-shadow: var(--kv-shadow); max-width: calc(100vw - 32px); }
+.kv-toast.kv-error { background: var(--kv-bad); color: #fff; }
+</style>
+</head>
+<body>
+<div id="kv-status" class="kv-status" role="status">Waiting for the host…</div>
+<div id="kv-root"></div>
+<script>
+/*{{KITARU_VIEWER_RUNTIME}}*/
+</script>
+</body>
+</html>
