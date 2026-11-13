@@ -34,6 +34,8 @@ def installer(tmp_path):
     binary = bin_dir / "kitaru"
     binary.write_text(
         '#!/bin/bash\nprintf "%s\\n" "$*" >> "$BINARY_CALLS"\n'
+        '[[ " $* " != *" setup "* ]] || '
+        'echo "${KITARU_INSTALL_METHOD:-}" > "$BINARY_CALLS.method"\n'
         '[ "${BROKEN_CLI:-0}" = 0 ] || { echo "fixture startup failed" >&2; exit 7; }\n'
         'if [ "$*" = --version ]; then\n'
         '  echo "${CLI_VERSION_STRING:-fixture}"; exit\nfi\n'
@@ -392,6 +394,25 @@ def test_setup_output_option_is_compatible_with_older_releases(
     assert any("--output text setup" in call for call in calls) == (
         supports_output == "1"
     )
+
+
+@pytest.mark.parametrize(
+    "opt_out", [None, "DO_NOT_TRACK", "KITARU_DISABLE_CLIENT_ANALYTICS"]
+)
+def test_setup_run_is_marked_as_install_and_disclosed(installer, tmp_path, opt_out):
+    script, env = installer
+    if opt_out:
+        env[opt_out] = "1"
+    result = subprocess.run(
+        ["bash", str(script), "--global", "--no-mcp", "--no-modify-path"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert Path(env["BINARY_CALLS"] + ".method").read_text().strip() == "script"
+    assert ("reports this install anonymously" in result.stdout) == (opt_out is None)
 
 
 def test_long_help_does_not_hide_output_option(installer, tmp_path):

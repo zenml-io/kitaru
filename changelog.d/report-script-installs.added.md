@@ -1,0 +1,1 @@
+- The one-line installer now reports one anonymous install event through `kitaru setup`. Set `DO_NOT_TRACK=1` or `KITARU_DISABLE_CLIENT_ANALYTICS=1` to turn it off.
