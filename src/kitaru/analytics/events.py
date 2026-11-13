@@ -41,6 +41,7 @@ class AnalyticsEvent(StrEnum):
     ACCOUNT_CREATED = "Account Created"
     USER_ENRICHED = "User Enriched"
     INSIGHT_CREATED = "Insight Created"
+    INSTALL_SCRIPT_COMPLETED = "Install script completed"
 
 
 class AccountOrigin(StrEnum):

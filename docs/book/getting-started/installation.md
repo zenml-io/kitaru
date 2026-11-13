@@ -211,6 +211,18 @@ npx skills add zenml-io/kitaru-skills
 
 Pair them with the [MCP server](../agent-native/setup.md) (`kitaru[mcp]`) so the assistant has bounded operations to go with the method. `kitaru` with no arguments tells you whether the skills are installed.
 
+## Anonymous usage analytics
+
+The installer's `kitaru setup` run sends one anonymous event saying that an install finished. It carries two random ids stored in Kitaru's config file, the Kitaru version, and whether the install was project or global. The second id is the one `kitaru login` presents, so an install can be matched to a later sign-in from the same machine. It carries no name, email, path, or code. Running `kitaru setup` yourself sends nothing.
+
+The CLI also attaches the first random id to its requests to your Kitaru server, so the server can count usage without identifying you.
+
+To turn both off, set `DO_NOT_TRACK=1` or `KITARU_DISABLE_CLIENT_ANALYTICS=1` before running the installer or the CLI:
+
+```bash
+curl -fsSL https://kitaru.ai/install | DO_NOT_TRACK=1 bash
+```
+
 ## Next steps
 
 Read the [Quickstart](quickstart.md) to understand Kitaru's five-step method. For a controlled hands-on path, prepare the [PydanticAI returns agent example](https://github.com/zenml-io/kitaru/tree/main/examples/python/pydantic_ai_ticket_resolver) and continue with the [complete returns agent tutorial](../tutorials/returns-agent/README.md). If you already collect traces elsewhere, start with [Import your traces](import-your-traces.md).
