@@ -192,8 +192,10 @@ def test_maps_native_openinference_llm_attributes() -> None:
     assert node.requested_model == "gemini-flash"
     assert node.model == "gemini-3.5-flash-lite"
     assert node.model_provider == "google"
-    assert node.inputs == [{"message.role": "user", "message.content": "Hello"}]
-    assert node.outputs == [{"message.role": "assistant", "message.content": "Hi"}]
+    assert node.inputs == [{"role": "user", "content": "Hello"}]
+    assert node.outputs == [{"role": "assistant", "content": "Hi"}]
+    assert node.input_text_selector == "/0/content"
+    assert node.output_text_selector == "/0/content"
     assert node.tokens is not None
     assert node.tokens.input_tokens == 12
     assert node.tokens.output_tokens == 5
@@ -667,7 +669,7 @@ def test_malformed_message_index_preserves_valid_messages(index: str) -> None:
         )
     )
     assert isinstance(session, ImportedSession)
-    assert session.nodes[0].inputs == [{"message.content": "hello"}]
+    assert session.nodes[0].inputs == [{"content": "hello"}]
 
 
 @pytest.mark.parametrize(

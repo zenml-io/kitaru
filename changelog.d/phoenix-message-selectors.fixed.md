@@ -1,0 +1,1 @@
+- Fixed Phoenix-imported model calls showing raw message fields instead of readable prompts and replies, while preserving tool calls and visible reasoning.
