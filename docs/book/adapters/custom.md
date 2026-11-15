@@ -35,6 +35,12 @@ Two rules worth keeping whichever way you build it:
 
 Read the [PydanticAI adapter](pydantic-ai.md) as the reference implementation, and the [LangGraph capability matrix](langgraph.md) for how to express partial support honestly.
 
+### Write sessions in the right order
+
+For native recording, create the session with `status=SessionStatus.IN_PROGRESS`, write its nodes, then update the session to `COMPLETED` or `FAILED`. Use the same sequence during replay with `origin=SessionOrigin.REPLAY`. Finish the session after the last node write, because a terminal native session no longer accepts nodes.
+
+An importer-backed adapter can instead ingest a completed provider trace with `kitaru.task.importer.ingest_session`. Pass the real source provider as `provider`; the helper stores it as `imported_from`, even when the session origin is `RECORDED` or `REPLAY`. A direct helper call that includes nodes for a terminal session with either origin requires that source identity under the server's node-ingestion rules. Registered importer jobs supply their configured provider automatically. Use the native recording sequence for runs without a provider trace.
+
 ## Your agent is a CLI harness
 
 If your production agent is a coding harness such as Claude Code or the Gemini CLI rather than code you wrote, the same two paths apply, and the import one works today with no changes to how the harness runs: export its session logs and [convert them to Kitaru JSONL](../guides/custom-importer.md), and you get inspection, investigations, and evaluators over everything the harness did.
