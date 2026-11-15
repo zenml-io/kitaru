@@ -89,6 +89,16 @@ Field by field:
 
 Watch it with `kitaru job watch <job-id>`; when the replay reads `completed`, `client.replays.get(replay.id)` carries the `result_session_id`.
 
+## Expected answers during replay
+
+Keep gold labels in the baseline session's metadata, separate from agent inputs. Evaluators of the result session receive `SessionView.baseline`, an optional `EvaluationBaselineContext` containing the baseline's `session_id` and `metadata`. This context also accompanies a later direct evaluation of the result session. It does not include the baseline's full trace or outputs. The result session's own metadata remains separate in `session.session.metadata`.
+
+An evaluator can read gold labels from `session.baseline.metadata` for a replay result and fall back to `session.session.metadata` for an ordinary session. A baseline evaluation has no baseline context unless that session was itself the result of an earlier replay. See [Write an evaluator](write-an-evaluator.md) for an example. The replayed agent receives the baseline inputs and replay ID, without baseline metadata or permission to read the baseline session.
+
+Context refers to the immediate baseline, without following earlier replays. Prefer the original labeled session as your baseline; replaying a previous result does not recover labels from its ancestors.
+
+Metadata is read when the evaluation task specification is fetched, not preserved as a permanent snapshot. Keep labels unchanged while comparing a pair. After editing gold labels, use `--baseline-evaluation-mode force` or `BaselineEvaluationMode.FORCE` for the next replay so the baseline is evaluated again; `if_missing` can reuse evaluations made before the edit.
+
 ## Overrides
 
 One `ReplayOverride`, four knobs; change one at a time:
