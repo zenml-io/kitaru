@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 from task_fixtures import (
     TaskAppFixture,
     build_task_app,
@@ -87,6 +88,23 @@ def _session_view() -> SessionView:
         updated=now,
     )
     return SessionView(session=session, nodes=[])
+
+
+@pytest.mark.parametrize(
+    "baseline",
+    [
+        {},
+        {"session_id": "invalid", "metadata": {}},
+        {"session_id": str(uuid.uuid4()), "metadata": []},
+        {"session_id": str(uuid.uuid4()), "metadata": {"labels": float("nan")}},
+    ],
+)
+def test_session_view_rejects_malformed_baseline(baseline: object) -> None:
+    """Validate baseline context when a session view enters the evaluator."""
+    with pytest.raises(ValidationError):
+        SessionView.model_validate(
+            {**_session_view().model_dump(), "baseline": baseline}
+        )
 
 
 def test_resolve_evaluator_rejects_a_non_callable(
@@ -218,8 +236,10 @@ async def test_call_evaluator_raising_async_evaluator_wrapped() -> None:
         await call_evaluator("broken", evaluate, view, {})
 
 
+@pytest.mark.parametrize("with_baseline", [False, True])
 async def test_run_fetches_the_session_and_its_nodes_in_one_call(
     monkeypatch: pytest.MonkeyPatch,
+    with_baseline: bool,
 ) -> None:
     """Read the input session and every node through a single request."""
     session_id = uuid.uuid4()
@@ -232,7 +252,21 @@ async def test_run_fetches_the_session_and_its_nodes_in_one_call(
         ),
         input_session_id=session_id,
     )
-    session = SessionDetailResponse.model_construct(id=session_id)
+    baseline_id = uuid.uuid4()
+    baseline_metadata = {"labels": {"answer": ["approved", None, 3, True]}}
+    if with_baseline:
+        details = EvaluationTaskDetails.model_validate(
+            {
+                **details.model_dump(mode="json"),
+                "baseline": {
+                    "session_id": str(baseline_id),
+                    "metadata": baseline_metadata,
+                },
+            }
+        )
+    session = SessionDetailResponse.model_construct(
+        id=session_id, metadata={"labels": {"answer": "result"}}
+    )
     node = SessionNodeResponse.model_construct(
         id=uuid.uuid4(), session_id=session_id, index=0
     )
@@ -256,6 +290,13 @@ async def test_run_fetches_the_session_and_its_nodes_in_one_call(
     def evaluate(view: SessionView, **params: object) -> EvaluationResult:
         assert view.session is session
         assert view.nodes == [node]
+        assert view.session.metadata == {"labels": {"answer": "result"}}
+        if with_baseline:
+            assert view.baseline is not None
+            assert view.baseline.session_id == baseline_id
+            assert view.baseline.metadata == baseline_metadata
+        else:
+            assert view.baseline is None
         assert params == {"threshold": 0.5}
         return EvaluationResult(name="quality", score=1.0)
 

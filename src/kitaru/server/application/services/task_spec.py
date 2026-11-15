@@ -28,6 +28,7 @@ from kitaru.server.application.interfaces.import_repository import ImportReposit
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.secret_repository import SecretRepository
+from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.models.task import TaskPolicy
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
@@ -42,6 +43,7 @@ from kitaru.server.domain.task import (
     AnalysisTaskDetails,
     ApiImportSourceSpec,
     BlobImportSourceSpec,
+    EvaluationBaselineContext,
     EvaluationTask,
     EvaluationTaskDetails,
     ImportSourceSpec,
@@ -68,6 +70,7 @@ class TaskSpecBuilder:
         replay_repository: ReplayRepository,
         import_repository: ImportRepository,
         connection_repository: ConnectionRepository,
+        session_repository: SessionRepository,
         policy: TaskPolicy,
     ) -> None:
         """Initialize the builder.
@@ -80,6 +83,7 @@ class TaskSpecBuilder:
             replay_repository: Replay repository.
             import_repository: Import repository.
             connection_repository: Connection repository.
+            session_repository: Session repository, for replay baseline metadata.
             policy: Task execution policy.
         """
         self._agent_versions = agent_version_repository
@@ -89,6 +93,7 @@ class TaskSpecBuilder:
         self._replays = replay_repository
         self._imports = import_repository
         self._connections = connection_repository
+        self._sessions = session_repository
         self._policy = policy
 
     async def build_spec(self, task: Task) -> TaskSpec:
@@ -177,6 +182,15 @@ class TaskSpecBuilder:
             )
         except ConnectionNotFound:
             env, secret_env, unset_env = task.env, {}, []
+        baseline_context = None
+        replay = await self._replays.get_by_result_session_id(task.input_session_id)
+        if replay is not None:
+            baseline = await self._sessions.get(
+                replay.baseline_session_id, include_payloads=False
+            )
+            baseline_context = EvaluationBaselineContext(
+                session_id=baseline.id, metadata=baseline.metadata
+            )
         return TaskSpec(
             task_id=task.id,
             kind=TaskKind.EVALUATOR,
@@ -189,6 +203,7 @@ class TaskSpecBuilder:
                 params=task.params,
                 plugin=await self._plugin_spec(plugin_version),
                 input_session_id=task.input_session_id,
+                baseline=baseline_context,
             ),
         )
 

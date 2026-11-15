@@ -124,6 +124,34 @@ process.stdout.write(JSON.stringify({schema_version: 1, results: [
     assert results[1].passed is True
 
 
+async def test_baseline_metadata_round_trip(
+    tmp_path: Path, node: str, view: SessionView
+) -> None:
+    """Serialize baseline labels separately from the scored session metadata."""
+    baseline = {
+        "session_id": str(uuid.uuid4()),
+        "metadata": {"labels": {"answer": ["approved", None, 3, True]}},
+    }
+    view = SessionView.model_validate({**view.model_dump(), "baseline": baseline})
+    artifact, digest = _write_artifact(
+        tmp_path,
+        """
+let input = '';
+for await (const chunk of process.stdin) input += chunk;
+const {session} = JSON.parse(input);
+process.stdout.write(JSON.stringify({schema_version: 1, results: [
+  {name: 'baseline', value: JSON.stringify(session.baseline ?? null)},
+  {name: 'result', value: JSON.stringify(session.session.metadata)}
+]}));
+""",
+    )
+    results = await run_typescript_evaluator(
+        view, artifact=artifact, sha256=digest, params={}, node=node
+    )
+    assert json.loads(results[0].value or "") == baseline
+    assert json.loads(results[1].value or "") == {"locale": "en"}
+
+
 @pytest.mark.parametrize(
     "response",
     [
