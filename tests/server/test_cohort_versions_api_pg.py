@@ -193,3 +193,49 @@ async def test_create_cohort_version_missing_cohort(client: httpx.AsyncClient) -
         "/api/v1/cohorts/00000000-0000-0000-0000-000000000000/versions", json={}
     )
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize("delete_all", [False, True])
+async def test_create_after_deleting_latest_persists_membership_and_counter(
+    client: httpx.AsyncClient, agent_id: str, cohort_id: str, delete_all: bool
+) -> None:
+    """Empty API deltas still copy surviving members without reusing deleted numbers."""
+    members = [await _make_session_id(client, agent_id) for _ in range(3)]
+    first = await client.post(
+        f"/api/v1/cohorts/{cohort_id}/versions", json={"add_session_ids": members[:2]}
+    )
+    assert first.status_code == 201
+    second = await client.post(
+        f"/api/v1/cohorts/{cohort_id}/versions", json={"add_session_ids": members[2:]}
+    )
+    assert second.status_code == 201
+    deleted = await client.delete(f"/api/v1/cohort-versions/{second.json()['id']}")
+    assert deleted.status_code == 204
+    if delete_all:
+        deleted = await client.delete(f"/api/v1/cohort-versions/{first.json()['id']}")
+        assert deleted.status_code == 204
+    parent = await client.get(f"/api/v1/cohorts/{cohort_id}")
+    assert parent.json()["latest_version"] == 2
+    copied = await client.post(
+        f"/api/v1/cohorts/{cohort_id}/versions", json={"display_version": "restored"}
+    )
+    assert copied.status_code == 201
+    assert copied.json()["version"] == 3
+    assert copied.json()["session_count"] == (0 if delete_all else 2)
+    listed = await client.get(
+        "/api/v1/sessions",
+        params={
+            "filter": '{"field":"cohort_version_id","op":"eq","value":"'
+            + copied.json()["id"]
+            + '"}'
+        },
+    )
+    assert listed.status_code == 200
+    assert {item["id"] for item in listed.json()["items"]} == (
+        set() if delete_all else set(members[:2])
+    )
+    parent = await client.get(f"/api/v1/cohorts/{cohort_id}")
+    assert parent.json()["latest_version"] == 3
+    following = await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})
+    assert following.status_code == 201
+    assert following.json()["version"] == 4

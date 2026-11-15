@@ -157,16 +157,19 @@ async def get_cohort_version(
 
     parent_reference, requested = parse_version_reference(normalized, "Cohort")
     cohort = await resolve_asset(client.cohorts, parent_reference, "Cohort")
-    version_number = cohort.latest_version if requested == "latest" else requested
-    matches = [
-        item
-        async for item in client.cohorts.iter_versions(cohort.id)
-        if item.version == version_number
-    ]
+    versions = [item async for item in client.cohorts.iter_versions(cohort.id)]
+    version_number = (
+        max((item.version for item in versions), default=None)
+        if requested == "latest"
+        else requested
+    )
+    matches = [item for item in versions if item.version == version_number]
     if not matches:
         raise CLIError(
             "not_found",
-            f"Cohort {cohort.name!r} has no version {version_number}.",
+            f"Cohort {cohort.name!r} has no versions."
+            if version_number is None
+            else f"Cohort {cohort.name!r} has no version {version_number}.",
         )
     if len(matches) > 1:
         raise CLIError(

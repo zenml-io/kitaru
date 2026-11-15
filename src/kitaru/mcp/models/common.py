@@ -156,10 +156,17 @@ ActivityItem = (
 )
 
 
+class ActivityPageData(PageData[ActivityItem]):
+    """Bounded page of activity records."""
+
+    # Accept generic PageData instances as well as dictionaries.
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ActivityReadResult(ToolResult):
     """Typed activity read result."""
 
-    data: ActivityItem | PageData[ActivityItem] | None = None
+    data: ActivityItem | ActivityPageData | None = None
     links: dict[Literal["inspect"], str] = Field(default_factory=dict)
 
 

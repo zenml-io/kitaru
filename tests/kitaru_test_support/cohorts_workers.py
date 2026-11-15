@@ -390,6 +390,26 @@ class FakeCohortVersionRepository:
                 return stored.model_copy()
         raise CohortVersionNotFound(cohort_id, version)
 
+    async def find_latest(self, cohort_id: uuid.UUID) -> CohortVersion | None:
+        """Find the highest-numbered surviving version of a cohort.
+
+        Args:
+            cohort_id: Id of the cohort.
+
+        Returns:
+            Highest-numbered stored version, or None when none remain.
+        """
+        latest = max(
+            (
+                version
+                for version in self._versions.values()
+                if version.cohort_id == cohort_id
+            ),
+            key=lambda version: version.version,
+            default=None,
+        )
+        return latest.model_copy() if latest is not None else None
+
     def _cohort_version_ids_tagged(self, tag_name: str) -> set[uuid.UUID]:
         """Resolve the ids of cohort versions linked to a tag by name.
 

@@ -3099,6 +3099,56 @@
     "name": "kitaru_activity_read",
     "outputSchema": {
       "$defs": {
+        "ActivityPageData": {
+          "additionalProperties": false,
+          "description": "Bounded page of activity records.",
+          "properties": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/SessionDetailResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/SessionResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/ReplayResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/ImportResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/EvaluationResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/ExperimentRunResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/SessionNodeResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/TaskResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/_MCPJob"
+                  }
+                ]
+              },
+              "title": "Items",
+              "type": "array"
+            },
+            "page": {
+              "$ref": "#/$defs/PageMetadata"
+            }
+          },
+          "required": [
+            "items",
+            "page"
+          ],
+          "title": "ActivityPageData",
+          "type": "object"
+        },
         "AnalyzerConfig": {
           "additionalProperties": false,
           "description": "Analyzer config.",
@@ -4138,55 +4188,6 @@
           "title": "NodeType",
           "type": "string"
         },
-        "PageData_Union_SessionDetailResponse__SessionResponse__ReplayResponse__ImportResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__": {
-          "additionalProperties": false,
-          "properties": {
-            "items": {
-              "items": {
-                "anyOf": [
-                  {
-                    "$ref": "#/$defs/SessionDetailResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/SessionResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/ReplayResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/ImportResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/EvaluationResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/ExperimentRunResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/SessionNodeResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/TaskResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/_MCPJob"
-                  }
-                ]
-              },
-              "title": "Items",
-              "type": "array"
-            },
-            "page": {
-              "$ref": "#/$defs/PageMetadata"
-            }
-          },
-          "required": [
-            "items",
-            "page"
-          ],
-          "title": "PageData[Union[SessionDetailResponse, SessionResponse, ReplayResponse, ImportResponse, EvaluationResponse, ExperimentRunResponse, SessionNodeResponse, TaskResponse, _MCPJob]]",
-          "type": "object"
-        },
         "PageMetadata": {
           "additionalProperties": false,
           "description": "Opaque one-page cursor metadata.",
@@ -4679,6 +4680,14 @@
             },
             "status": {
               "$ref": "#/$defs/SessionStatus"
+            },
+            "tags": {
+              "description": "Linked tags.",
+              "items": {
+                "$ref": "#/$defs/TagResponse"
+              },
+              "title": "Tags",
+              "type": "array"
             },
             "task_id": {
               "anyOf": [
@@ -5256,6 +5265,14 @@
             "status": {
               "$ref": "#/$defs/SessionStatus"
             },
+            "tags": {
+              "description": "Linked tags.",
+              "items": {
+                "$ref": "#/$defs/TagResponse"
+              },
+              "title": "Tags",
+              "type": "array"
+            },
             "task_id": {
               "anyOf": [
                 {
@@ -5389,6 +5406,49 @@
           ],
           "title": "StaticMatchMode",
           "type": "string"
+        },
+        "TagResponse": {
+          "description": "Tag response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "id": {
+              "description": "Tag id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "name": {
+              "description": "Tag name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "name"
+          ],
+          "title": "TagResponse",
+          "type": "object"
         },
         "TaskKind": {
           "description": "Kind of work a task runs.",
@@ -6005,7 +6065,7 @@
               "$ref": "#/$defs/_MCPJob"
             },
             {
-              "$ref": "#/$defs/PageData_Union_SessionDetailResponse__SessionResponse__ReplayResponse__ImportResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__"
+              "$ref": "#/$defs/ActivityPageData"
             },
             {
               "type": "null"
