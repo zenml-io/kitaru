@@ -219,11 +219,18 @@ async def create_cohort_version(
     remove_session_ids: list[uuid.UUID] | None,
     display_version: str | None,
     baseline_id: uuid.UUID | None = None,
+    allow_unchanged: bool = False,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create an immutable version from an ordered membership delta."""
     additions = list(add_session_ids or [])
     removals = list(remove_session_ids or [])
+    if not additions and not removals and not allow_unchanged:
+        raise CLIError(
+            "invalid_arguments",
+            "Select at least one --add-session or --remove-session, or use "
+            "--allow-unchanged to copy existing membership.",
+        )
     if len(set(additions)) != len(additions):
         raise CLIError("invalid_arguments", "Each --add-session value must be unique.")
     if len(set(removals)) != len(removals):

@@ -61,7 +61,33 @@ kitaru cohort version create refund-regression \
 
 In the Python client and REST request, the same field is named `baseline_id`. Versions are server-numbered, `display_version` carries whatever you call the snapshot, and versions can be tagged and filtered by tag like sessions.
 
+The CLI rejects a version creation with no additions or removals before sending a request, even when `--display-version` or `--baseline` is present. This catches an empty shell expansion before it creates an unintended copy. To copy membership intentionally, pass `--allow-unchanged`:
+
+```bash
+kitaru cohort version create refund-regression \
+  --baseline <cohort-version-id> --allow-unchanged \
+  --display-version restored-baseline
+```
+
+Without `--baseline`, an intentional copy uses the latest surviving version. Existing Python client and REST calls can still create versions with empty membership deltas.
+
 Immutability is the point. When an experiment run reports "12 of 14 sessions improved," that claim stays checkable because cohort version 3 will always contain exactly those 14 sessions. Re-running the experiment on the same version is an apples-to-apples comparison; adding this week's failures is a new version, and the numbers say which version they came from.
+
+## Renaming or removing a version
+
+Membership is immutable, but a version's display label can be corrected:
+
+```bash
+kitaru cohort version update refund-regression@2 --display-version week-33
+```
+
+An unused version can also be deleted:
+
+```bash
+kitaru cohort version delete refund-regression@2 --force
+```
+
+An experiment run that references the version prevents its deletion. Deleting a version never renumbers other versions or makes its number available again. After deleting the newest version, the next creation uses the highest surviving version as its default baseline, and `@latest` resolves to that surviving version. If none remain, creation starts with an empty member list and continues the numbering. The API's `cohort.latest_version` remains the highest number ever assigned, including a number whose version was deleted; it is an allocation counter, not a guarantee that the version still exists.
 
 ## The lifecycle of a good cohort
 

@@ -382,8 +382,7 @@ class FakeSessionRepository:
         self._sessions[stored.id] = stored
         return self._copy(stored, include_payloads=False)
 
-    @staticmethod
-    def _copy(session: Session, include_payloads: bool) -> Session:
+    def _copy(self, session: Session, include_payloads: bool) -> Session:
         """Copy a stored session, dropping payloads unless requested.
 
         Args:
@@ -393,11 +392,25 @@ class FakeSessionRepository:
         Returns:
             Copied session.
         """
+        linked_tags = []
+        if self._tags is not None:
+            linked_ids = {
+                link.tag_id
+                for link in self._tags._links.values()
+                if link.resource_type == TagResourceType.SESSION
+                and link.resource_id == session.id
+            }
+            linked_tags = [
+                tag.model_copy()
+                for tag in sorted(self._tags._tags.values(), key=lambda tag: tag.id)
+                if tag.id in linked_ids
+            ]
         if include_payloads:
-            return session.model_copy()
+            return session.model_copy(update={"tags": linked_tags})
         # Rebuild without the payload fields so they stay unset, like a load
         # that excluded the payload columns.
         data = dict(session)
+        data["tags"] = linked_tags
         del data["inputs"]
         del data["outputs"]
         return Session(**data)
