@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Allow genai-prices 0.2 so the adapter installs alongside PydanticAI 2.68 and later.
 - Record LangChain's `input_token_details.cache_creation`, plus the `ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens` split that langchain-anthropic reports instead, as `cache_write_input_tokens`, and include cache writes in genai-prices cost estimates.
 - Document that LangGraph 1.2.19 and later deliver middleware hook state to Kitaru's callback even when a trace policy omits it from LangChain tracers.
 

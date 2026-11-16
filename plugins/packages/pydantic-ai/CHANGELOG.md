@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Support PydanticAI 2.67 and 2.68 in addition to the existing 2.14 through 2.66 minor lines, and allow genai-prices 0.2, which PydanticAI 2.68 requires.
 - Record PydanticAI's `cache_write_tokens` as `cache_write_input_tokens`, include cache writes in genai-prices cost estimates, and pass them to custom cost calculators as `PydanticAIUsageSummary.cache_write_input_tokens`.
 - Support PydanticAI 2.62 through 2.66 in addition to the existing 2.14 through 2.61 minor lines.
 

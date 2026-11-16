@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Allow genai-prices 0.2 so the adapter installs alongside PydanticAI 2.68 and later.
 - Record `input_tokens_details.cache_write_tokens` as `cache_write_input_tokens` and include cache writes in genai-prices cost estimates.
 
 ### Release context
