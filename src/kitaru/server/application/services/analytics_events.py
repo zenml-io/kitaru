@@ -123,13 +123,16 @@ def build_survey_traits(account: Account) -> dict[str, Any]:
     traits["name"] = (
         survey_name if isinstance(survey_name, str) and survey_name else account.name
     )
-    # The account email is the verified login identity, so the address typed
-    # into the survey only fills in for accounts that have none.
-    work_email = metadata.get("work_email")
-    if account.email is not None:
-        traits["email"] = account.email
-    elif isinstance(work_email, str) and work_email:
-        traits["email"] = work_email
+    # An address only goes on the profile with consent to be contacted. The
+    # one typed into the survey is the newer answer, so it wins over the email
+    # the account was created with.
+    if metadata.get("newsletter") is True:
+        work_email = metadata.get("work_email")
+        email = (
+            work_email if isinstance(work_email, str) and work_email else account.email
+        )
+        if email:
+            traits["email"] = email
     return traits
 
 

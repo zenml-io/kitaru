@@ -72,7 +72,7 @@ async def test_update_user_identifies_the_finished_survey_once() -> None:
         FINISHED_ONBOARDING_SURVEY_KEY: True,
         "name": "Alice Example",
         "work_email": "alice@example.com",
-        "newsletter": False,
+        "newsletter": True,
         "framework": "pydantic_ai",
         "trace_provider": "langfuse",
     }
@@ -93,7 +93,7 @@ async def test_update_user_identifies_the_finished_survey_once() -> None:
             {
                 "name": "Alice Example",
                 "email": "alice@example.com",
-                "newsletter": False,
+                "newsletter": True,
                 "framework": "pydantic_ai",
                 "trace_provider": "langfuse",
             },
@@ -101,22 +101,40 @@ async def test_update_user_identifies_the_finished_survey_once() -> None:
     ]
 
 
-def test_survey_traits_keep_the_account_email() -> None:
-    """Keep the account email over the address typed into the survey."""
+def test_survey_traits_prefer_the_survey_email() -> None:
+    """Use the address typed into the survey over the account email."""
     account = Account(
         name="alice",
         email="alice@example.com",
-        metadata={"work_email": "alice@work.test"},
+        metadata={"work_email": "alice@work.test", "newsletter": True},
+    )
+
+    assert build_survey_traits(account) == {
+        "name": "alice",
+        "email": "alice@work.test",
+        "newsletter": True,
+    }
+
+
+def test_survey_traits_fall_back_to_the_account_email() -> None:
+    """Use the account email when the survey has no address."""
+    account = Account(
+        name="alice", email="alice@example.com", metadata={"newsletter": True}
     )
 
     assert build_survey_traits(account) == {
         "name": "alice",
         "email": "alice@example.com",
+        "newsletter": True,
     }
 
 
-def test_survey_traits_without_any_email() -> None:
-    """Leave the email trait out when neither the account nor the survey has one."""
-    account = Account(name="default", metadata={"newsletter": False})
+def test_survey_traits_leave_the_email_out_without_consent() -> None:
+    """Leave the email trait out when the newsletter was declined."""
+    account = Account(
+        name="alice",
+        email="alice@example.com",
+        metadata={"work_email": "alice@work.test", "newsletter": False},
+    )
 
-    assert build_survey_traits(account) == {"name": "default", "newsletter": False}
+    assert build_survey_traits(account) == {"name": "alice", "newsletter": False}
