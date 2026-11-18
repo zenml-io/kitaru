@@ -87,6 +87,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
                     SessionNodeORM.input_tokens,
                     SessionNodeORM.output_tokens,
                     SessionNodeORM.cached_input_tokens,
+                    SessionNodeORM.cache_write_input_tokens,
                     SessionNodeORM.reasoning_tokens,
                 )
             ),
@@ -98,6 +99,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
                 input_tokens=row.input_tokens,
                 output_tokens=row.output_tokens,
                 cached_input_tokens=row.cached_input_tokens,
+                cache_write_input_tokens=row.cache_write_input_tokens,
                 reasoning_tokens=row.reasoning_tokens,
             ),
         )

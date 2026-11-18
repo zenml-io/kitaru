@@ -5,7 +5,7 @@ icon: chart-pie
 
 # Post-import insights
 
-Select post-import analyzers to find patterns in normalized sessions, such as failed tool calls, repeated calls, and outcome distributions. They store insight cards with supporting session references and investigation prompts. They run on your worker, including with a local or self-hosted server.
+Select post-import analyzers to find patterns in normalized sessions, such as failed tool calls, repeated calls, outcome distributions, cost concentrated in a few sessions, the tool or model that covers most recorded time, model input that grows within a session, low prompt-cache reads, and the tool-call paths sessions take. They store insight cards with supporting session references and investigation prompts. They run on your worker, including with a local or self-hosted server.
 
 The independently versioned `kitaru-post-import-insights` package supplies three analyzers: `kitaru/post-import-insights` uses deterministic checks without a model or API key; `kitaru/openai-post-import-insights` uses OpenAI to select findings and customize their wording; `kitaru/openai-session-findings` uses OpenAI to read the sessions themselves and verify each problem it finds on every session. The server registers all three package entrypoints; the worker installs the package when executing an analysis task. Imports run only the analyzers explicitly selected by the caller.
 
@@ -64,7 +64,26 @@ uv run kitaru import analyze <import-id> \
 
 This creates a new job holding one analysis task per selected analyzer, scoped to the same sessions. Re-importing the file instead would skip every session as a duplicate and give the analyzer nothing to read. An import with no completed or failed sessions is rejected. SDK and REST consumers use `client.imports.analyze(...)` and `POST /api/v1/imports/{import_id}/analyze`.
 
-There is no command or MCP tool to run analyzers over arbitrary sessions outside an import. `kitaru insight create` stores a supplied insight. It does not run analysis.
+`kitaru insight create` stores a supplied insight. It does not run analysis.
+
+## Analyze any set of sessions
+
+`kitaru session analyze` runs analyzers over one agent's sessions, whether they were imported, recorded live through an adapter, or a mix. Select the sessions with any combination of IDs, `--sessions-file`, `--tag`, `--cohort`, `--import-id`, `--started-after`, `--started-before`, and `--filter`. Every selector you give must match. With none, every finished session of the agent is analyzed.
+
+```bash
+uv run kitaru session analyze \
+  --agent customer-service \
+  --tag refunds \
+  --started-after 2026-10-23T00:00:00Z \
+  --analyzer kitaru/post-import-insights@latest \
+  --wait
+```
+
+The server resolves the selection when it creates the job and stores the matching sessions as a fixed group that every analysis task of the job reads. A job that waits in the queue therefore reads the sessions that matched when you ran the command, not the ones that match when a worker picks it up. A session deleted in the meantime drops out of the group. Insights from `kitaru session analyze` are never filed under an import, even when you select with `--import-id`; to analyze a whole import and file the insights under it, use `kitaru import analyze IMPORT_ID`. Sessions still in progress are left out. A selection that matches no finished session, or more than the server's cap (1,000 by default, set with `KITARU_SERVER_ANALYSIS_SESSION_LIMIT`), is rejected before any job is created. The analyzer's own session minimum still applies: below it, the task is recorded as skipped.
+
+Insights from a session analysis have no `import_id`. When every analyzed session came from one import, the post-import insights analyzers still name that import and its provider in the copied investigation prompt.
+
+SDK and REST consumers use `client.analyses.create(...)` and `POST /api/v1/analyses`, which take the `agent_id`, the `analyzers`, and an optional session `filter`. The CLI turns its selectors into that filter: session IDs become `id` `in` conditions (split into groups of 100 joined by `or`), and the other selectors become one condition each, joined by `and`. In MCP, call `kitaru_workflow_start` with `operation: "analysis"`, the `agent_id`, the `analyzers`, and an optional `filter` in the same format. The tool returns the queued job immediately; read it with `kitaru_activity_read`.
 
 Each generated insight stores its `import_id` directly, so task cleanup does not remove its import association. Deleting the import itself clears that reference. Deleting an analyzer version clears the insight's analyzer-version reference without deleting the insight.
 
@@ -124,6 +143,8 @@ Unlike the other two analyzers, this one sends session content to OpenAI: the sy
 ## Coverage and large imports
 
 Every analyzer receives session IDs through the same [analyzer contract](../concepts/analyzers.md). The post-import plugin fetches one complete session at a time and runs its deterministic checks across every imported session, including sessions marked in progress. It does not stop after a fixed number of sessions or nodes.
+
+The cost, time, and token cards count only the sessions and calls that record the field they need, such as a session cost, both node timestamps, or input and cache-read token counts, and each card's caveat names what was left out. Sources differ on whether input tokens include cache reads. A call that reports more cache reads than input tokens must count them separately, so the analyzer reads every call to that model in the session that way; where no call settles the question, the prompt cache card gives its cache-read share as a range between the two readings. System prompts are compared between consecutive calls to the same model, and their text is not stored. The [package README](https://github.com/zenml-io/kitaru/blob/develop/plugins/packages/post-import-insights/README.md) lists each card's thresholds.
 
 Evidence references, chart categories, and model input are bounded independently of the scan. Large category sets retain the leading categories and combine the remainder without dropping their counts. Payload traversal and text inspection have per-session limits, so an unusually large payload cannot consume the inspection budget for later sessions. Read the coverage and caveats before treating a text-dependent finding as exhaustive.
 

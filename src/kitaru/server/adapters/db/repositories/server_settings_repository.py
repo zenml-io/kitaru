@@ -14,8 +14,9 @@
 """SQL server settings repository."""
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,3 +55,33 @@ class SQLServerSettingsRepository:
         return (
             await self._session.execute(select(ServerSettingsORM.server_id))
         ).scalar_one()
+
+    async def get_last_user_activity(self) -> datetime | None:
+        """Load the time of the last recorded user activity.
+
+        Returns:
+            Stored timestamp, or ``None`` when none was recorded yet.
+        """
+        return (
+            await self._session.execute(select(ServerSettingsORM.last_user_activity))
+        ).scalar_one_or_none()
+
+    async def record_user_activity(self, at: datetime) -> None:
+        """Store a user activity time unless a later one is already stored.
+
+        The guard lives in the statement, so replicas writing out of order
+        can never move the stored time backward.
+
+        Args:
+            at: Time of the activity.
+        """
+        await self._session.execute(
+            update(ServerSettingsORM)
+            .where(
+                or_(
+                    ServerSettingsORM.last_user_activity.is_(None),
+                    ServerSettingsORM.last_user_activity < at,
+                )
+            )
+            .values(last_user_activity=at)
+        )

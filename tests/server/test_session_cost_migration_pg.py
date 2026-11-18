@@ -18,7 +18,12 @@ from decimal import Decimal
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from conftest import db_settings, drop_test_database, postgres_available
+from conftest import (
+    add_missing_orm_columns,
+    db_settings,
+    drop_test_database,
+    postgres_available,
+)
 from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -52,6 +57,9 @@ async def test_upgrade_repairs_costs_and_preserves_other_session_data() -> None:
     try:
         alembic = Alembic(engine)
         await alembic.upgrade(PREVIOUS_REVISION)
+        # The current repositories write and read every ORM column, including
+        # those later revisions add.
+        await add_missing_orm_columns(engine, "session", "session_node")
         factory = async_sessionmaker(
             bind=engine, class_=AsyncSession, expire_on_commit=False
         )

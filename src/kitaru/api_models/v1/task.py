@@ -280,7 +280,14 @@ class AnalysisTaskDetails(ResponseModel):
     )
     plugin: PluginSpec = Field(description="Analyzer plugin to load.")
     agent_id: uuid.UUID = Field(description="Agent the insights belong to.")
-    import_id: uuid.UUID = Field(description="Import whose sessions are analyzed.")
+    import_id: uuid.UUID | None = Field(
+        default=None,
+        description="Import whose sessions are analyzed, unset with a session group.",
+    )
+    session_group_id: uuid.UUID | None = Field(
+        default=None,
+        description="Group of sessions analyzed, fixed when the task was created.",
+    )
 
 
 TaskDetails = Annotated[

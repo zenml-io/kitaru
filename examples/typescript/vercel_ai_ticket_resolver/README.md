@@ -474,13 +474,13 @@ CONTROL_COHORT_VERSION_ID="$(
 uv run kitaru experiment run start "$EXPERIMENT_NAME" \
   --cohort-version "$TARGET_COHORT_VERSION_ID" \
   --agent "${AGENT_NAME}@2" \
-  --evaluate-baselines \
+  --baseline-evaluation-mode if_missing \
   --wait \
   --timeout 1800
 uv run kitaru experiment run start "$EXPERIMENT_NAME" \
   --cohort-version "$CONTROL_COHORT_VERSION_ID" \
   --agent "${AGENT_NAME}@2" \
-  --evaluate-baselines \
+  --baseline-evaluation-mode if_missing \
   --wait \
   --timeout 1800
 ```

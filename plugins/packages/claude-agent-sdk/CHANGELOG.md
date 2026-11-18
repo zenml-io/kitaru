@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Record Claude's `cache_creation_input_tokens` as `cache_write_input_tokens` on model nodes and on the terminal remainder. `input_tokens` still counts cache writes, as before.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
+
 ## 0.1.2 - 2026-11-02
 
 - Set `output_text_selector` on model-call nodes to the turn's text block when the turn has exactly one, so the dashboard shows Claude's reply instead of the raw output JSON.

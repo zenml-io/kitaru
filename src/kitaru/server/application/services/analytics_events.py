@@ -125,14 +125,7 @@ def build_session_completed_properties(session: Session) -> dict[str, Any]:
     if session.adapter_version is not None:
         properties["adapter_version"] = session.adapter_version
     if session.tokens is not None:
-        if session.tokens.input_tokens is not None:
-            properties["input_tokens"] = session.tokens.input_tokens
-        if session.tokens.output_tokens is not None:
-            properties["output_tokens"] = session.tokens.output_tokens
-        if session.tokens.cached_input_tokens is not None:
-            properties["cached_input_tokens"] = session.tokens.cached_input_tokens
-        if session.tokens.reasoning_tokens is not None:
-            properties["reasoning_tokens"] = session.tokens.reasoning_tokens
+        properties.update(session.tokens.model_dump(exclude_none=True))
     return properties
 
 
@@ -208,7 +201,7 @@ def build_analysis_completed_properties(
     Args:
         task: Analysis task that transitioned to a terminal status.
         plugin: Analyzer plugin the task ran.
-        import_: Import the task analyzed.
+        import_: Import the task analyzed, if any.
 
     Returns:
         Event properties.
@@ -218,8 +211,14 @@ def build_analysis_completed_properties(
         **_plugin_properties(plugin),
         **_duration_properties(task.started_at, task.ended_at),
     }
-    if import_ is not None and import_.stats is not None:
-        properties["session_count"] = import_.stats.created
+    # A task with a session group came from a session analysis request; one
+    # without reads a whole import, whether queued by the import or later.
+    if task.session_group_id is not None:
+        properties["selection"] = "sessions"
+    else:
+        properties["selection"] = "import"
+        if import_ is not None and import_.stats is not None:
+            properties["session_count"] = import_.stats.created
     if isinstance(task.result, list):
         properties["insight_count"] = len(task.result)
     return properties

@@ -77,6 +77,22 @@ class FakeBlobRepository:
         self._blobs[stored.id] = stored
         return stored.model_copy(), True
 
+    async def create_many(self, blobs: Sequence[Blob]) -> dict[tuple[str, str], Blob]:
+        """Persist many new blobs, deduping concurrent identical uploads.
+
+        Args:
+            blobs: Blobs to store, at most one per (sha256, media_type).
+
+        Returns:
+            Stored blobs keyed by (sha256, media_type), the already-stored
+            row in place of each blob that was not stored again.
+        """
+        stored: dict[tuple[str, str], Blob] = {}
+        for blob in blobs:
+            row, _ = await self.create(blob)
+            stored[(row.sha256, row.media_type)] = row
+        return stored
+
     async def get(self, blob_id: uuid.UUID) -> Blob:
         """Load a blob by id.
 

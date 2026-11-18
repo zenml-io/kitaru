@@ -1,1 +1,0 @@
-- Fixed installer workspace and custom environment detection, first-run shell PATH setup, `--no-modify-path` during uv bootstrap, and project upgrades on rerun. Failed skill replacements now preserve the previous entry in both `kitaru setup` and the legacy installer.

@@ -76,6 +76,23 @@ def test_book_page_rules() -> None:
     assert check_book_page(clean, PAGE) == []
 
 
+@pytest.mark.parametrize(
+    ("front_matter", "findings"),
+    [
+        ('description: "Nouns: a, b."', []),
+        ("description: Nouns: a, b.", [("KMD005", 2)]),
+        ("description: Page.\nicon: a: b", [("KMD005", 3)]),
+        ("A sentence.", [("KMD003", 1), ("KMD005", 1)]),
+    ],
+)
+def test_front_matter_must_load_as_yaml(
+    front_matter: str, findings: list[tuple[str, int]]
+) -> None:
+    """Report front matter that YAML cannot load, at the line that fails."""
+    text = f"---\n{front_matter}\n---\n\nBody.\n"
+    assert [(f.code, f.line) for f in check_book_page(text, PAGE)] == findings
+
+
 def test_toc_registration() -> None:
     """Report book pages the table of contents does not list."""
     toc = "- [Page](guides/page.md)\n"

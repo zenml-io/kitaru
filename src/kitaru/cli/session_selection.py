@@ -14,12 +14,20 @@
 """Shared CLI selection of immutable session sets."""
 
 import uuid
+from collections.abc import Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from kitaru.api_models.v1.cohort import CohortResponse
 from kitaru.api_models.v1.cohort_version import CohortVersionResponse
-from kitaru.api_models.v1.filter import FilterCondition, FilterOp
+from kitaru.api_models.v1.filter import (
+    AndFilter,
+    Filter,
+    FilterCondition,
+    FilterOp,
+    OrFilter,
+)
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.cli.input_files import read_utf8_file
 from kitaru.cli.output import CLIError
@@ -28,6 +36,64 @@ from kitaru.cli.registration import (
     parse_version_reference,
     resolve_asset,
 )
+
+# The server rejects an `in` condition holding more values than this.
+FILTER_IN_VALUE_LIMIT = 100
+
+
+def build_session_filter(
+    *,
+    session_ids: Sequence[uuid.UUID] | None = None,
+    tag: str | None = None,
+    cohort_version_id: uuid.UUID | None = None,
+    import_id: uuid.UUID | None = None,
+    started_after: datetime | None = None,
+    started_before: datetime | None = None,
+    extra: Filter | None = None,
+) -> Filter | None:
+    """Combine session selectors into one session filter, ANDing every one set."""
+    operands: list[Filter] = []
+    if session_ids:
+        id_conditions: list[Filter] = [
+            FilterCondition(
+                field="id",
+                op=FilterOp.IN,
+                value=[
+                    str(session_id)
+                    for session_id in session_ids[start : start + FILTER_IN_VALUE_LIMIT]
+                ],
+            )
+            for start in range(0, len(session_ids), FILTER_IN_VALUE_LIMIT)
+        ]
+        operands.append(
+            id_conditions[0]
+            if len(id_conditions) == 1
+            else OrFilter.model_validate({"or": id_conditions})
+        )
+    for field, op, value in (
+        ("tag", FilterOp.EQ, tag),
+        ("cohort_version_id", FilterOp.EQ, cohort_version_id),
+        ("import_id", FilterOp.EQ, import_id),
+        ("started_at", FilterOp.GE, started_after),
+        ("started_at", FilterOp.LT, started_before),
+    ):
+        if value is not None:
+            operands.append(
+                FilterCondition(
+                    field=field,
+                    op=op,
+                    value=value.isoformat()
+                    if isinstance(value, datetime)
+                    else str(value),
+                )
+            )
+    if extra is not None:
+        operands.append(extra)
+    if not operands:
+        return None
+    if len(operands) == 1:
+        return operands[0]
+    return AndFilter.model_validate({"and": operands})
 
 
 def read_session_file(path: Path) -> list[tuple[int, str]]:

@@ -6,7 +6,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from typing import Any
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ToolCallRequest
@@ -52,7 +52,7 @@ def _tool_identity(request: ToolCallRequest) -> tuple[str, str, dict[str, Any]]:
     call = request.tool_call
     name = str(call["name"])
     call_id = str(call["id"])
-    arguments = cast(dict[str, Any], call.get("args") or {})
+    arguments = call.get("args") or {}
     return name, call_id, arguments
 
 

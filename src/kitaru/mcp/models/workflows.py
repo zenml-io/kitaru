@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import JsonValue
+from kitaru.api_models.v1.filter import Filter
 from kitaru.api_models.v1.imports import ImportSource
 from kitaru.api_models.v1.plugin import AnalyzerConfig, EvaluatorConfig
 from kitaru.api_models.v1.replay import BaselineEvaluationMode
@@ -56,6 +57,27 @@ class EvaluationStart(MCPModel):
         return self
 
 
+class AnalysisStart(MCPModel):
+    """Run analyzers once over one agent's finished sessions matching a filter.
+
+    Without a filter, every finished session of the agent is analyzed. The
+    server fixes the matching sessions when it creates the job.
+    """
+
+    operation: Literal["analysis"]
+    agent_id: uuid.UUID
+    analyzers: list[AnalyzerConfig] = Field(min_length=1, max_length=20)
+    filter: Filter | None = Field(
+        default=None,
+        description="Session filter selecting the sessions, e.g. id in a list, "
+        "tag, cohort_version_id, import_id, or a started_at range.",
+    )
+    idempotency_key: str | None = Field(
+        default=None,
+        description=IDEMPOTENCY_KEY_DESCRIPTION,
+    )
+
+
 class ExperimentRunStart(MCPModel):
     """Start one exact experiment run."""
 
@@ -71,7 +93,7 @@ class ExperimentRunStart(MCPModel):
 
 
 WorkflowStartRequest = Annotated[
-    EvaluationStart | ExperimentRunStart,
+    EvaluationStart | AnalysisStart | ExperimentRunStart,
     Field(discriminator="operation"),
 ]
 

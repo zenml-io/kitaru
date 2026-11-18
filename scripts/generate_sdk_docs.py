@@ -114,6 +114,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "EvaluatorsResource",
                 "AnalyzersResource",
                 "EvaluationsResource",
+                "AnalysesResource",
                 "CohortsResource",
                 "CohortVersionsResource",
                 "ExperimentsResource",

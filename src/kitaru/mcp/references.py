@@ -4,6 +4,7 @@
 """MCP-local bounded reference resolution."""
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, TypeVar, cast
@@ -14,7 +15,7 @@ from kitaru.api_models.v1.analyzer import (
     AnalyzerResponse,
     AnalyzerVersionResponse,
 )
-from kitaru.api_models.v1.base import JsonValue, Page
+from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.cohort import CohortListParams, CohortResponse
 from kitaru.api_models.v1.connection import ConnectionListParams, ConnectionResponse
 from kitaru.api_models.v1.evaluator import (
@@ -136,7 +137,7 @@ async def resolve_connection(
             filter=FilterCondition(field="name", op=FilterOp.EQ, value=normalized),
         )
     )
-    return _select_named(page, "connection", normalized)
+    return _select_named(page.items, "connection", normalized)
 
 
 async def resolve_plugin_version(
@@ -193,12 +194,12 @@ async def _resolve_parent_resource(
         page = await cast(AnalyzersResource, resource).list(
             AnalyzerListParams(size=2, filter=name_filter)
         )
-    return _select_named(page, kind.value, normalized)
+    return _select_named(page.items, kind.value, normalized)
 
 
-def _select_named(page: Page[NamedT], kind: str, normalized: str) -> NamedT:
+def _select_named(items: Sequence[NamedT], kind: str, normalized: str) -> NamedT:
     """Select one exact-name match from a bounded page."""
-    matches = [item for item in page.items if item.name == normalized]
+    matches = [item for item in items if item.name == normalized]
     if not matches:
         raise ReferenceResolutionError(
             "not_found", f"{kind.title()} {normalized!r} was not found."

@@ -20,7 +20,7 @@ import os
 import sys
 import uuid
 from collections.abc import AsyncGenerator, Callable, Generator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -31,13 +31,14 @@ import pytest
 from fastapi import FastAPI
 from hypothesis import settings
 from hypothesis.database import DirectoryBasedExampleDatabase
-from sqlalchemy import text
+from sqlalchemy import Connection, event, inspect, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.schema import CreateColumn
 
 from kitaru.analytics.source import AnalyticsSource
 from kitaru.api_models.v1.info import AuthScheme
@@ -441,6 +442,39 @@ async def drop_test_database(settings: APISettings) -> None:
         await engine.dispose()
 
 
+async def add_missing_orm_columns(engine: AsyncEngine, *tables: str) -> None:
+    """Add the nullable ORM columns that a historical schema lacks.
+
+    Upgrading past the revision that adds such a column then fails, because
+    the column already exists.
+
+    Args:
+        engine: Engine bound to a database migrated to an older revision.
+        tables: Names of the tables to complete.
+
+    Raises:
+        ValueError: A missing column is not nullable, so adding it empty
+            would not match any row a later revision could produce.
+    """
+
+    def add_columns(connection: Connection) -> None:
+        inspector = inspect(connection)
+        for name in tables:
+            present = {column["name"] for column in inspector.get_columns(name)}
+            for column in Base.metadata.tables[name].columns:
+                if column.name in present:
+                    continue
+                if not column.nullable:
+                    raise ValueError(f"Column {name}.{column.name} is not nullable")
+                definition = CreateColumn(column).compile(dialect=connection.dialect)
+                connection.execute(
+                    text(f'ALTER TABLE "{name}" ADD COLUMN {definition}')
+                )
+
+    async with engine.begin() as connection:
+        await connection.run_sync(add_columns)
+
+
 @asynccontextmanager
 async def lifespan_client(
     settings: APISettings,
@@ -526,6 +560,28 @@ async def pg_session() -> AsyncGenerator[AsyncSession, None]:
     """
     async with pg_session_with_engine() as (session, _):
         yield session
+
+
+@contextmanager
+def capture_statements(engine: AsyncEngine) -> Generator[list[str], None, None]:
+    """Record the SQL of every statement the engine sends while the block runs.
+
+    Args:
+        engine: Engine to listen on.
+
+    Yields:
+        Statements in send order, one entry per database round trip.
+    """
+    statements: list[str] = []
+
+    def record(_connection: Any, _cursor: Any, statement: str, *_: Any) -> None:
+        statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", record)
+    try:
+        yield statements
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record)
 
 
 def base_asgi_scope(**overrides: Any) -> dict[str, Any]:

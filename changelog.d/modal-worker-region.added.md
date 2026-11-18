@@ -1,1 +1,0 @@
-- Added `KITARU_SERVER_EPHEMERAL_WORKER__MODAL__REGION` to choose a region for Modal ephemeral workers, such as `eu` for Europe. Leaving it unset preserves Modal's default placement.

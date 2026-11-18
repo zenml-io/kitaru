@@ -14,7 +14,7 @@
 """In-memory fakes for tags and sessions."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -297,6 +297,7 @@ class FakeSessionRepository:
         self._replays: FakeReplayRepository | None = None
         self._tasks: FakeTaskRepository | None = None
         self._session_numbers: dict[uuid.UUID, int] = {}
+        self._groups: dict[uuid.UUID, set[uuid.UUID]] = {}
 
     def _mark_cohort_member(self, session_id: uuid.UUID) -> None:
         """Record that one more cohort version references this session.
@@ -503,6 +504,7 @@ class FakeSessionRepository:
             resolvers = {
                 "tag": self._evaluate_tag_condition,
                 "cohort_version_id": self._evaluate_cohort_version_condition,
+                "session_group_id": self._evaluate_session_group_condition,
                 "has_evaluation": self._evaluate_has_evaluation_condition,
             }
             sessions = [
@@ -527,6 +529,54 @@ class FakeSessionRepository:
         """
         names = condition.value if condition.op is FilterOp.IN else (condition.value,)
         return any(session.id in self._session_ids_tagged(name) for name in names)
+
+    def _evaluate_session_group_condition(
+        self, session: Session, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a session group condition against a session.
+
+        Args:
+            session: Session to evaluate.
+            condition: Validated session group condition.
+
+        Returns:
+            Whether the session belongs to one of the groups.
+        """
+        ids = condition.value if condition.op is FilterOp.IN else (condition.value,)
+        return any(session.id in self._groups.get(group_id, ()) for group_id in ids)
+
+    async def create_group(
+        self, job_id: uuid.UUID, session_ids: Sequence[uuid.UUID]
+    ) -> uuid.UUID:
+        """Store a fixed group of sessions for the tasks of a job to read.
+
+        Args:
+            job_id: Id of the job the group belongs to.
+            session_ids: Ids of the member sessions.
+
+        Returns:
+            Id of the stored group.
+        """
+        _ = job_id
+        group_id = uuid.uuid4()
+        self._groups[group_id] = set(session_ids)
+        return group_id
+
+    async def is_in_group(
+        self, session_id: uuid.UUID, group_ids: Collection[uuid.UUID]
+    ) -> bool:
+        """Whether a session belongs to any of the given session groups.
+
+        Args:
+            session_id: Id of the session.
+            group_ids: Ids of the session groups.
+
+        Returns:
+            Whether the session is a member of at least one group.
+        """
+        return any(
+            session_id in self._groups.get(group_id, ()) for group_id in group_ids
+        )
 
     def _evaluate_cohort_version_condition(
         self, session: Session, condition: FilterCondition
@@ -659,6 +709,8 @@ class FakeSessionRepository:
         ):
             raise SessionInUse(session_id)
         del self._sessions[session_id]
+        for members in self._groups.values():
+            members.discard(session_id)
         if self._tasks is not None:
             self._tasks._unlink_session(session_id)
 

@@ -39,6 +39,7 @@ from kitaru.cli.command_registry import (
 )
 from kitaru.cli.output import CommandResult
 from kitaru.cli.schema import ParameterSpec
+from kitaru.session_transcript import DEFAULT_MAX_CHARS
 
 
 @register_command(
@@ -543,6 +544,72 @@ async def session_nodes(
 @register_command(
     session_app,
     build_spec(
+        ("session", "read"),
+        "Read sessions as compact transcripts, one node per line.",
+        parameters=(
+            ParameterSpec(
+                "SESSION", "UUID[]", "argument", False, "Explicit session IDs."
+            ),
+            ParameterSpec(
+                "--sessions-file",
+                "path",
+                "option",
+                False,
+                "UTF-8 file with one session UUID per nonblank line.",
+            ),
+            ParameterSpec(
+                "--max-chars",
+                "integer",
+                "option",
+                False,
+                "Longest text kept per field before it is cut.",
+            ),
+            ParameterSpec(
+                "--full", "boolean", "option", False, "Keep every field uncut."
+            ),
+            ParameterSpec(
+                "--reasoning",
+                "boolean",
+                "option",
+                False,
+                "Include the visible reasoning of model calls.",
+            ),
+            ParameterSpec(
+                "--node",
+                "integer",
+                "option",
+                False,
+                "Show only the node at this zero-based position.",
+            ),
+        ),
+        errors=UUID_READ_ERRORS,
+    ),
+)
+async def session_read(
+    session: list[str] | None = None,
+    /,
+    *,
+    sessions_file: Path | None = None,
+    max_chars: int = DEFAULT_MAX_CHARS,
+    full: bool = False,
+    reasoning: bool = False,
+    node: int | None = None,
+) -> CommandResult:
+    """Read sessions as compact transcripts, one node per line."""
+    async with invocation_context.open_asset_client() as client:
+        return await sessions.read_sessions(
+            client,
+            session or [],
+            sessions_file=sessions_file,
+            max_chars=None if full else max_chars,
+            include_reasoning=reasoning,
+            node=node,
+        )
+
+
+@register_command(
+    session_app,
+    build_spec(
         ("session", "evaluate"),
         "Evaluate sessions selected by ID, tag, or all sessions.",
         parameters=(
@@ -647,6 +714,144 @@ async def session_evaluate(
             evaluators=evaluator,
             evaluator_params=evaluator_params,
             evaluator_connections=evaluator_connection,
+            wait=wait,
+            interval=interval,
+            timeout=timeout,
+            idempotency_key=idempotency_key,
+        )
+
+
+@register_command(
+    session_app,
+    build_spec(
+        ("session", "analyze"),
+        "Run analyzers over one agent's sessions matching every given selector.",
+        parameters=(
+            ParameterSpec(
+                "SESSION", "UUID[]", "argument", False, "Only these session IDs."
+            ),
+            ParameterSpec(
+                "--agent",
+                "reference",
+                "option",
+                True,
+                "Agent whose sessions are analyzed.",
+            ),
+            ParameterSpec(
+                "--sessions-file",
+                "path",
+                "option",
+                False,
+                "UTF-8 file with one session UUID per nonblank line.",
+            ),
+            ParameterSpec(
+                "--tag", "text", "option", False, "Only sessions with this tag."
+            ),
+            ParameterSpec(
+                "--cohort",
+                "reference",
+                "option",
+                False,
+                "Only sessions in this cohort version.",
+            ),
+            ParameterSpec(
+                "--import-id",
+                "UUID",
+                "option",
+                False,
+                "Only sessions this import created.",
+            ),
+            ParameterSpec(
+                "--started-after",
+                "timestamp",
+                "option",
+                False,
+                "Only sessions started at or after this ISO 8601 timestamp.",
+            ),
+            ParameterSpec(
+                "--started-before",
+                "timestamp",
+                "option",
+                False,
+                "Only sessions started before this ISO 8601 timestamp.",
+            ),
+            ParameterSpec(
+                "--filter",
+                "JSON filter",
+                "option",
+                False,
+                "Only sessions matching this filter.",
+            ),
+            ParameterSpec(
+                "--analyzer",
+                "ANALYZER@VERSION[]",
+                "option",
+                True,
+                "Exact analyzer version run once over the selected sessions.",
+            ),
+            ParameterSpec(
+                "--analyzer-params",
+                "ANALYZER@VERSION=JSON_OBJECT[]",
+                "option",
+                False,
+                "Parameters for a selected analyzer token.",
+            ),
+            ParameterSpec(
+                "--analyzer-connection",
+                "ANALYZER@VERSION=CONNECTION[]",
+                "option",
+                False,
+                "Connection for a selected analyzer token.",
+            ),
+            *WAIT_PARAMETERS,
+            IDEMPOTENCY_KEY_PARAMETER,
+        ),
+        read_only=False,
+        side_effects=("reads_local_file", "creates_remote_state"),
+        idempotency="non_idempotent_job_created_per_request",
+        errors=(
+            *ASSET_READ_ERRORS,
+            *JOB_WAIT_ERRORS,
+        ),
+        streams=True,
+    ),
+)
+async def session_analyze(
+    session: list[str] | None = None,
+    /,
+    *,
+    agent: str,
+    sessions_file: Path | None = None,
+    tag: str | None = None,
+    cohort: str | None = None,
+    import_id: uuid.UUID | None = None,
+    started_after: datetime | None = None,
+    started_before: datetime | None = None,
+    filter: str | None = None,
+    analyzer: list[str],
+    analyzer_params: list[str] | None = None,
+    analyzer_connection: list[str] | None = None,
+    wait: bool = False,
+    interval: float | None = None,
+    timeout: float | None = None,
+    idempotency_key: str | None = None,
+) -> CommandResult:
+    """Run analyzers over one agent's sessions matching every given selector."""
+    async with invocation_context.open_asset_client() as client:
+        return await imports.analyze_sessions(
+            client,
+            agent,
+            session,
+            sessions_file=sessions_file,
+            tag=tag,
+            cohort=cohort,
+            import_id=import_id,
+            started_after=started_after,
+            started_before=started_before,
+            filter=filter,
+            analyzers=analyzer,
+            analyzer_params=analyzer_params,
+            analyzer_connections=analyzer_connection,
             wait=wait,
             interval=interval,
             timeout=timeout,

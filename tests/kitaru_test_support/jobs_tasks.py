@@ -568,6 +568,17 @@ class FakeTaskRepository:
         )
         return stale[:limit]
 
+    async def has_in_flight(self) -> bool:
+        """Report whether any task is claimed or running.
+
+        Returns:
+            Whether at least one task is in flight.
+        """
+        return any(
+            task.status in (TaskStatus.CLAIMED, TaskStatus.RUNNING)
+            for task in self._tasks.values()
+        )
+
     async def stamp_heartbeats(
         self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
     ) -> tuple[dict[uuid.UUID, datetime | None], set[uuid.UUID]]:

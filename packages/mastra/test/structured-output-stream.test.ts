@@ -108,7 +108,7 @@ describe("structured output provider streams", () => {
         usage: {
           inputTokens: 11,
           outputTokens: 8,
-          inputTokenDetails: { cacheReadTokens: 5 },
+          inputTokenDetails: { cacheReadTokens: 5, cacheWriteTokens: 2 },
           outputTokenDetails: { reasoningTokens: 3 },
         },
       },
@@ -120,6 +120,7 @@ describe("structured output provider streams", () => {
         input_tokens: 11,
         output_tokens: 8,
         cached_input_tokens: 5,
+        cache_write_input_tokens: 2,
         reasoning_tokens: 3,
       },
     });
@@ -153,6 +154,7 @@ describe("structured output provider streams", () => {
           input_tokens: 11,
           output_tokens: 8,
           cached_input_tokens: 5,
+          cache_write_input_tokens: 0,
           reasoning_tokens: 3,
         },
         outputs: { text: '{"ok":true}', finish_reason: "stop" },

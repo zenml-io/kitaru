@@ -848,3 +848,29 @@ def test_metadata_records_the_embedded_experiment_under_an_override() -> None:
     assert isinstance(session, ImportedSession)
     assert session.external_id == "acme:tr-a"
     assert session.metadata["mlflow.experiment_id"] == "9"
+
+
+def test_maps_cache_creation_tokens() -> None:
+    usage = {
+        "input_tokens": 2300,
+        "output_tokens": 10,
+        "cache_read_input_tokens": 800,
+        "cache_creation_input_tokens": 300,
+    }
+    call = span(
+        "0000000000000001",
+        span_type="CHAT_MODEL",
+        attributes={"mlflow.chat.tokenUsage": usage},
+    )
+
+    [session] = parse([trace("tr-cache", [call])])
+
+    assert isinstance(session, ImportedSession)
+    [node] = flatten(session.nodes)
+    assert node.tokens is not None
+    assert node.tokens.model_dump(exclude_none=True) == {
+        "input_tokens": 2300,
+        "output_tokens": 10,
+        "cached_input_tokens": 800,
+        "cache_write_input_tokens": 300,
+    }

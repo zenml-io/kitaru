@@ -52,13 +52,13 @@ KITARU_QUIET="${KITARU_QUIET:-0}"
 KITARU_VERBOSE="${KITARU_VERBOSE:-0}"
 KITARU_WITH=()                                # extra packages, e.g. kitaru-pydantic-ai
 KITARU_PYTHON_EXPLICIT="${KITARU_PYTHON:+1}"
-KITARU_PYTHON="${KITARU_PYTHON:-3.12}"        # uv-managed Python if none suitable (global mode)
+KITARU_PYTHON="${KITARU_PYTHON:-3.12}"        # isolated default; project overrides are explicit
 KITARU_SCOPE="${KITARU_SCOPE:-auto}"          # auto | project | global
 KITARU_SKILLS_REPO="${KITARU_SKILLS_REPO:-zenml-io/kitaru-skills}"
 KITARU_LOCAL_URL="${KITARU_LOCAL_URL:-http://localhost:8000}"
 KITARU_MCP_MODE="${KITARU_MCP_MODE:-standard}"
 KITARU_NO_MODIFY_PATH="${KITARU_NO_MODIFY_PATH:-0}"    # leave rc files alone
-KITARU_MIN_UV="0.5.0"                                  # older uv lacks the tool flags we use
+KITARU_MIN_UV="0.13.4"                                 # tested project Python-range resolution
 
 usage() {
   cat <<'USAGE'
@@ -72,7 +72,8 @@ Usage: install.sh [options]
                       (uv add). Default when a pyproject.toml or uv.lock is here.
   --global            Install into an isolated uv tool environment on PATH.
                       Default anywhere else.
-  --python=VERSION    Select Python for a global install (default: 3.12)
+  --python=VERSION    Select Python (default: 3.12 globally; preserve project
+                      pins/environments, or choose a compatible Python 3.11-3.14)
   --server=URL        Point the MCP server at a team/self-hosted server
                       (default: the local server, http://localhost:8000)
   --no-skills         Skip installing the coding-agent skills
@@ -267,6 +268,128 @@ SPEC="kitaru[cli,mcp,worker]"
 EXTRA_PKGS=()
 for pkg in "${KITARU_WITH[@]:-}"; do [ -n "$pkg" ] && EXTRA_PKGS+=("$pkg"); done
 
+kitaru_version_of() {
+  local version
+  version="$("$1" --version)" || return 1
+  case "$version" in
+    'kitaru, version '*) version="${version#kitaru, version }" ;;
+    'kitaru '*) version="${version#kitaru }" ;;
+  esac
+  [ -n "$version" ] || return 1
+  printf '%s\n' "$version"
+}
+
+prepare_project_python() {
+  local parser directory environment candidate
+  parser="$(VIRTUAL_ENV="" "$UV" python find --no-python-downloads '>=3.11' 2>/dev/null || true)"
+  # python find discovers .venv, but not custom UV_PROJECT_ENVIRONMENT paths.
+  if [ -z "$parser" ] && [ -n "${UV_PROJECT_ENVIRONMENT:-}" ]; then
+    directory="$PROJECT_DIR"; environment="$UV_PROJECT_ENVIRONMENT"
+    case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) environment="$(cygpath -u "$environment")" ;; esac
+    while :; do
+      case "$environment" in /*) candidate="$environment" ;; *) candidate="$directory/$environment" ;; esac
+      if [ -f "$candidate/pyvenv.cfg" ]; then
+        parser="$(VIRTUAL_ENV="$candidate" "$UV" python find --no-project --no-python-downloads '>=3.11' 2>/dev/null || true)"
+        [ -z "$parser" ] || break
+      fi
+      [ "$directory" != / ] || break
+      directory="$(dirname "$directory")"
+    done
+  fi
+  if [ -z "$parser" ]; then
+    quiet "$UV" python install --no-bin 3.12 \
+      || die "Could not get Python to read project metadata. Install Python >=3.11 with uv and re-run."
+    parser="$(VIRTUAL_ENV="" "$UV" python find --no-python-downloads '>=3.11')"
+  fi
+  case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) parser="$(cygpath -u "$parser")" ;; esac
+  "$parser" -I - "$PROJECT_DIR" "$PROJECT_PYTHON_TMP" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+import tomllib
+
+
+def load(path: Path) -> dict:
+    with (path / "pyproject.toml").open("rb") as stream:
+        return tomllib.load(stream)
+
+
+try:
+    current = Path(sys.argv[1]).resolve()
+    root = current
+    projects = [(current, load(current))]
+    for candidate in (current, *current.parents):
+        if not (candidate / "pyproject.toml").is_file():
+            continue
+        workspace = load(candidate).get("tool", {}).get("uv", {}).get("workspace")
+        if workspace is None:
+            continue
+        excluded = {p.resolve() for pattern in workspace.get("exclude", []) for p in candidate.glob(pattern)}
+        members = {p.resolve() for pattern in workspace.get("members", []) for p in candidate.glob(pattern)} - excluded
+        if current != candidate and current not in members:
+            continue
+        root = candidate
+        projects = [(p, load(p)) for p in sorted(members | {candidate}) if (p / "pyproject.toml").is_file()]
+        break
+    requirements = [">=3.11,<3.15"]
+    requirements.extend(metadata["project"]["requires-python"] for _, metadata in projects if metadata.get("project", {}).get("requires-python"))
+    scratch = Path(sys.argv[2])
+    for name, suffix in (("compatible", ""), ("preferred", ",==3.12.*")):
+        (scratch / f"{name}.py").write_text("# /// script\n# requires-python = " + json.dumps(",".join(requirements) + suffix) + "\n# ///\n")
+    (scratch / "requirement").write_text(",".join(requirements))
+    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT") or ".venv")
+    if not environment.is_absolute():
+        environment = root / environment
+    (scratch / "environment").write_text(str(environment))
+except (OSError, ValueError, TypeError) as error:
+    print(f"Cannot read project metadata: {error}", file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
+select_project_python() {
+  PROJECT_PYTHON_ARGS=()
+  local pin request requested_python pinned_python
+  pin="$("$UV" python pin 2>/dev/null || true)"
+  request="${UV_PYTHON:-}"
+  [ -z "$KITARU_PYTHON_EXPLICIT" ] || request="$KITARU_PYTHON"
+  if [ -n "$request" ]; then
+    if [ -n "$pin" ] && [ "$request" != "$pin" ]; then
+      requested_python="$(VIRTUAL_ENV="" "$UV" python find --system --no-project --resolve-links --no-python-downloads "$request" 2>/dev/null || true)"
+      pinned_python="$(VIRTUAL_ENV="" "$UV" python find --system --no-project --resolve-links --no-python-downloads "$pin" 2>/dev/null || true)"
+      # setup registers plain uv run, which must select the same interpreter later.
+      if [ -z "$requested_python" ] || [ "$requested_python" != "$pinned_python" ]; then
+        die "This project pins Python $pin. Update that pin explicitly before selecting another interpreter with --python ($request); the existing pin was left unchanged."
+      fi
+    fi
+    PROJECT_PYTHON_ARGS=(--python "$request")
+    return
+  fi
+  # Let uv retain inherited pins, including workspace pins.
+  [ -z "$pin" ] || return 0
+  PROJECT_PYTHON_TMP="$(mktemp -d)"
+  trap 'rm -rf "$PROJECT_PYTHON_TMP"' EXIT
+  prepare_project_python || die "Project metadata validation failed; no dependencies were changed."
+  local environment selected requirement
+  environment="$(cat "$PROJECT_PYTHON_TMP/environment")"
+  case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) environment="$(cygpath -u "$environment")" ;; esac
+  if [ ! -f "$environment/pyvenv.cfg" ]; then
+    selected="$(VIRTUAL_ENV="" "$UV" python find --script "$PROJECT_PYTHON_TMP/preferred.py" 2>/dev/null || true)"
+    if [ -z "$selected" ]; then
+      selected="$(VIRTUAL_ENV="" "$UV" python find --script "$PROJECT_PYTHON_TMP/compatible.py" 2>/dev/null || true)"
+    fi
+    if [ -z "$selected" ]; then
+      requirement="$(cat "$PROJECT_PYTHON_TMP/requirement")"
+      quiet "$UV" python install --no-bin "$requirement" \
+        || die "No Python satisfies this project's requirements and the installer's Python 3.11-3.14 defaults. Check the project requirements, or select Python explicitly with --python."
+      selected="$(VIRTUAL_ENV="" "$UV" python find --script "$PROJECT_PYTHON_TMP/compatible.py")"
+    fi
+    PROJECT_PYTHON_ARGS=(--python "$selected")
+  fi
+  rm -rf "$PROJECT_PYTHON_TMP"; trap - EXIT
+}
+
 PROJECT_DIR="$PWD"
 if [ "$KITARU_SCOPE" = "auto" ]; then
   if [ -f "$PROJECT_DIR/pyproject.toml" ] || [ -f "$PROJECT_DIR/uv.lock" ] || [ -f "$PROJECT_DIR/Pipfile" ] || [ -f "$PROJECT_DIR/poetry.lock" ] || [ -f "$PROJECT_DIR/pdm.lock" ] || [ -f "$PROJECT_DIR/Pipfile.lock" ]; then
@@ -291,11 +414,13 @@ if [ "$KITARU_SCOPE" = "project" ]; then
   grep -Eq '^[[:space:]]*\[[[:space:]]*project[[:space:]]*\][[:space:]]*(#.*)?$' "$PROJECT_DIR/pyproject.toml" \
     || die "pyproject.toml has no [project] metadata. Initialize a Python project first, or use --global for an isolated CLI."
   step "Installing $SPEC into this project ($PROJECT_DIR)"
+  select_project_python
   UV_ADD=(add --quiet --upgrade-package kitaru)
+  UV_ADD+=("${PROJECT_PYTHON_ARGS[@]:+${PROJECT_PYTHON_ARGS[@]}}")
   [ "$KITARU_PRE" = "1" ] && UV_ADD+=(--prerelease allow)
   quiet "$UV" "${UV_ADD[@]}" "$SPEC" "${EXTRA_PKGS[@]:+${EXTRA_PKGS[@]}}" \
-    || die "uv add failed (uv's message is above; Kitaru needs Python >= 3.11). To install outside this project instead: --global"
-  VENV_DIR="$("$UV" run --no-sync --offline --no-python-downloads python -c 'import sys; print(sys.prefix)')" \
+    || die "uv add failed. See uv's error above; check this project's Python selection and any --with packages. Choose Python with --python, or use --global for an isolated CLI."
+  VENV_DIR="$("$UV" run "${PROJECT_PYTHON_ARGS[@]:+${PROJECT_PYTHON_ARGS[@]}}" --no-sync --offline --no-python-downloads python -c 'import sys; print(sys.prefix)')" \
     || die "Could not locate the project environment after uv add. Re-run with --verbose."
   case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) VENV_DIR="$(cygpath -u "$VENV_DIR")" ;; esac
   case "$(uname -s)" in
@@ -304,12 +429,18 @@ if [ "$KITARU_SCOPE" = "project" ]; then
   esac
   KITARU_BIN="$TOOL_BIN/kitaru"
   [ -x "$KITARU_BIN" ] || [ -x "$KITARU_BIN.exe" ] || die "uv reported success but $KITARU_BIN is missing. Re-run with --verbose."
-  CLI_VERSION="$("$KITARU_BIN" --version)" || die "Kitaru was installed but its CLI could not start. See the error above and re-run with --verbose."
-  ok "$CLI_VERSION installed into this project's environment"
+  CLI_VERSION="$(kitaru_version_of "$KITARU_BIN")" || die "Kitaru was installed but its CLI could not start. See the error above and re-run with --verbose."
+  ok "kitaru $CLI_VERSION installed into this project's environment"
   note "environment: $VENV_DIR (recorded in pyproject.toml)"
-  note "run it as: uv run kitaru ...   (or activate the environment)"
+  PROJECT_COMMAND="uv run"
+  if [ -n "$KITARU_PYTHON_EXPLICIT" ]; then
+    printf -v PROJECT_PYTHON_ARG '%q' "$KITARU_PYTHON"
+    PROJECT_COMMAND="$PROJECT_COMMAND --python $PROJECT_PYTHON_ARG"
+  fi
+  PROJECT_COMMAND="$PROJECT_COMMAND kitaru"
+  note "run it as: $PROJECT_COMMAND ...   (or activate the environment)"
   # MCP: run through uv so the assistant gets this project's environment.
-  MCP_CMD=("$UV" run --directory "$PROJECT_DIR" kitaru-mcp)
+  MCP_CMD=("$UV" run "${PROJECT_PYTHON_ARGS[@]:+${PROJECT_PYTHON_ARGS[@]}}" --directory "$PROJECT_DIR" kitaru-mcp)
   CLAUDE_SCOPE=project
 else
   # ---- isolated tool environment on PATH -----------------------------------
@@ -322,7 +453,7 @@ else
     [ "$KITARU_PRE" = "1" ] && UV_ARGS+=(--prerelease allow)
     for pkg in "${EXTRA_PKGS[@]:+${EXTRA_PKGS[@]}}"; do UV_ARGS+=(--with "$pkg"); done
     step "Installing $SPEC (isolated, on PATH)"
-    quiet "$UV" "${UV_ARGS[@]}" "$SPEC" || die "uv tool install failed. If an unmanaged kitaru executable already exists, remove it with its original package manager or choose UV_TOOL_BIN_DIR; this installer will not overwrite it. Re-run with --verbose for details."
+    quiet "$UV" "${UV_ARGS[@]}" "$SPEC" || die "uv tool install failed. See uv's error above and re-run with --verbose for details."
   fi
 
   # uv puts tool executables in its tool bin dir; make sure future shells see it.
@@ -339,8 +470,8 @@ else
 
   KITARU_BIN="$TOOL_BIN/kitaru"
   [ -x "$KITARU_BIN" ] || [ -x "$KITARU_BIN.exe" ] || die "uv reported success but $KITARU_BIN is missing. Re-run with --verbose."
-  CLI_VERSION="$("$KITARU_BIN" --version)" || die "Kitaru was installed but its CLI could not start. See the error above and re-run with --verbose."
-  ok "$CLI_VERSION installed"
+  CLI_VERSION="$(kitaru_version_of "$KITARU_BIN")" || die "Kitaru was installed but its CLI could not start. See the error above and re-run with --verbose."
+  ok "kitaru $CLI_VERSION installed"
   note "isolated environment: $TOOL_ENV   (uv tool; no other Python touched)"
   note "commands: $TOOL_BIN/kitaru, $TOOL_BIN/kitaru-mcp"
   # Warn if a different kitaru was already reachable on the PATH the user
@@ -372,9 +503,8 @@ elif "$KITARU_BIN" schema setup >/dev/null 2>&1; then
   [ "$KITARU_SKIP_MCP" = "1" ] && SETUP_ARGS+=(--no-mcp)
   SETUP_SERVER_ARGS=()
   # Older releases with setup may predate the global output option.
-  if "$KITARU_BIN" --help 2>/dev/null | grep -q -- '--output'; then
-    SETUP_SERVER_ARGS+=(--output text)
-  fi
+  KITARU_HELP="$("$KITARU_BIN" --help 2>/dev/null || true)"
+  case "$KITARU_HELP" in *--output*) SETUP_SERVER_ARGS+=(--output text) ;; esac
   [ -n "$KITARU_SERVER" ] && SETUP_SERVER_ARGS+=(--server "$KITARU_SERVER")
   if [ "$KITARU_QUIET" = "1" ]; then
     quiet "$KITARU_BIN" "${SETUP_SERVER_ARGS[@]:+${SETUP_SERVER_ARGS[@]}}" setup "${SETUP_ARGS[@]}" || warn "kitaru setup failed; run it again later: $KITARU_BIN setup"
@@ -516,11 +646,11 @@ say "${C_GREEN}◆${C_RESET} ${C_BOLD}Kitaru is installed.${C_RESET}"
 say ""
 # Print the PATH export needed by the first word of the suggested commands.
 if [ "$KITARU_SCOPE" = "project" ]; then
-  K="uv run kitaru"; NEEDED_DIR="$(dirname "$UV")"
+  K="$PROJECT_COMMAND"; NEEDED_DIR="$(dirname "$UV")"
   case "$(PATH="$ORIG_PATH" command -v uv 2>/dev/null || true)" in
     "$UV"|"$UV.exe") NEEDED_DIR="" ;;
   esac
-  say "  Installed into this project's environment, so run it as ${C_BOLD}uv run kitaru ...${C_RESET}"
+  say "  Installed into this project's environment, so run it as ${C_BOLD}$K ...${C_RESET}"
   say "  (or activate $VENV_DIR)."
   say ""
 else

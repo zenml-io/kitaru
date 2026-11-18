@@ -1,5 +1,5 @@
 ---
-description: "From an agent in production to your first replay-backed decision, driven by your coding assistant: every step is a prompt first, a command second."
+description: "From an agent in production to your first tested fix, driven by your coding assistant: every step is a prompt first, a command second."
 icon: rocket
 ---
 

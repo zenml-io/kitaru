@@ -21,6 +21,7 @@ from kitaru.client import KitaruAPIClient
 from kitaru.api_models.v1.experiment import ExperimentCreateRequest
 from kitaru.api_models.v1.experiment_run import ExperimentRunCreateRequest
 from kitaru.api_models.v1.plugin import EvaluatorConfig
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.api_models.v1.replay_config import (
     HistoryConfig,
     ReplayOverride,
@@ -50,7 +51,7 @@ async def main() -> None:
         ExperimentRunCreateRequest(
             cohort_version_id=COHORT_VERSION_ID,
             agent_version_id=AGENT_VERSION_ID,
-            evaluate_baselines=True,
+            baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
         ),
     )
     print(run.id, run.status, run.progress)
@@ -73,10 +74,10 @@ kitaru experiment create cheaper-model \
 kitaru experiment run start cheaper-model \
   --cohort-version <cohort-version-id> \
   --agent support-agent@1 \
-  --evaluate-baselines --wait
+  --baseline-evaluation-mode if_missing --wait
 ```
 
-Starting a run fans out **one replay per session** in the cohort version. [Workers](workers.md) in your environment execute them; the run's `progress` counts replays through `pending → evaluating → completed` (plus `failed` / `canceled`), and the run settles when the last replay does. `evaluate_baselines=True` evaluates the original sessions too, so every replay has its baseline numbers to sit next to.
+Starting a run fans out **one replay per session** in the cohort version. [Workers](workers.md) in your environment execute them; the run's `progress` counts replays through `pending → evaluating → completed` (plus `failed` / `canceled`), and the run settles when the last replay does. `baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING` reuses the latest matching baseline evaluations for the same evaluator versions and parameters, and schedules any missing ones. Result sessions receive fresh evaluations, giving each completed replay paired measurements.
 
 With a `history` tool policy scoped to `cohort_version`, replayed tool calls can be answered from any recording in the cohort (useful when runs share tool traffic), and `on_miss="fail"` keeps anything unrecorded from reaching a live system.
 

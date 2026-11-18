@@ -1,8 +1,8 @@
 """Check deterministic Markdown rules (codes KMD001 and up) in tracked files.
 
-Prose is never hard-wrapped. GitBook pages under docs/book carry a description,
-appear in toc.md, and link other pages without anchors, because Git Sync
-rewrites cross-file anchors into broken URLs.
+Prose is never hard-wrapped. GitBook pages under docs/book carry a description
+in valid YAML front matter, appear in toc.md, and link other pages without
+anchors, because Git Sync rewrites cross-file anchors into broken URLs.
 """
 
 import argparse
@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
 from markdown_it import MarkdownIt
 
 if __package__:
@@ -28,6 +29,7 @@ MESSAGES = {
     "KMD002": "Link the page without an anchor; GitBook breaks cross-file anchors.",
     "KMD003": "Add a description to the page's front matter.",
     "KMD004": "Register the page in docs/book/toc.md.",
+    "KMD005": "Make the front matter valid YAML; quote values that contain `: `.",
 }
 
 PARSER = MarkdownIt("commonmark").enable("table")
@@ -88,8 +90,22 @@ def join_wrapped_lines(text: str, path: Path) -> str:
     return text
 
 
+def _check_front_matter_yaml(front_matter: list[str], path: Path) -> list[Violation]:
+    """Report front matter that YAML cannot load as a mapping, at the failing line."""
+    try:
+        data = yaml.safe_load("\n".join(front_matter[1:-1]))
+    except yaml.YAMLError as error:
+        mark = getattr(error, "problem_mark", None)
+        # The mark counts from the line after the opening `---`, which is line 2.
+        line = mark.line + 2 if mark else 1
+        return [Violation(path.as_posix(), line, "KMD005", MESSAGES["KMD005"])]
+    if not isinstance(data, dict | None):
+        return [Violation(path.as_posix(), 1, "KMD005", MESSAGES["KMD005"])]
+    return []
+
+
 def check_book_page(text: str, path: Path) -> list[Violation]:
-    """Find anchored cross-file links and a missing front matter description."""
+    """Find anchored cross-file links and missing or unloadable front matter."""
     findings = [
         Violation(path.as_posix(), start + offset + 1, "KMD002", MESSAGES["KMD002"])
         for start, block in _get_inline_blocks(text)
@@ -104,6 +120,7 @@ def check_book_page(text: str, path: Path) -> list[Violation]:
     front_matter = lines[: _get_front_matter_end(lines)]
     if not any(re.match(r"description:\s*\S", line) for line in front_matter):
         findings.append(Violation(path.as_posix(), 1, "KMD003", MESSAGES["KMD003"]))
+    findings.extend(_check_front_matter_yaml(front_matter, path))
     return findings
 
 
