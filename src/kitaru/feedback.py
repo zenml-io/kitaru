@@ -15,7 +15,7 @@
 
 from collections.abc import Sequence
 from typing import NamedTuple
-from urllib.parse import quote, urlencode
+from urllib.parse import quote
 
 from kitaru.redaction import redact
 
@@ -64,8 +64,15 @@ def build_issue_draft(
     return IssueDraft(_build_url(title, body), body, trimmed != kept)
 
 
+def _encode(text: str) -> str:
+    # Encode "_" too: CLI and MCP output redact everything again, and a masked
+    # "KITKEY_***" followed by percent-encoded text has no space or comma to
+    # end the match, so that pass would cut off the rest of the link.
+    return quote(text, safe="").replace("_", "%5F")
+
+
 def _get_encoded_length(text: str) -> int:
-    return len(quote(text, safe=""))
+    return len(_encode(text))
 
 
 def _trim_sections(sections: list[Section], budget: int) -> list[Section]:
@@ -101,4 +108,4 @@ def _render_body(sections: list[Section]) -> str:
 
 
 def _build_url(title: str, body: str) -> str:
-    return f"{ISSUE_URL}?{urlencode({'title': title, 'body': body}, quote_via=quote)}"
+    return f"{ISSUE_URL}?title={_encode(title)}&body={_encode(body)}"
