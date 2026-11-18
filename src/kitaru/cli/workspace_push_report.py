@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Report of one workspace push and its rendering."""
 
+import shlex
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,6 +37,12 @@ NOT_COPIED = (
 
 _MAX_DETAILS = 200
 _MAX_TEXT_DETAILS = 20
+_MAX_CONNECTION_ACTIONS = 5
+
+
+def describe_not_copied() -> str:
+    """Return the kinds of record a push leaves behind as an English list."""
+    return f"{', '.join(NOT_COPIED[:-1])}, and {NOT_COPIED[-1]}"
 
 
 @dataclass(slots=True)
@@ -71,25 +78,45 @@ class PushReport:
         self.count(kind, "failed")
         self._add_detail(self.failed, {"kind": kind, "record": record, "error": error})
 
-    def add_unmapped(self, insight: InsightResponse, unmapped: dict[str, str]) -> None:
+    def add_unmapped(
+        self, insight: InsightResponse, references: list[dict[str, str]]
+    ) -> None:
         """Keep the references one copied insight still makes to the source."""
         self._add_detail(
             self.unmapped_references,
             {
                 "insight": insight.name,
                 "source_insight_id": str(insight.id),
-                "references": [
-                    {"id": reference, "kind": kind}
-                    for reference, kind in sorted(unmapped.items())
-                ],
+                "references": references,
             },
         )
 
-    def add_incomplete_connection(self, name: str, missing_keys: list[str]) -> None:
-        """Keep the secret keys a copied connection still needs."""
+    def add_incomplete_connection(
+        self, name: str, missing_keys: set[str], stored_keys: set[str]
+    ) -> None:
+        """Keep the secret keys a destination connection still needs.
+
+        The command names the stored keys too, because a connection update
+        replaces every stored secret value with the ones it is given.
+
+        Args:
+            name: Connection name.
+            missing_keys: Secret keys the source has and the destination
+                lacks.
+            stored_keys: Secret keys the destination already holds.
+        """
+        options = " ".join(
+            f"--set-secret {shlex.quote(key)}=<value>"
+            for key in sorted(missing_keys | stored_keys)
+        )
         self._add_detail(
             self.incomplete_connections,
-            {"connection": name, "missing_keys": sorted(missing_keys)},
+            {
+                "connection": name,
+                "missing_keys": sorted(missing_keys),
+                "command": f"kitaru --server {self.destination} connection "
+                f"update {shlex.quote(name)} {options}",
+            },
         )
 
     @property
@@ -127,55 +154,83 @@ def build_push_result(report: PushReport) -> CommandResult:
         report: Outcome of the push.
 
     Raises:
-        CLIError: At least one record failed to copy.
+        CLIError: At least one record failed to copy. Its details carry the
+            report with the warnings and next actions.
 
     Returns:
         Result carrying the report and the follow-up actions.
     """
+    warnings = _build_warnings(report)
+    next_actions = _build_next_actions(report)
     if report.failures:
         raise CLIError(
             "partial_failure",
             f"{report.failures} record(s) failed to copy to {report.destination}.",
             retryable=True,
-            details=report.to_item(),
+            details={
+                **report.to_item(),
+                "warnings": warnings,
+                "next_actions": next_actions,
+            },
             hint="Rerun the same command. Records already copied are not copied again.",
         )
-    warnings = list(report.warnings)
-    if report.unmapped_references:
-        warnings.append(
-            f"{len(report.unmapped_references)} copied insight(s) still reference "
-            "records that exist only on the source. Each lists them under "
-            "`unmapped_references` in its `kitaru.push/v1` metadata."
-        )
-    next_actions = []
-    if report.dry_run:
-        next_actions.append("Rerun without --dry-run to copy the records.")
-    else:
-        next_actions.append(
-            f"Run `kitaru --server {report.destination} agent list` to inspect "
-            "the destination."
-        )
-    if report.counts["connections"]["skipped"]:
-        next_actions.append(
-            "Rerun with --copy-secrets to copy the skipped connections, or "
-            "recreate them on the destination with `kitaru connection create`."
-        )
-    if report.incomplete_connections:
-        next_actions.append(
-            "Set the missing secret values on the destination with `kitaru "
-            f"--server {report.destination} connection update NAME "
-            "--set-secret KEY=VALUE` for each key under `incomplete_connections`."
-        )
-    next_actions.append(
-        "Recreate what a push does not copy on the destination: "
-        f"{', '.join(NOT_COPIED)}."
-    )
     return CommandResult(
         item=report.to_item(),
         warnings=warnings,
         next_actions=next_actions,
         text=_render_text(report),
     )
+
+
+def _build_warnings(report: PushReport) -> list[str]:
+    """Collect the warnings a push ends with."""
+    warnings = list(report.warnings)
+    if report.incomplete_connections:
+        verb = "would lack" if report.dry_run else "lack"
+        warnings.append(
+            f"{len(report.incomplete_connections)} connection(s) on "
+            f"{report.destination} {verb} secret values, because a Kitaru "
+            "server never returns the secret values of a connection. Their "
+            "keys are listed under `incomplete_connections`."
+        )
+    if report.unmapped_references:
+        warnings.append(
+            f"{len(report.unmapped_references)} copied insight(s) still reference "
+            "records that exist only on the source. Each lists them under "
+            "`unmapped_references` in its `kitaru.push/v1` metadata."
+        )
+    return warnings
+
+
+def _build_next_actions(report: PushReport) -> list[str]:
+    """Collect the follow-up actions a push ends with."""
+    if report.dry_run:
+        next_actions = ["Rerun without --dry-run to copy the records."]
+    else:
+        next_actions = [
+            f"Run `kitaru --server {report.destination} agent list` to inspect "
+            "the destination."
+        ]
+    if report.incomplete_connections and not report.dry_run:
+        next_actions.append(
+            "Set the secret values of each incomplete connection with one "
+            "command naming all of its keys, because an update replaces every "
+            "stored secret value:"
+        )
+        next_actions.extend(
+            f"`{detail['command']}`"
+            for detail in report.incomplete_connections[:_MAX_CONNECTION_ACTIONS]
+        )
+        if len(report.incomplete_connections) > _MAX_CONNECTION_ACTIONS:
+            next_actions.append(
+                "Find the command for each remaining connection under "
+                "`incomplete_connections`."
+            )
+    next_actions.append(
+        f"Recreate what a push does not copy on the destination: "
+        f"{describe_not_copied()}."
+    )
+    return next_actions
 
 
 def _render_text(report: PushReport) -> str:

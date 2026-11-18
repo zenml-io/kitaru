@@ -22,7 +22,7 @@ from kitaru.api_models.v1.insight import (
     InsightResponse,
     TextInsightData,
 )
-from kitaru.cli.workspace_references import (
+from kitaru.cli.workspace_push_references import (
     PUSH_METADATA_KEY,
     ReferenceMap,
     build_pushed_insight,
@@ -134,7 +134,7 @@ def test_find_uuids_ignores_longer_hex_runs() -> None:
     reference = uuid.uuid4()
 
     found = find_uuids(
-        {"a": [f"see {reference}"], str(reference).upper(): f"x{reference}-ffff"}
+        f'{{"a":["see {reference}"],"{str(reference).upper()}":"x{reference}-ffff"}}'
     )
 
     assert found == {str(reference)}
@@ -173,7 +173,7 @@ def test_build_pushed_insight_rewrites_and_marks_the_copy() -> None:
         "contributing_session_ids": [str(destination_session)],
         "context": {"source_import": {"import_id": str(import_id)}},
     }
-    assert unmapped == {str(import_id): "import"}
+    assert unmapped == [{"id": str(import_id), "kind": "import"}]
     assert pushed.metadata[PUSH_METADATA_KEY] == {
         "source_insight_id": str(insight.id),
         "source_server": SOURCE_URL,
@@ -193,7 +193,7 @@ def test_build_pushed_insight_keeps_chart_data_unchanged() -> None:
     pushed, unmapped = build_pushed_insight(insight, _build_references())
 
     assert pushed.data == data
-    assert unmapped == {}
+    assert unmapped == []
     assert pushed.metadata == {
         PUSH_METADATA_KEY: {
             "source_insight_id": str(insight.id),

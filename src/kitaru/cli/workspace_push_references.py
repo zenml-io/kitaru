@@ -63,19 +63,9 @@ class ReferenceMap:
         return None if destination_id is None else uuid.UUID(destination_id)
 
 
-def find_uuids(value: Any) -> set[str]:
-    """Collect every UUID written anywhere in a JSON value, lowercased."""
-    found: set[str] = set()
-    if isinstance(value, str):
-        found.update(match.lower() for match in _UUID_PATTERN.findall(value))
-    elif isinstance(value, dict):
-        for key, item in value.items():
-            found |= find_uuids(key)
-            found |= find_uuids(item)
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            found |= find_uuids(item)
-    return found
+def find_uuids(text: str) -> set[str]:
+    """Collect every UUID written in a text, lowercased."""
+    return {match.lower() for match in _UUID_PATTERN.findall(text)}
 
 
 def rewrite_references(
@@ -99,21 +89,19 @@ def rewrite_references(
         return _rewrite_string(value, references, unmapped)
     if isinstance(value, dict):
         return {
-            (
-                _rewrite_string(key, references, unmapped)
-                if isinstance(key, str)
-                else key
-            ): rewrite_references(item, references, unmapped)
+            _rewrite_string(key, references, unmapped): rewrite_references(
+                item, references, unmapped
+            )
             for key, item in value.items()
         }
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list):
         return [rewrite_references(item, references, unmapped) for item in value]
     return value
 
 
 def build_pushed_insight(
     insight: InsightResponse, references: ReferenceMap
-) -> tuple[InsightInput, dict[str, str]]:
+) -> tuple[InsightInput, list[dict[str, str]]]:
     """Build the destination copy of a source insight.
 
     Fields the insight create request cannot set, and every reference left
@@ -124,7 +112,8 @@ def build_pushed_insight(
         references: Known source ids and their destination copies.
 
     Returns:
-        Insight to create and the references left unmapped, by id.
+        Insight to create and the references left unmapped, each with its
+        id and the kind of source record it names.
     """
     unmapped: dict[str, str] = {}
     metadata = {
@@ -137,6 +126,7 @@ def build_pushed_insight(
         data = TextInsightData(
             content=_rewrite_string(data.content, references, unmapped)
         )
+    title = _rewrite_string(insight.title, references, unmapped)
     description = insight.description
     if description is not None:
         description = _rewrite_string(description, references, unmapped)
@@ -150,21 +140,21 @@ def build_pushed_insight(
         marker["source_analyzer_version_id"] = str(insight.analyzer_version_id)
     if insight.analyzer_params is not None:
         marker["analyzer_params"] = insight.analyzer_params
-    if unmapped:
-        marker["unmapped_references"] = [
-            {"id": reference, "kind": kind}
-            for reference, kind in sorted(unmapped.items())
-        ]
+    unmapped_references = [
+        {"id": reference, "kind": kind} for reference, kind in sorted(unmapped.items())
+    ]
+    if unmapped_references:
+        marker["unmapped_references"] = unmapped_references
     metadata[PUSH_METADATA_KEY] = marker
     return (
         InsightInput(
             name=insight.name,
-            title=_rewrite_string(insight.title, references, unmapped),
+            title=title,
             description=description,
             data=data,
             metadata=metadata,
         ),
-        unmapped,
+        unmapped_references,
     )
 
 
@@ -191,6 +181,5 @@ def _rewrite_string(
         unmapped[key] = references.unmapped.get(key, UNKNOWN_REFERENCE_KIND)
         return found
 
-    if references.source_url != references.destination_url:
-        value = value.replace(references.source_url, references.destination_url)
+    value = value.replace(references.source_url, references.destination_url)
     return _UUID_PATTERN.sub(replace, value)

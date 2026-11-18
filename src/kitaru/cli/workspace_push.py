@@ -13,13 +13,14 @@
 #  permissions and limitations under the License.
 """Copying of workspace content from one Kitaru server to another."""
 
+import asyncio
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
 import httpx
-from pydantic import SecretStr, ValidationError
+from pydantic import ValidationError
 
 from kitaru.api_models.v1.agent import (
     AgentCreateRequest,
@@ -53,7 +54,6 @@ from kitaru.api_models.v1.session_node import (
     SessionIngestRequest,
     SessionNodeCreateRequest,
     SessionNodeListParams,
-    SessionNodeResponse,
     SessionWithNodesResponse,
 )
 from kitaru.cli.config import (
@@ -61,22 +61,27 @@ from kitaru.cli.config import (
     build_api_client,
     validate_server_url,
 )
-from kitaru.cli.output import CLIError
-from kitaru.cli.redaction import redact
-from kitaru.cli.workspace_push_report import PushReport
-from kitaru.cli.workspace_references import (
+from kitaru.cli.output import CLIError, describe_validation_error
+from kitaru.cli.workspace_push_references import (
     ReferenceMap,
     build_pushed_insight,
     find_uuids,
     get_pushed_insight_source_id,
 )
+from kitaru.cli.workspace_push_report import PushReport
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.credential_store import CredentialStore
-from kitaru.client.exceptions import APIError, NotFoundError
+from kitaru.client.exceptions import APIError
 
 PUSH_IMPORTED_FROM = "kitaru-workspace-push"
 _PAGE_SIZE = 200
+_ID_PAGE_SIZE = 1000
 _MAX_ERROR_LENGTH = 300
+_CONCURRENCY = 8
+
+
+class _SessionCopyError(Exception):
+    """Raised when a session copy fails for a reason the API did not state."""
 
 
 @dataclass(slots=True)
@@ -85,23 +90,26 @@ class _AgentPair:
 
     source: AgentResponse
     destination: AgentResponse | None
-    """Destination agent, None when it was not created."""
+    """Destination agent, None when it failed or a dry run would create it."""
     created: bool = False
-    """Whether this run created the destination agent, which is then empty."""
+    failed: bool = False
+
+    @property
+    def has_earlier_records(self) -> bool:
+        """Whether the destination agent existed before this run."""
+        return self.destination is not None and not self.created
 
 
 @dataclass(slots=True)
 class _Push:
-    """Clients, options, and accumulated state of one push."""
+    """Clients and accumulated state of one push."""
 
     source: KitaruAPIClient
     destination: KitaruAPIClient
     references: ReferenceMap
     report: PushReport
-    dry_run: bool
     sessions: dict[uuid.UUID, uuid.UUID] = field(default_factory=dict)
     """Source session id to destination session id."""
-    node_mapped_sessions: set[uuid.UUID] = field(default_factory=set)
 
 
 @asynccontextmanager
@@ -129,8 +137,7 @@ async def open_destination_client(
         raise CLIError(
             "authentication_failed",
             f"No stored credential for the destination {destination}.",
-            hint=f"Run `kitaru login {destination}`, then rerun the push with "
-            "`--server` naming the source.",
+            hint=_build_login_hint(destination),
         )
     client = build_api_client(
         destination,
@@ -163,7 +170,6 @@ async def push_workspace(
     source_url: str,
     destination_url: str,
     agent_names: list[str] | None,
-    copy_secrets: bool,
     dry_run: bool,
 ) -> PushReport:
     """Copy agents, connections, sessions, and insights between servers.
@@ -179,7 +185,6 @@ async def push_workspace(
         source_url: Source server URL.
         destination_url: Destination server URL.
         agent_names: Names of the agents to copy, None for every agent.
-        copy_secrets: Whether connection secret values may leave the source.
         dry_run: Whether to report without writing.
 
     Raises:
@@ -194,18 +199,16 @@ async def push_workspace(
         destination=destination,
         references=ReferenceMap(source_url, destination_url),
         report=PushReport(source_url, destination_url, dry_run),
-        dry_run=dry_run,
     )
     selected = await _select_agents(push, agent_names)
     destination_agents = await _list_destination_agents(push)
     pairs = [await _push_agent(push, agent, destination_agents) for agent in selected]
     for pair in pairs:
         await _push_agent_versions(push, pair)
-    await _push_connections(push, copy_secrets=copy_secrets)
+    await _push_connections(push)
     for pair in pairs:
         await _push_sessions(push, pair)
-    for pair in pairs:
-        await _push_insights(push, pair)
+    await _push_insights(push, pairs)
     return push.report
 
 
@@ -236,6 +239,9 @@ def build_ingest_request(
 ) -> SessionIngestRequest:
     """Build the destination ingest request for a source session.
 
+    Every request field is read from the source record of the same name, so
+    a field added to both models is copied without a change here.
+
     Args:
         full: Source session with every node and payload.
         agent_id: Destination agent.
@@ -244,61 +250,31 @@ def build_ingest_request(
     Returns:
         Request creating the session and its nodes in one transaction.
     """
-    session = full.session
-    imported_from, external_id = get_session_identity(session)
+    imported_from, external_id = get_session_identity(full.session)
+    session = SessionCreateRequest.model_validate(
+        full.session, from_attributes=True
+    ).model_copy(
+        update={
+            "agent_id": agent_id,
+            "agent_version_id": agent_version_id,
+            "imported_from": imported_from,
+            "external_id": external_id,
+        }
+    )
     return SessionIngestRequest(
-        session=SessionCreateRequest(
-            agent_id=agent_id,
-            agent_version_id=agent_version_id,
-            origin=session.origin,
-            status=session.status,
-            name=session.name,
-            input_text_selector=session.input_text_selector,
-            output_text_selector=session.output_text_selector,
-            inputs=session.inputs,
-            outputs=session.outputs,
-            error=session.error,
-            started_at=session.started_at,
-            ended_at=session.ended_at,
-            external_id=external_id,
-            metadata=session.metadata,
-            imported_from=imported_from,
-            framework=session.framework,
-            adapter_version=session.adapter_version,
-        ),
-        nodes=[_build_node_request(node) for node in full.nodes],
+        session=session,
+        nodes=[
+            SessionNodeCreateRequest.model_validate(node, from_attributes=True)
+            for node in full.nodes
+        ],
     )
 
 
-def _build_node_request(node: SessionNodeResponse) -> SessionNodeCreateRequest:
-    """Build the create request repeating one source node."""
-    return SessionNodeCreateRequest(
-        external_id=node.external_id,
-        parent_external_id=node.parent_external_id,
-        links=node.links,
-        trace_id=node.trace_id,
-        node_type=node.node_type,
-        name=node.name,
-        status=node.status,
-        error=node.error,
-        started_at=node.started_at,
-        ended_at=node.ended_at,
-        input_text_selector=node.input_text_selector,
-        output_text_selector=node.output_text_selector,
-        system_prompt_selector=node.system_prompt_selector,
-        reasoning_selectors=node.reasoning_selectors,
-        inputs=node.inputs,
-        outputs=node.outputs,
-        requested_model=node.requested_model,
-        model=node.model,
-        model_provider=node.model_provider,
-        tokens=node.tokens,
-        cost=node.cost,
-        model_params=node.model_params,
-        tool_name=node.tool_name,
-        subagent_id=node.subagent_id,
-        attributes=node.attributes,
-        metadata=node.metadata,
+def _build_login_hint(destination: str) -> str:
+    """Build the hint for a destination that needs a fresh credential."""
+    return (
+        f"Run `kitaru login {destination}`, then rerun the push with `--server` "
+        "naming the source."
     )
 
 
@@ -308,15 +284,37 @@ def _filter_by_agent(agent_id: uuid.UUID) -> FilterCondition:
 
 
 def _describe_error(error: APIError) -> str:
-    """Describe an API failure without credentials or unbounded text."""
-    detail = redact(error.detail.strip())[:_MAX_ERROR_LENGTH]
+    """Describe an API failure in bounded text."""
+    detail = error.detail.strip()[:_MAX_ERROR_LENGTH]
     return f"HTTP {error.status_code}: {detail}" if detail else str(error.status_code)
+
+
+def _is_auth_failure(error: APIError) -> bool:
+    """Return whether a server rejected the credential of a request."""
+    return error.status_code in {httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN}
 
 
 def _reraise_fatal(error: APIError) -> None:
     """Raise failures that would repeat for every remaining record."""
-    if error.status_code in {httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN}:
+    if _is_auth_failure(error):
         raise error
+
+
+@asynccontextmanager
+async def _open_task_group() -> AsyncGenerator[asyncio.TaskGroup]:
+    """Open a task group that raises its first failure in place of the group.
+
+    The tasks of a group run the same copy, so the first failure describes
+    the others, and a bare exception keeps its stable CLI error kind.
+    """
+    try:
+        async with asyncio.TaskGroup() as group:
+            yield group
+    except BaseExceptionGroup as failures:
+        error: BaseException = failures
+        while isinstance(error, BaseExceptionGroup):
+            error = error.exceptions[0]
+        raise error from None
 
 
 async def _select_agents(
@@ -354,16 +352,15 @@ async def _list_destination_agents(push: _Push) -> dict[str, AgentResponse]:
             )
         }
     except APIError as error:
-        if error.status_code in {httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN}:
-            destination = push.references.destination_url
-            raise CLIError(
-                "authentication_failed",
-                f"The destination {destination} rejected its stored credential.",
-                details={"status_code": error.status_code},
-                hint=f"Run `kitaru login {destination}`, then rerun the push "
-                "with `--server` naming the source.",
-            ) from error
-        raise
+        if not _is_auth_failure(error):
+            raise
+        destination = push.references.destination_url
+        raise CLIError(
+            "authentication_failed",
+            f"The destination {destination} rejected its stored credential.",
+            details={"status_code": error.status_code},
+            hint=_build_login_hint(destination),
+        ) from error
 
 
 async def _push_agent(
@@ -375,7 +372,7 @@ async def _push_agent(
         push.references.add(agent.id, existing.id)
         push.report.count("agents", "already_present")
         return _AgentPair(agent, existing)
-    if push.dry_run:
+    if push.report.dry_run:
         push.report.count("agents", "copied")
         return _AgentPair(agent, None)
     try:
@@ -386,7 +383,7 @@ async def _push_agent(
         _reraise_fatal(error)
         push.references.add_unmapped(agent.id, "agent")
         push.report.fail("agents", agent.name, _describe_error(error))
-        return _AgentPair(agent, None)
+        return _AgentPair(agent, None, failed=True)
     push.references.add(agent.id, created.id)
     push.report.count("agents", "copied")
     return _AgentPair(agent, created, created=True)
@@ -410,7 +407,7 @@ async def _push_agent_versions(push: _Push, pair: _AgentPair) -> None:
     if not versions:
         return
     agent_name = pair.source.name
-    if pair.destination is None and not push.dry_run:
+    if pair.failed:
         for version in versions:
             push.references.add_unmapped(version.id, "agent_version")
             push.report.skip(
@@ -423,7 +420,7 @@ async def _push_agent_versions(push: _Push, pair: _AgentPair) -> None:
     next_number = 1
     if pair.destination is not None:
         next_number = pair.destination.latest_version + 1
-        if not pair.created:
+        if pair.has_earlier_records:
             existing = {
                 version.version: version
                 async for version in push.destination.agents.iter_versions(
@@ -446,7 +443,7 @@ async def _push_agent_versions(push: _Push, pair: _AgentPair) -> None:
                 "The destination agent's version numbers differ from the source.",
             )
             continue
-        if push.dry_run or pair.destination is None:
+        if pair.destination is None or push.report.dry_run:
             push.report.count("agent_versions", "copied")
             next_number += 1
             continue
@@ -481,175 +478,119 @@ async def _push_agent_versions(push: _Push, pair: _AgentPair) -> None:
         )
 
 
-async def _push_connections(push: _Push, *, copy_secrets: bool) -> None:
-    """Copy provider connections, matching them by name.
+async def _push_connections(push: _Push) -> None:
+    """Copy provider connections without their secret values, by name.
 
-    A connection whose secret values cannot be read is copied with its
-    non-secret values and reported with the keys to set on the destination.
+    A server never returns the secret values of a connection, so a copy
+    holds the non-secret values and every secret key the destination lacks
+    is reported, also for a connection copied by an earlier run.
     """
-    existing: set[str] = set()
+    existing: dict[str, ConnectionResponse] = {}
     default_providers: set[str] = set()
     async for connection in push.destination.connections.iter(
         ConnectionListParams(size=_PAGE_SIZE)
     ):
-        existing.add(connection.name)
+        existing[connection.name] = connection
         if connection.default:
             default_providers.add(connection.provider)
-    hidden_values = False
     async for connection in push.source.connections.iter(
         ConnectionListParams(sort="created:asc", size=_PAGE_SIZE)
     ):
-        if connection.name in existing:
+        match = existing.get(connection.name)
+        stored_keys = set(match.secret_keys) if match is not None else set()
+        if match is not None:
             push.report.count("connections", "already_present")
-            continue
-        if connection.secret_keys and not copy_secrets:
-            push.report.skip(
-                "connections",
-                connection.name,
-                "Copying a connection sends its secret values to the "
-                "destination, which requires --copy-secrets.",
-            )
-            continue
-        if push.dry_run:
+        elif push.report.dry_run:
             push.report.count("connections", "copied")
-            continue
-        # Keep the default the destination already has, because a provider
-        # allows one and a second is rejected.
-        default = connection.default and connection.provider not in default_providers
-        try:
-            secrets = await _read_connection_secrets(push, connection)
-            await push.destination.connections.create(
-                ConnectionCreateRequest(
-                    name=connection.name,
-                    provider=connection.provider,
-                    env=connection.env,
-                    secrets=secrets or {},
-                    default=default,
+        else:
+            # Keep the default the destination already has, because a
+            # provider allows one and a second is rejected.
+            default = (
+                connection.default and connection.provider not in default_providers
+            )
+            try:
+                await push.destination.connections.create(
+                    ConnectionCreateRequest(
+                        name=connection.name,
+                        provider=connection.provider,
+                        env=connection.env,
+                        default=default,
+                    )
                 )
-            )
-        except APIError as error:
-            _reraise_fatal(error)
-            # A rejected request can echo its body, which holds the values.
-            push.report.fail(
-                "connections", connection.name, f"HTTP {error.status_code}"
-            )
-            continue
-        if default:
-            default_providers.add(connection.provider)
-        push.report.count("connections", "copied")
-        if secrets is None:
-            hidden_values = True
+            except APIError as error:
+                _reraise_fatal(error)
+                push.report.fail("connections", connection.name, _describe_error(error))
+                continue
+            if default:
+                default_providers.add(connection.provider)
+            push.report.count("connections", "copied")
+        missing_keys = set(connection.secret_keys) - stored_keys
+        if missing_keys:
             push.report.add_incomplete_connection(
-                connection.name, connection.secret_keys
+                connection.name, missing_keys, stored_keys
             )
-    if hidden_values:
-        push.report.warnings.append(
-            f"{push.references.source_url} does not return the secret values "
-            "of connections, so the copies hold only the non-secret values. "
-            "Set the keys listed under `incomplete_connections` on the "
-            "destination."
-        )
-
-
-async def _read_connection_secrets(
-    push: _Push, connection: ConnectionResponse
-) -> dict[str, SecretStr] | None:
-    """Read the secret values of a source connection.
-
-    Returns:
-        Secret values, empty when the connection has none, or None when the
-        source keeps the connection's secret hidden.
-    """
-    if not connection.secret_keys:
-        return {}
-    try:
-        secret = await push.source.secrets.get(connection.secret_id, True)
-    except NotFoundError:
-        return None
-    return secret.values
 
 
 async def _push_sessions(push: _Push, pair: _AgentPair) -> None:
-    """Copy the settled sessions of one agent with their nodes."""
+    """Copy the settled sessions of one agent with their nodes.
+
+    Copies run concurrently while the source listing streams. The listing
+    waits for a free slot before it starts a copy, which bounds both the
+    open requests and the sessions held in memory.
+    """
     existing: dict[tuple[str, str], uuid.UUID] = {}
-    if pair.destination is not None and not pair.created:
+    if pair.destination is not None and pair.has_earlier_records:
         async for session in push.destination.sessions.iter(
             SessionListParams(
-                filter=_filter_by_agent(pair.destination.id), size=_PAGE_SIZE
+                filter=_filter_by_agent(pair.destination.id), size=_ID_PAGE_SIZE
             )
         ):
             if session.imported_from is not None and session.external_id is not None:
                 existing[(session.imported_from, session.external_id)] = session.id
-    missing_versions = 0
-    async for session in push.source.sessions.iter(
-        SessionListParams(
-            filter=_filter_by_agent(pair.source.id),
-            sort="created:asc",
-            size=_PAGE_SIZE,
-        )
-    ):
-        record = str(session.id)
-        if session.import_id is not None:
-            push.references.add_unmapped(session.import_id, "import")
-        reason = _get_session_skip_reason(session, pair, dry_run=push.dry_run)
-        if reason is not None:
-            push.references.add_unmapped(session.id, "session")
-            push.report.skip("sessions", record, reason)
-            continue
-        match = existing.get(get_session_identity(session))
-        if match is not None:
-            _record_session(push, session.id, match)
-            push.report.count("sessions", "already_present")
-            continue
-        if push.dry_run or pair.destination is None:
-            push.report.count("sessions", "copied")
-            continue
-        agent_version_id = None
-        if session.agent_version_id is not None:
-            agent_version_id = push.references.get(session.agent_version_id)
-            missing_versions += agent_version_id is None
+    slots = asyncio.Semaphore(_CONCURRENCY)
+    without_version: list[uuid.UUID] = []
+
+    async def copy(session: SessionResponse, agent_id: uuid.UUID) -> None:
         try:
-            created = await _ingest_session(
-                push, session, pair.destination.id, agent_version_id
+            await _copy_session(push, session, agent_id, without_version)
+        finally:
+            slots.release()
+
+    async with _open_task_group() as copies:
+        async for session in push.source.sessions.iter(
+            SessionListParams(
+                filter=_filter_by_agent(pair.source.id),
+                sort="created:asc",
+                size=_ID_PAGE_SIZE,
             )
-        except APIError as error:
-            _reraise_fatal(error)
-            push.references.add_unmapped(session.id, "session")
-            push.report.fail("sessions", record, _describe_error(error))
-            continue
-        except ValidationError as error:
-            push.references.add_unmapped(session.id, "session")
-            push.report.fail(
-                "sessions",
-                record,
-                f"The source session is not a valid ingest request "
-                f"({error.error_count()} validation error(s)).",
-            )
-            continue
-        if created is None:
-            push.references.add_unmapped(session.id, "session")
-            push.report.fail(
-                "sessions",
-                record,
-                "The destination reported the session as present but did not list it.",
-            )
-            continue
-        session_id, copied = created
-        _record_session(push, session.id, session_id)
-        push.report.count("sessions", "copied" if copied else "already_present")
-    if missing_versions:
+        ):
+            if session.import_id is not None:
+                push.references.add_unmapped(session.import_id, "import")
+            reason = _get_session_skip_reason(session, pair)
+            if reason is not None:
+                push.references.add_unmapped(session.id, "session")
+                push.report.skip("sessions", str(session.id), reason)
+                continue
+            match = existing.get(get_session_identity(session))
+            if match is not None:
+                _record_session(push, session.id, match)
+                push.report.count("sessions", "already_present")
+            elif pair.destination is None or push.report.dry_run:
+                push.report.count("sessions", "copied")
+            else:
+                await slots.acquire()
+                copies.create_task(copy(session, pair.destination.id))
+    if without_version:
         push.report.warnings.append(
-            f"{missing_versions} session(s) of agent {pair.source.name!r} were "
-            "copied without an agent version because their version was not "
-            "copied."
+            f"{len(without_version)} session(s) of agent {pair.source.name!r} "
+            "were copied without an agent version because their version was "
+            "not copied."
         )
 
 
-def _get_session_skip_reason(
-    session: SessionResponse, pair: _AgentPair, *, dry_run: bool
-) -> str | None:
+def _get_session_skip_reason(session: SessionResponse, pair: _AgentPair) -> str | None:
     """Return why a source session is not copied, None when it is."""
-    if pair.destination is None and not dry_run:
+    if pair.failed:
         return "Its agent was not copied."
     if session.status == SessionStatus.IN_PROGRESS:
         return "The session is still in progress on the source."
@@ -666,17 +607,52 @@ def _record_session(
     push.references.add(source_id, destination_id)
 
 
+async def _copy_session(
+    push: _Push,
+    session: SessionResponse,
+    agent_id: uuid.UUID,
+    without_version: list[uuid.UUID],
+) -> None:
+    """Copy one session and record how the copy ended."""
+    agent_version_id = None
+    if session.agent_version_id is not None:
+        agent_version_id = push.references.get(session.agent_version_id)
+    try:
+        destination_id, copied = await _ingest_session(
+            push, session, agent_id, agent_version_id
+        )
+    except (APIError, ValidationError, _SessionCopyError) as error:
+        if isinstance(error, APIError):
+            _reraise_fatal(error)
+            message = _describe_error(error)
+        elif isinstance(error, ValidationError):
+            location, problem = describe_validation_error(error)
+            message = f"The source session has invalid {location}: {problem}."
+        else:
+            message = str(error)
+        push.references.add_unmapped(session.id, "session")
+        push.report.fail("sessions", str(session.id), message)
+        return
+    _record_session(push, session.id, destination_id)
+    push.report.count("sessions", "copied" if copied else "already_present")
+    if copied and session.agent_version_id is not None and agent_version_id is None:
+        without_version.append(session.id)
+
+
 async def _ingest_session(
     push: _Push,
     session: SessionResponse,
     agent_id: uuid.UUID,
     agent_version_id: uuid.UUID | None,
-) -> tuple[uuid.UUID, bool] | None:
+) -> tuple[uuid.UUID, bool]:
     """Create one session with its nodes on the destination.
 
+    Raises:
+        _SessionCopyError: The destination reports the session as present
+            but lists no session with its identity.
+
     Returns:
-        Destination session id and whether this call created it, None when
-        the destination reports a conflict but lists no matching session.
+        Destination session id and whether this call created it.
     """
     full = await push.source.sessions.get_with_nodes(session.id)
     request = build_ingest_request(full, agent_id, agent_version_id)
@@ -707,13 +683,38 @@ async def _ingest_session(
             size=1,
         )
     )
-    return (page.items[0].id, False) if page.items else None
+    if not page.items:
+        raise _SessionCopyError(
+            "The destination reported the session as present but did not list it."
+        )
+    return page.items[0].id, False
 
 
-async def _push_insights(push: _Push, pair: _AgentPair) -> None:
-    """Copy the insights of one agent with their references rewritten."""
+async def _push_insights(push: _Push, pairs: list[_AgentPair]) -> None:
+    """Copy the insights of every agent with their references rewritten."""
+    pending = [(pair, await _list_pending_insights(push, pair)) for pair in pairs]
+    if not push.report.dry_run:
+        await _map_referenced_nodes(
+            push, [insight for _, insights in pending for insight in insights]
+        )
+    for pair, insights in pending:
+        if pair.destination is None or push.report.dry_run:
+            push.report.count("insights", "copied", len(insights))
+            continue
+        for start in range(0, len(insights), MAX_INSIGHT_BATCH_SIZE):
+            await _create_insights(
+                push,
+                pair.destination.id,
+                insights[start : start + MAX_INSIGHT_BATCH_SIZE],
+            )
+
+
+async def _list_pending_insights(
+    push: _Push, pair: _AgentPair
+) -> list[InsightResponse]:
+    """List the source insights of one agent the destination lacks."""
     existing: set[str] = set()
-    if pair.destination is not None and not pair.created:
+    if pair.destination is not None and pair.has_earlier_records:
         async for insight in push.destination.insights.iter(
             InsightListParams(
                 filter=_filter_by_agent(pair.destination.id), size=_PAGE_SIZE
@@ -732,37 +733,38 @@ async def _push_insights(push: _Push, pair: _AgentPair) -> None:
     ):
         if str(insight.id) in existing:
             push.report.count("insights", "already_present")
-        elif pair.destination is None and not push.dry_run:
+        elif pair.failed:
             push.report.skip("insights", str(insight.id), "Its agent was not copied.")
         else:
             pending.append(insight)
-    if push.dry_run or pair.destination is None:
-        push.report.count("insights", "copied", len(pending))
-        return
-    await _map_referenced_nodes(push, pending)
-    for insight in pending:
+    return pending
+
+
+async def _create_insights(
+    push: _Push, agent_id: uuid.UUID, insights: list[InsightResponse]
+) -> None:
+    """Create one batch of rewritten insights on the destination."""
+    for insight in insights:
         if insight.import_id is not None:
             push.references.add_unmapped(insight.import_id, "import")
         if insight.analyzer_version_id is not None:
             push.references.add_unmapped(
                 insight.analyzer_version_id, "analyzer_version"
             )
-    for start in range(0, len(pending), MAX_INSIGHT_BATCH_SIZE):
-        batch = pending[start : start + MAX_INSIGHT_BATCH_SIZE]
-        built = [build_pushed_insight(insight, push.references) for insight in batch]
-        try:
-            await push.destination.insights.create(
-                pair.destination.id, [insight for insight, _ in built]
-            )
-        except APIError as error:
-            _reraise_fatal(error)
-            for insight in batch:
-                push.report.fail("insights", str(insight.id), _describe_error(error))
-            continue
-        push.report.count("insights", "copied", len(batch))
-        for insight, (_, unmapped) in zip(batch, built, strict=True):
-            if unmapped:
-                push.report.add_unmapped(insight, unmapped)
+    built = [build_pushed_insight(insight, push.references) for insight in insights]
+    try:
+        await push.destination.insights.create(
+            agent_id, [pushed for pushed, _ in built]
+        )
+    except APIError as error:
+        _reraise_fatal(error)
+        for insight in insights:
+            push.report.fail("insights", str(insight.id), _describe_error(error))
+        return
+    push.report.count("insights", "copied", len(insights))
+    for insight, (_, unmapped) in zip(insights, built, strict=True):
+        if unmapped:
+            push.report.add_unmapped(insight, unmapped)
 
 
 async def _map_referenced_nodes(push: _Push, insights: list[InsightResponse]) -> None:
@@ -774,22 +776,33 @@ async def _map_referenced_nodes(push: _Push, insights: list[InsightResponse]) ->
     """
     referenced: set[str] = set()
     for insight in insights:
-        referenced |= find_uuids(insight.model_dump(mode="json"))
-    for source_id, destination_id in list(push.sessions.items()):
-        if str(source_id) not in referenced or source_id in push.node_mapped_sessions:
-            continue
-        push.node_mapped_sessions.add(source_id)
-        destination_nodes = {
+        referenced |= find_uuids(insight.model_dump_json())
+    slots = asyncio.Semaphore(_CONCURRENCY)
+
+    async def list_nodes(
+        client: KitaruAPIClient, session_id: uuid.UUID
+    ) -> dict[str, uuid.UUID]:
+        return {
             node.external_id: node.id
-            async for node in push.destination.sessions.iter_nodes(
-                destination_id, SessionNodeListParams(size=_PAGE_SIZE)
+            async for node in client.sessions.iter_nodes(
+                session_id, SessionNodeListParams(size=_ID_PAGE_SIZE)
             )
         }
-        async for node in push.source.sessions.iter_nodes(
-            source_id, SessionNodeListParams(size=_PAGE_SIZE)
-        ):
-            match = destination_nodes.get(node.external_id)
+
+    async def map_nodes(source_id: uuid.UUID, destination_id: uuid.UUID) -> None:
+        async with slots:
+            source_nodes, destination_nodes = await asyncio.gather(
+                list_nodes(push.source, source_id),
+                list_nodes(push.destination, destination_id),
+            )
+        for external_id, node_id in source_nodes.items():
+            match = destination_nodes.get(external_id)
             if match is None:
-                push.references.add_unmapped(node.id, "session_node")
+                push.references.add_unmapped(node_id, "session_node")
             else:
-                push.references.add(node.id, match)
+                push.references.add(node_id, match)
+
+    async with _open_task_group() as listings:
+        for source_id, destination_id in push.sessions.items():
+            if str(source_id) in referenced:
+                listings.create_task(map_nodes(source_id, destination_id))

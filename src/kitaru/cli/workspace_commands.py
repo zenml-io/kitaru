@@ -23,7 +23,7 @@ from kitaru.cli.command_registry import (
 from kitaru.cli.invocation_context import get_invocation
 from kitaru.cli.output import CommandResult
 from kitaru.cli.schema import ParameterSpec
-from kitaru.cli.workspace_push_report import build_push_result
+from kitaru.cli.workspace_push_report import build_push_result, describe_not_copied
 
 
 @register_command(
@@ -31,8 +31,7 @@ from kitaru.cli.workspace_push_report import build_push_result
     build_spec(
         ("workspace", "push"),
         "Copy agents, connections, sessions, and insights from the selected "
-        "server to another server. Cohorts, evaluators, evaluations, "
-        "investigations, annotations, experiments, and replays are not copied.",
+        f"server to another server. Not copied: {describe_not_copied()}.",
         parameters=(
             ParameterSpec(
                 "--to",
@@ -49,15 +48,6 @@ from kitaru.cli.workspace_push_report import build_push_result
                 False,
                 "Agent name to copy with its sessions and insights. Repeat "
                 "for more agents. Defaults to every agent.",
-            ),
-            ParameterSpec(
-                "--copy-secrets",
-                "boolean",
-                "option",
-                False,
-                "Copy provider connections that hold secret values, which "
-                "sends the values to the destination. They are skipped "
-                "without it.",
             ),
             ParameterSpec(
                 "--dry-run",
@@ -78,7 +68,6 @@ async def workspace_push_command(
     *,
     to: str,
     agent: list[str] | None = None,
-    copy_secrets: bool = False,
     dry_run: bool = False,
 ) -> CommandResult:
     """Copy workspace content from the selected server to another server."""
@@ -97,7 +86,6 @@ async def workspace_push_command(
             source_url=source_url,
             destination_url=destination_url,
             agent_names=agent,
-            copy_secrets=copy_secrets,
             dry_run=dry_run,
         )
     return build_push_result(report)
