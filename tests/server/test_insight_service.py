@@ -491,13 +491,11 @@ async def test_create_insights_tracks_insight_created(
         actor=ACTOR,
     )
 
-    assert analytics.tracked[-1][1] == AnalyticsEvent.FIRST_INSIGHT_GENERATED
-    normal_events = analytics.tracked[:-1]
-    assert len(normal_events) == 2
-    for user_id, event, _ in normal_events:
+    assert len(analytics.tracked) == 2
+    for user_id, event, _ in analytics.tracked:
         assert user_id == ACTOR.account.id
         assert event == AnalyticsEvent.INSIGHT_CREATED
-    assert [properties for _, _, properties in normal_events] == [
+    assert [properties for _, _, properties in analytics.tracked] == [
         {"insight_type": "text"},
         {"insight_type": "categorical"},
     ]

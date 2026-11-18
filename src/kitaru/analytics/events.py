@@ -41,7 +41,6 @@ class AnalyticsEvent(StrEnum):
     ACCOUNT_CREATED = "Account Created"
     USER_ENRICHED = "User Enriched"
     INSIGHT_CREATED = "Insight Created"
-    FIRST_INSIGHT_GENERATED = "First Insight Generated"
 
 
 class AccountOrigin(StrEnum):

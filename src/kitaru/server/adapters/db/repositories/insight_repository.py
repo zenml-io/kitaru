@@ -65,22 +65,6 @@ class SQLInsightRepository(BaseSQLRepository[InsightORM]):
         """
         return InsightNotFound(entity_id)
 
-    async def find_first_id_by_owner(self, owner_id: uuid.UUID) -> uuid.UUID | None:
-        """Find the first insight id belonging to an account.
-
-        Args:
-            owner_id: Account owning the insights.
-
-        Returns:
-            Earliest insight id, or None when no insights exist.
-        """
-        return await self._session.scalar(
-            select(InsightORM.id)
-            .where(InsightORM.owner_id == owner_id)
-            .order_by(InsightORM.id)
-            .limit(1)
-        )
-
     async def create_many(self, insights: list[Insight]) -> list[Insight]:
         """Persist a batch of new insights in one transaction.
 

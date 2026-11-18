@@ -96,24 +96,6 @@ class FakeInsightRepository:
         self._insights: dict[uuid.UUID, Insight] = {}
         self._plugin_repository = plugin_repository
 
-    async def find_first_id_by_owner(self, owner_id: uuid.UUID) -> uuid.UUID | None:
-        """Find the first insight id belonging to an account.
-
-        Args:
-            owner_id: Account owning the insights.
-
-        Returns:
-            Earliest insight id, or None when no insights exist.
-        """
-        return min(
-            (
-                insight.id
-                for insight in self._insights.values()
-                if insight.owner_id == owner_id
-            ),
-            default=None,
-        )
-
     async def create_many(self, insights: list[Insight]) -> list[Insight]:
         """Persist a batch of new insights in one transaction.
 

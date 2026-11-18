@@ -15,9 +15,11 @@
 
 import uuid
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from datetime import UTC, datetime
 
 from kitaru.analytics.events import AnalyticsEvent
+from kitaru.analytics.source import analytics_event_context
 from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
 from kitaru.server.application.events import (
@@ -25,12 +27,14 @@ from kitaru.server.application.events import (
     JobsSettled,
     TaskTerminal,
 )
+from kitaru.server.application.interfaces.account_repository import AccountRepository
 from kitaru.server.application.interfaces.import_repository import ImportRepository
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.domain.account import AccountNotFound
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.imports import Import
 from kitaru.server.domain.job import Job
@@ -67,6 +71,7 @@ class TaskTransitions:
         analytics: ServerAnalytics | None = None,
         plugin_repository: PluginRepository | None = None,
         import_repository: ImportRepository | None = None,
+        account_repository: AccountRepository | None = None,
     ) -> None:
         """Initialize the dispatch.
 
@@ -79,6 +84,7 @@ class TaskTransitions:
                 properties on tracked events.
             import_repository: Import repository, None skips tracking import
                 task events.
+            account_repository: Accounts used to resolve import owners' cloud IDs.
         """
         self._tasks = task_repository
         self._jobs = job_repository
@@ -86,6 +92,7 @@ class TaskTransitions:
         self._analytics = analytics
         self._plugins = plugin_repository
         self._imports = import_repository
+        self._accounts = account_repository
 
     async def apply_status(
         self, task: Task, transition: Callable[[Task], None]
@@ -400,13 +407,23 @@ class TaskTransitions:
                 if import_.importer_version_id is not None
                 else None
             )
-            self._analytics.track(
-                job.owner_id,
-                AnalyticsEvent.IMPORT_COMPLETED,
-                analytics_events.build_import_completed_properties(
-                    task, plugin, import_
-                ),
-            )
+            owner = None
+            if self._accounts is not None:
+                with suppress(AccountNotFound):
+                    owner = await self._accounts.get(job.owner_id)
+            # Worker requests may carry a different account's actor context.
+            with analytics_event_context(
+                cloud_user_id=owner.external_id if owner else None,
+                control_plane_user_id=owner.external_id if owner else None,
+                service_account=owner.is_service_account if owner else None,
+            ):
+                self._analytics.track(
+                    job.owner_id,
+                    AnalyticsEvent.IMPORT_COMPLETED,
+                    analytics_events.build_import_completed_properties(
+                        task, plugin, import_
+                    ),
+                )
         elif isinstance(task, EvaluationTask):
             self._analytics.track(
                 job.owner_id,
