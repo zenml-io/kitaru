@@ -1,0 +1,1 @@
+- The server now sends an analytics identify call when a user first finishes the onboarding survey, carrying the name, email, newsletter choice, framework, and trace provider they entered. Analytics stay off with `KITARU_SERVER_ANALYTICS_OPT_IN=false`.
