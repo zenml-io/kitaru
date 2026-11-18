@@ -50,9 +50,11 @@ if not os.environ.get("KITARU_FUZZ"):
 # test matrix does not install, so guard the import before the module loads.
 pytest.importorskip("schemathesis")
 
+import requests
 import schemathesis
 from fuzz_server import FuzzServer
 from hypothesis import HealthCheck, settings
+from schemathesis import HookContext
 from schemathesis.checks import not_a_server_error
 from schemathesis.core.failures import Failure, FailureGroup, ServerError
 from schemathesis.generation import GenerationMode
@@ -67,6 +69,13 @@ SPEC_PATH = Path(__file__).parents[2] / "openapi" / "openapi.json"
 # the operation again. Empty is the healthy state: every operation is covered.
 KNOWN_FAILURES: dict[tuple[str, str], str] = {}
 
+# Proxies in front of a real deployment commonly reject request lines over
+# 8 KB. Longer URLs only exercise uvicorn's HTTP parser, which refuses a
+# request head once more than 16 KB of it is buffered unfinished. Whether that
+# happens depends on how the bytes arrive, so the same input can pass on
+# replay and Hypothesis reports it as flaky (issue #1538).
+MAX_URL_BYTES = 8 * 1024
+
 # Derandomized runs replay the same inputs every time, which is what a
 # reproducible gate wants. Nightly exploration wants fresh inputs instead.
 DERANDOMIZE = os.environ.get("KITARU_FUZZ_RANDOM") is None
@@ -79,9 +88,22 @@ FUZZ_SETTINGS = settings(
 )
 
 
+def _is_url_within_limit(context: HookContext | None, case: schemathesis.Case) -> bool:
+    """Return whether a case's encoded URL fits within ``MAX_URL_BYTES``."""
+    _ = context
+    # Measure against an HTTP placeholder because requests leaves the query off
+    # the schema's own file:// base URL. The real base URL adds a few bytes.
+    kwargs = case.as_transport_kwargs(base_url="http://127.0.0.1")
+    prepared = requests.Request(
+        method=kwargs["method"], url=kwargs["url"], params=kwargs.get("params")
+    ).prepare()
+    return len(prepared.url or "") <= MAX_URL_BYTES
+
+
 def _load_schema(*modes: GenerationMode) -> Any:
     schema = schemathesis.openapi.from_path(str(SPEC_PATH))
     schema.config.generation.modes = list(modes)
+    schema.hook("filter_case")(_is_url_within_limit)
     return schema
 
 
@@ -121,6 +143,19 @@ def _run(case: schemathesis.Case, server: FuzzServer, checks: list[Any]) -> None
                     f"{case.method.upper()} {case.path}\n{captured}", pytrace=False
                 )
         raise
+
+
+def test_url_limit_measures_encoded_query() -> None:
+    """Drop a case only when its encoded URL is longer than real proxies accept."""
+    operation = schema_hunt["/api/v1/connections"]["GET"]
+    # Each "[" encodes to three bytes, so the raw value alone stays under the
+    # limit while the URL on the wire goes over it.
+    nested = operation.Case(query={"filter": "[" * (MAX_URL_BYTES // 2)})
+    short = operation.Case(query={"sort": "name:asc", "size": 5})
+
+    assert not _is_url_within_limit(None, nested)
+    assert _is_url_within_limit(None, short)
+    assert _is_url_within_limit in schema_hunt.hooks.get_all_by_name("filter_case")
 
 
 def test_run_reports_captured_grouped_failure() -> None:
