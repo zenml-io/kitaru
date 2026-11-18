@@ -84,7 +84,7 @@ class TaskTransitions:
                 properties on tracked events.
             import_repository: Import repository, None skips tracking import
                 task events.
-            account_repository: Accounts used to resolve import owners' contact details.
+            account_repository: Accounts used to resolve import owners' cloud IDs.
         """
         self._tasks = task_repository
         self._jobs = job_repository
@@ -413,7 +413,7 @@ class TaskTransitions:
                     owner = await self._accounts.get(job.owner_id)
             # Worker requests may carry a different account's actor context.
             with analytics_event_context(
-                email=owner.email if owner else None,
+                cloud_user_id=owner.external_id if owner else None,
                 control_plane_user_id=owner.external_id if owner else None,
                 service_account=owner.is_service_account if owner else None,
             ):
