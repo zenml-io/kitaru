@@ -20,7 +20,7 @@ async def test_draft_returns_a_prefilled_issue_link() -> None:
         {
             "request": {
                 "title": "session_read drops tool errors",
-                "problem": "kitaru_session_read with full=true hid a tool error.",
+                "problem": "kitaru_session_read hid a tool error for KITKEY_abc123.",
                 "proposed_fix": "x" * 6000,
             }
         },

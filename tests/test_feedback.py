@@ -4,6 +4,7 @@
 from urllib.parse import parse_qs, urlsplit
 
 from kitaru.feedback import ISSUE_URL, MAX_URL_LENGTH, build_issue_draft
+from kitaru.redaction import redact
 
 
 def _query(url: str) -> dict[str, str]:
@@ -42,6 +43,8 @@ def test_credentials_are_masked_before_encoding() -> None:
     )
 
     assert "abc123secret" not in draft.url
+    # CLI and MCP output redact the link again; that pass must not cut it.
+    assert redact(draft.url) == draft.url
     query = _query(draft.url)
     assert query["title"] == "Leaked KITKEY_***"
     assert "Bearer ***" in query["body"]
