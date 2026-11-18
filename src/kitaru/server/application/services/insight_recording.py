@@ -16,8 +16,14 @@
 from kitaru.api_models.v1.insight import InsightInput
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.application.events import TaskTerminal
+from kitaru.server.application.interfaces.account_repository import AccountRepository
 from kitaru.server.application.interfaces.insight_repository import InsightRepository
 from kitaru.server.application.interfaces.job_repository import JobRepository
+from kitaru.server.application.services.insight_analytics import (
+    track_first_insight_generated,
+)
+from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.domain.account import AccountNotFound
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.insight import Insight
@@ -29,6 +35,8 @@ async def record_task_insights(
     event: TaskTerminal,
     insight_repository: InsightRepository,
     job_repository: JobRepository,
+    account_repository: AccountRepository | None = None,
+    analytics: ServerAnalytics | None = None,
 ) -> None:
     """Write one insight row per result of a completed analysis task.
 
@@ -40,6 +48,8 @@ async def record_task_insights(
         event: TaskTerminal event.
         insight_repository: Insight repository.
         job_repository: Job repository, for the owning job's owner id.
+        account_repository: Accounts used to resolve the owner's analytics identity.
+        analytics: Analytics tracker, None skips tracking.
     """
     task = event.task
     if not isinstance(task, AnalysisTask) or task.status is not TaskStatus.COMPLETED:
@@ -71,6 +81,14 @@ async def record_task_insights(
     # Related resources can disappear while the task runs. A foreign-key
     # violation then leaves nothing to record.
     try:
-        await insight_repository.create_many(insights)
+        insights = await insight_repository.create_many(insights)
     except NotFoundError:
         return
+    if analytics is not None and account_repository is not None:
+        try:
+            owner = await account_repository.get(job.owner_id)
+        except AccountNotFound:
+            return
+        await track_first_insight_generated(
+            insight_repository, insights, owner, analytics
+        )

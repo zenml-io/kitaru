@@ -27,6 +27,9 @@ from kitaru.server.application.models.insight import (
 from kitaru.server.application.services.analytics_events import (
     build_insight_created_properties,
 )
+from kitaru.server.application.services.insight_analytics import (
+    track_first_insight_generated,
+)
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.insight import Insight
@@ -89,6 +92,9 @@ class InsightService:
                     AnalyticsEvent.INSIGHT_CREATED,
                     build_insight_created_properties(insight),
                 )
+        await track_first_insight_generated(
+            self._repository, insights, actor.account, self._analytics
+        )
         return insights
 
     async def get_insight(self, insight_id: uuid.UUID, actor: AuthContext) -> Insight:

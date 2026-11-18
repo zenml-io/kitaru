@@ -617,3 +617,12 @@ async def test_delete_not_found(setup: Setup) -> None:
     missing_id = uuid.uuid4()
     with pytest.raises(InsightNotFound, match=f"Insight {missing_id} was not found"):
         await setup.insights.delete(missing_id)
+
+
+async def test_find_first_id_by_owner(setup: Setup) -> None:
+    """The milestone probe scopes history to its owner and returns the first row."""
+    assert await setup.insights.find_first_id_by_owner(setup.owner_id) is None
+    first = await _create_insight(setup.insights, setup.owner_id, setup.agent_id)
+    await _create_insight(setup.insights, setup.owner_id, setup.agent_id, name="next")
+    assert await setup.insights.find_first_id_by_owner(setup.owner_id) == first.id
+    assert await setup.insights.find_first_id_by_owner(uuid.uuid4()) is None

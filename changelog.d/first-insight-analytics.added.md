@@ -1,0 +1,1 @@
+- Added a first-insight analytics event for onboarding integrations, attributed directly to the hosted Cloud user when available.
