@@ -203,6 +203,7 @@ def _recorded_call(
             cached_input_tokens=tokens.cached_input_tokens or 0,
             output_tokens=tokens.output_tokens or 0,
             reasoning_tokens=tokens.reasoning_tokens or 0,
+            reported=node.tokens is not None,
         ),
         cost=node.cost,
         estimated_input_tokens=input_tokens

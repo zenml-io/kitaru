@@ -601,7 +601,13 @@ def _disagreement(result: CallResult) -> dict[str, Any]:
 
 
 def _mean_tokens(usages: list[Usage]) -> dict[str, float] | None:
-    """Mean token counts per call."""
+    """Mean token counts per call, over the calls whose usage is known.
+
+    A failed request or a recording without token counts carries no usage,
+    and averaging those in as zeros would make a failing candidate look as
+    if it used fewer tokens per call.
+    """
+    usages = [usage for usage in usages if usage.reported]
     if not usages:
         return None
 

@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 
+from kitaru_model_swap.endpoint import Usage
 from kitaru_model_swap.html import render_section
 from kitaru_model_swap.params import ModelSwapParams
 from kitaru_model_swap.pricing import resolve_price
@@ -203,3 +204,32 @@ def test_cheaper_comparable_candidate_is_still_picked() -> None:
         "calls), within 10 points of today's model: 95% vs today's model's own "
         "100% on the calls both answered."
     )
+
+
+def test_failed_replies_do_not_lower_tokens_per_call() -> None:
+    # Half the replies failed without usage; the answered ones used 100 input
+    # tokens each, so that is the candidate's tokens per call, not 50.
+    calls = [call(i) for i in range(10)]
+    results = [reply(c, "reference", "1") for c in calls]
+    for i, c in enumerate(calls):
+        answered = reply(c, "cheap", "0.1")
+        assert answered.reply is not None
+        results.append(
+            answered
+            if i % 2
+            else replace(
+                answered,
+                agreement=None,
+                cost=None,
+                reply=replace(
+                    answered.reply,
+                    tool_calls=(),
+                    failure="timeout",
+                    usage=Usage(reported=False),
+                ),
+            )
+        )
+    cheap = report(calls, results)["candidates"][1]
+
+    assert cheap["failure_rate"] == 0.5
+    assert cheap["tokens_per_call"]["input_tokens"] == 100
