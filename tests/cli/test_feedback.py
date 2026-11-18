@@ -21,7 +21,9 @@ def test_feedback_prints_a_prefilled_issue_link(capsys) -> None:
             "--title",
             "session read hides errors",
             "--problem",
-            "kitaru session read dropped an error node.",
+            "kitaru session read dropped an error node for KITKEY_abc123.",
+            "--proposed-fix",
+            "Keep error nodes in full mode.",
         ]
     )
 
@@ -32,7 +34,12 @@ def test_feedback_prints_a_prefilled_issue_link(capsys) -> None:
     ]
     query = parse_qs(urlsplit(payload["links"]["issue"]).query)
     assert query["title"] == ["CLI feedback: session read hides errors"]
+    # Output redaction runs over the link too and must leave it whole.
     assert query["body"] == [payload["item"]["body"]]
+    assert "for KITKEY_***\n" in payload["item"]["body"]
+    assert (
+        "### Proposed fix\n\nKeep error nodes in full mode." in payload["item"]["body"]
+    )
     assert ", CLI, Python " in payload["item"]["body"]
     assert payload["item"]["truncated"] is False
 
