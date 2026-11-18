@@ -145,14 +145,11 @@ class ServerAnalytics:
         if not self._client.enabled:
             return
         properties = dict(properties or {})
-        properties.pop("cloud_user_id", None)
         actor = current_actor.get()
         if actor is not None:
             properties["service_account"] = actor.is_service_account
             if actor.external_id is not None:
                 properties["control_plane_user_id"] = actor.external_id
-                if actor.id == user_id:
-                    properties["cloud_user_id"] = actor.external_id
         properties.update(current_event_context.get().properties)
         self._get_buffer().messages.append(
             _BufferedTrack(user_id=user_id, event=event, properties=properties)

@@ -1,4 +1,4 @@
-"""Regular import telemetry exposes its owner's Cloud API identity."""
+"""Regular import telemetry exposes its owner's email."""
 
 import uuid
 from datetime import UTC, datetime
@@ -31,18 +31,24 @@ from kitaru_test_support import (
 
 
 @pytest.mark.parametrize("hosted", [False, True])
+@pytest.mark.parametrize("email", ["owner@example.com", None])
 @pytest.mark.parametrize("count", [0, 3])
 @pytest.mark.parametrize("failed", [False, True])
 @pytest.mark.parametrize("commit", [False, True])
-async def test_import_events_use_owner_cloud_id_on_every_import(
-    hosted: bool, count: int, failed: bool, commit: bool
+async def test_import_events_use_owner_email_on_every_import(
+    hosted: bool, email: str | None, count: int, failed: bool, commit: bool
 ) -> None:
     register_analytics_listeners()
     accounts = FakeAccountRepository()
     owner = await accounts.create(
-        Account(name="owner", external_id=uuid.uuid4() if hosted else None)
+        Account(name="owner", external_id=uuid.uuid4() if hosted else None, email=email)
     )
-    worker = Account(name="worker", external_id=uuid.uuid4(), is_service_account=True)
+    worker = Account(
+        name="worker",
+        external_id=uuid.uuid4(),
+        is_service_account=True,
+        email="worker@example.com",
+    )
     tasks = FakeTaskRepository()
     jobs = FakeJobRepository(tasks=tasks)
     imports = FakeImportRepository()
@@ -103,41 +109,9 @@ async def test_import_events_use_owner_cloud_id_on_every_import(
     for user_id, event, properties in events:
         assert user_id == owner.id
         assert event == "Import Completed"
-        assert properties["cloud_user_id"] == owner.external_id
+        assert properties["email"] == owner.email
         assert properties["control_plane_user_id"] == owner.external_id
         assert properties["service_account"] is False
         assert properties["status"] == ("failed" if failed else "completed")
         assert properties["session_count"] == count
-        assert properties["cloud_user_id"] != worker.external_id
-
-
-@pytest.mark.parametrize("hosted", [False, True])
-@pytest.mark.parametrize("same_actor", [False, True])
-async def test_regular_actor_events_include_only_known_cloud_id(
-    hosted: bool, same_actor: bool
-) -> None:
-    register_analytics_listeners()
-    actor = Account(name="person", external_id=uuid.uuid4() if hosted else None)
-    subject_id = actor.id if same_actor else uuid.uuid4()
-    client = MagicMock(spec=AnalyticsClient)
-    client.enabled = True
-    token = current_actor.set(actor)
-    try:
-        async with AsyncSession() as session:
-            await session.begin()
-            analytics = ServerAnalytics(client=client, session=session)
-            analytics.track(
-                subject_id,
-                AnalyticsEvent.SESSION_COMPLETED,
-                {"cloud_user_id": uuid.uuid4()},
-            )
-            await session.commit()
-    finally:
-        current_actor.reset(token)
-    client.track.assert_called_once()
-    user_id, _, properties = client.track.call_args.args
-    assert user_id == subject_id
-    if hosted and same_actor:
-        assert properties["cloud_user_id"] == actor.external_id
-    else:
-        assert "cloud_user_id" not in properties
+        assert properties["email"] != worker.email
