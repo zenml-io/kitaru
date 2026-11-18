@@ -44,9 +44,10 @@ def test_feedback_prints_a_prefilled_issue_link(capsys) -> None:
     assert payload["item"]["truncated"] is False
 
 
-def test_feedback_rejects_an_empty_title(capsys) -> None:
+@pytest.mark.parametrize("title", [" ", "错" * 121])
+def test_feedback_rejects_an_empty_or_oversized_title(capsys, title: str) -> None:
     exit_code = app_module.main(
-        ["feedback", "--output", "json", "--title", " ", "--problem", "It broke."]
+        ["feedback", "--output", "json", "--title", title, "--problem", "It broke."]
     )
 
     assert exit_code == 2

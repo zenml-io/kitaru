@@ -24,6 +24,8 @@ from kitaru.redaction import redact
 ISSUE_URL = "https://github.com/zenml-io/kitaru/issues/new"
 # GitHub rejects issue links much longer than about 8 KB, so stay below that.
 MAX_URL_LENGTH = 7500
+# Titles are never cut, so a cap keeps them from using up the link budget.
+MAX_TITLE_LENGTH = 120
 TRUNCATION_MARKER = "\n\n[cut to fit the issue link]"
 
 Section = tuple[str, str]
