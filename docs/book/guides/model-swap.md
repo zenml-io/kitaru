@@ -154,6 +154,22 @@ uv run kitaru insight report --import-id IMPORT_ID --out report.html
 
 A spend cap needs a price for every candidate; the analyzer refuses to start when one is unknown, rather than spending without a limit. You can also select the analyzer on the import itself with `kitaru session import ... --analyzer kitaru/model-swap@latest --analyzer-params ...`.
 
+### Sessions that are not one import
+
+To compare models on sessions recorded live through an adapter, on part of an import, or on several imports of one agent, select the sessions with `kitaru session analyze` instead. It takes the same `--analyzer` and `--analyzer-params` options; the "Analyze any set of sessions" section of [Post-import insights](post-import-insights.md) lists the selectors.
+
+```bash
+uv run kitaru session analyze \
+  --agent returns-resolver \
+  --tag refunds \
+  --analyzer kitaru/model-swap@latest \
+  --analyzer-params 'kitaru/model-swap@latest={"dry_run": true, "candidates": [...]}' \
+  --wait -o json
+uv run kitaru insight report --task-id TASK_ID --out report.html
+```
+
+Insights from a session analysis are not filed under an import, so the report takes the analysis task instead: `TASK_ID` is the `id` under `tasks` in the command's output. When the selection is only part of the agent's traffic, set `sessions_per_month` yourself, because the derived value projects the selected sessions, not the whole agent.
+
 ### Parameters
 
 | Parameter | Default | Meaning |
@@ -167,7 +183,7 @@ A spend cap needs a price for every candidate; the analyzer refuses to start whe
 | `tool_descriptions` | `{}` | Optional tool descriptions to go with `tool_schemas`. |
 | `use_recorded_tools` | `true` | Use tool definitions recorded on each call. |
 | `infer_missing_schemas` | `false` | Infer a loose schema from recorded arguments when no schema exists. |
-| `sessions_per_month` | derived | Traffic for monthly projections. Derived from the import's time span when it covers at least a day. |
+| `sessions_per_month` | derived | Traffic for monthly projections. Derived from the analyzed sessions' time span when it covers at least a day. |
 | `judge` | none | A judge that rules whether differing answers or arguments are equivalent: a decision model (see [Judge the differences quickly](#judge-the-differences-quickly)) or a candidate-shaped chat model. |
 | `concurrency` | `4` | Requests in flight. |
 | `time_budget_seconds` | `600` | Counted from the start of the analyzer task, including fetching sessions. When it ends, the analyzer stops fetching sessions and starting new calls, and cuts off calls still running, so the analysis returns results before the analyzer task timeout. The report counts sessions that were not fetched. |
@@ -275,7 +291,7 @@ How to read the agreement numbers:
 
 After review, confirm the finalists end to end with a [replay experiment](replay-and-overrides.md) on the reviewed sessions when your agent was recorded through an adapter that supports model overrides.
 
-Each run stores its own insights. The report renders the most recent model-swap run of the import, followed by the import's other insights. A card from an earlier run can still appear under **Other insights** when that run stored it under a name the latest run no longer uses. Session links use the dashboard URL the server reports when the analysis runs; they are left out when the server reports none. The full report is also available as JSON in the `kitaru.model_swap/v1` metadata of the `model-swap-summary` insight, for scripts and coding agents.
+Each run stores its own insights. With `--import-id`, the report renders the most recent model-swap run of the import, followed by the import's other insights. With `--task-id`, it renders that one analysis task's insights. A card from an earlier run can still appear under **Other insights** when that run stored it under a name the latest run no longer uses. Session links use the dashboard URL the server reports when the analysis runs; they are left out when the server reports none. The full report is also available as JSON in the `kitaru.model_swap/v1` metadata of the `model-swap-summary` insight, for scripts and coding agents.
 
 ## Supported trace shapes
 

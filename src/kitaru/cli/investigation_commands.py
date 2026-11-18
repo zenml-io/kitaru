@@ -264,14 +264,22 @@ async def insight_delete(
     insight_app,
     build_spec(
         ("insight", "report"),
-        "Render an import's insights as a self-contained HTML file.",
+        "Render an import's or analysis task's insights as a self-contained HTML file.",
         parameters=(
             ParameterSpec(
                 "--import-id",
                 "UUID",
                 "option",
-                True,
+                False,
                 "Import whose insights to render.",
+            ),
+            ParameterSpec(
+                "--task-id",
+                "UUID",
+                "option",
+                False,
+                "Analysis task whose insights to render, for analyses started "
+                "with `kitaru session analyze`.",
             ),
             ParameterSpec(
                 "--out", "path", "option", False, "HTML file to write (report.html)."
@@ -285,13 +293,14 @@ async def insight_delete(
 )
 async def insight_report_command(
     *,
-    import_id: Annotated[uuid.UUID, Parameter(name="--import-id")],
+    import_id: Annotated[uuid.UUID | None, Parameter(name="--import-id")] = None,
+    task_id: Annotated[uuid.UUID | None, Parameter(name="--task-id")] = None,
     out: Annotated[Path, Parameter(name="--out")] = Path("report.html"),
 ) -> CommandResult:
-    """Render the insights of one import to an HTML file."""
+    """Render the insights of one import or analysis task to an HTML file."""
     async with invocation_context.open_asset_client() as client:
         return await insight_report.write_insight_report(
-            client, import_id=import_id, out=out
+            client, import_id=import_id, task_id=task_id, out=out
         )
 
 

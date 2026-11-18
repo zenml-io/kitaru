@@ -89,8 +89,8 @@ def _lookup(candidate: Candidate, usage: Usage) -> PriceCalculation:
     Raises:
         LookupError: The table does not know the model.
     """
-    # Some providers report cached tokens outside the input count, and the
-    # table rejects a cached count above the input count.
+    # The table rejects a cached count above the input count. Usage read from
+    # an endpoint or a recording already counts cached tokens in the input.
     tokens = PriceUsage(
         input_tokens=usage.input_tokens,
         cache_read_tokens=min(usage.cached_input_tokens, usage.input_tokens),

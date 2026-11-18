@@ -56,7 +56,7 @@ kitaru analyzer register model-judge \
 
 ## Add a section to the HTML report
 
-`kitaru insight report --import-id IMPORT_ID --out report.html` renders an import's insights as one self-contained HTML file, drawing each insight as a card from its data. An analyzer whose results need more than cards can store its own rendered section in one insight's metadata:
+`kitaru insight report --import-id IMPORT_ID --out report.html` renders an import's insights as one self-contained HTML file (`--task-id TASK_ID` renders one analysis task's insights instead, for analyses started with `kitaru session analyze`), drawing each insight as a card from its data. An analyzer whose results need more than cards can store its own rendered section in one insight's metadata:
 
 ```python
 InsightInput(

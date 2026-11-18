@@ -17,6 +17,7 @@ import hashlib
 import heapq
 import json
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -93,6 +94,7 @@ class Collection:
                 self.first_started = started
             if self.last_started is None or started > self.last_started:
                 self.last_started = started
+        separate = _find_separate_cache_counts(session.nodes)
         for node in session.nodes:
             if node.node_type is not NodeType.LLM_CALL:
                 continue
@@ -118,12 +120,16 @@ class Collection:
             rank = _get_sample_rank(node.id)
             if len(kept) < self.max_per_group:
                 heapq.heappush(kept, (-rank, len(self.calls)))
-                self.calls.append(_recorded_call(session.session.id, node, result))
+                self.calls.append(
+                    _recorded_call(session.session.id, node, result, separate)
+                )
             elif rank < -kept[0][0]:
                 # Reuse the slot of the highest-ranked kept call it displaces.
                 index = kept[0][1]
                 heapq.heapreplace(kept, (-rank, index))
-                self.calls[index] = _recorded_call(session.session.id, node, result)
+                self.calls[index] = _recorded_call(
+                    session.session.id, node, result, separate
+                )
 
 
 def _get_sample_rank(node_id: UUID) -> int:
@@ -132,25 +138,74 @@ def _get_sample_rank(node_id: UUID) -> int:
     return int.from_bytes(digest[:8])
 
 
+@dataclass(frozen=True)
+class SeparateCacheCounts:
+    """Models whose recorded input tokens leave out cache reads or writes."""
+
+    reads: frozenset[str | None] = frozenset()
+    writes: frozenset[str | None] = frozenset()
+
+
+def _find_separate_cache_counts(
+    nodes: Iterable[SessionNodeResponse],
+) -> SeparateCacheCounts:
+    """Find the models of one session that count cache tokens beside the input.
+
+    Sources differ on whether `input_tokens` includes cache reads and writes.
+    A call that reports more of either than input tokens must count it
+    separately, and one source records every call of a model the same way.
+    Reads and writes are settled independently, since some sources include
+    one and not the other.
+    """
+    reads: set[str | None] = set()
+    writes: set[str | None] = set()
+    for node in nodes:
+        tokens = node.tokens
+        if node.node_type is not NodeType.LLM_CALL or tokens is None:
+            continue
+        model = node.model or node.requested_model
+        input_tokens = tokens.input_tokens or 0
+        if (tokens.cached_input_tokens or 0) > input_tokens:
+            reads.add(model)
+        if (tokens.cache_write_input_tokens or 0) > input_tokens:
+            writes.add(model)
+    return SeparateCacheCounts(frozenset(reads), frozenset(writes))
+
+
 def _recorded_call(
-    session_id: UUID, node: SessionNodeResponse, request: ReplayRequest
+    session_id: UUID,
+    node: SessionNodeResponse,
+    request: ReplayRequest,
+    separate: SeparateCacheCounts,
 ) -> RecordedCall:
-    """Pair a rebuilt request with the recorded usage and cost."""
+    """Pair a rebuilt request with the recorded usage and cost.
+
+    The recorded input is the whole prompt: cache reads and writes are added
+    where the call's source counts them beside the input tokens. A replay
+    sends that whole prompt to a candidate with a cold cache, so estimates
+    and token comparisons need the full size.
+    """
     tokens = node.tokens or TokenUsage()
+    model = node.model or node.requested_model
+    input_tokens = tokens.input_tokens or 0
+    if model in separate.reads:
+        input_tokens += tokens.cached_input_tokens or 0
+    if model in separate.writes:
+        input_tokens += tokens.cache_write_input_tokens or 0
     return RecordedCall(
         session_id=session_id,
         node_id=node.id,
         node_name=node.name,
-        model=node.model or node.requested_model,
+        model=model,
         request=request,
         usage=Usage(
-            input_tokens=tokens.input_tokens or 0,
+            input_tokens=input_tokens,
             cached_input_tokens=tokens.cached_input_tokens or 0,
             output_tokens=tokens.output_tokens or 0,
             reasoning_tokens=tokens.reasoning_tokens or 0,
         ),
         cost=node.cost,
-        estimated_input_tokens=tokens.input_tokens
+        estimated_input_tokens=input_tokens
         or len(json.dumps(request.messages) + json.dumps(request.tools))
         // _CHARS_PER_TOKEN,
     )

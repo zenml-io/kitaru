@@ -88,7 +88,7 @@ CHART = insight(
 
 def test_renders_every_insight_as_a_card() -> None:
     document = render_insight_report(
-        [CHART, insight("summary-text")], import_id=IMPORT_ID
+        [CHART, insight("summary-text")], source="Import x"
     )
 
     assert "<title>Insight report</title>" in document
@@ -102,7 +102,7 @@ def test_embeds_sections_and_hides_what_they_cover() -> None:
     summary = analyzer_insight("swap-summary", "<h2>Swap section</h2>", ["swap-cost"])
     covered = analyzer_insight("swap-cost")
 
-    document = render_insight_report([summary, covered, CHART], import_id=IMPORT_ID)
+    document = render_insight_report([summary, covered, CHART], source="Import x")
 
     assert "<h2>Swap section</h2>" in document
     assert "swap-cost content" not in document
@@ -117,7 +117,7 @@ def test_only_the_latest_section_per_name_is_embedded() -> None:
     )
     newer = analyzer_insight("swap-summary", "<p>new run</p>")
 
-    document = render_insight_report([newer, older], import_id=IMPORT_ID)
+    document = render_insight_report([newer, older], source="Import x")
 
     assert "new run" in document
     assert "old run" not in document
@@ -126,7 +126,7 @@ def test_only_the_latest_section_per_name_is_embedded() -> None:
 def test_page_forbids_scripts_and_escapes_card_content() -> None:
     hostile = insight("x", {"type": "text", "content": "<script>alert(1)</script>"})
 
-    document = render_insight_report([hostile], import_id=IMPORT_ID)
+    document = render_insight_report([hostile], source="Import x")
 
     assert "default-src 'none'" in document
     assert "<script>" not in document
@@ -140,7 +140,7 @@ def test_malformed_sections_fall_back_to_cards() -> None:
         analyzer_version_id=ANALYZER_VERSION_ID,
     )
 
-    document = render_insight_report([broken], import_id=IMPORT_ID)
+    document = render_insight_report([broken], source="Import x")
 
     assert "x content" in document
 
@@ -151,7 +151,7 @@ def test_section_without_analyzer_version_is_drawn_as_a_card() -> None:
     )
     covered = analyzer_insight("swap-cost")
 
-    document = render_insight_report([forged, covered], import_id=IMPORT_ID)
+    document = render_insight_report([forged, covered], source="Import x")
 
     assert "<h2>Injected</h2>" not in document
     assert "swap-summary content" in document
@@ -166,7 +166,7 @@ def test_section_meta_base_and_link_tags_are_stripped() -> None:
         '<me<meta>ta http-equiv="refresh">',
     )
 
-    document = render_insight_report([summary], import_id=IMPORT_ID)
+    document = render_insight_report([summary], source="Import x")
 
     assert "<p>kept</p>" in document
     assert "refresh" not in document.lower()
@@ -189,7 +189,7 @@ def test_rerun_cards_render_only_the_newest_insight_per_name() -> None:
         analyzer_version_id=ANALYZER_VERSION_ID,
     )
 
-    document = render_insight_report([newer, older], import_id=IMPORT_ID)
+    document = render_insight_report([newer, older], source="Import x")
 
     assert "second run" in document
     assert "first run" not in document
@@ -204,7 +204,7 @@ def test_a_rerun_after_a_new_analyzer_version_replaces_the_old_run() -> None:
     )
     new = analyzer_insight("swap-summary", "<p>new run</p>")
 
-    document = render_insight_report([old, new], import_id=IMPORT_ID)
+    document = render_insight_report([old, new], source="Import x")
 
     assert "new run" in document
     assert "old run" not in document
@@ -219,7 +219,7 @@ def test_hand_made_insights_sharing_a_name_are_all_kept() -> None:
     first = insight("summary", {"type": "text", "content": "by hand"})
     second = insight("summary", {"type": "text", "content": "also by hand"})
 
-    document = render_insight_report([by_analyzer, first, second], import_id=IMPORT_ID)
+    document = render_insight_report([by_analyzer, first, second], source="Import x")
 
     assert "from analyzer" in document
     assert "by hand" in document
@@ -231,7 +231,7 @@ def test_covers_hide_analyzer_cards_but_not_hand_made_ones() -> None:
     covered = analyzer_insight("swap-cost", analyzer_version_id=uuid.uuid4())
     by_hand = insight("notes", {"type": "text", "content": "my own notes"})
 
-    document = render_insight_report([summary, covered, by_hand], import_id=IMPORT_ID)
+    document = render_insight_report([summary, covered, by_hand], source="Import x")
 
     assert "swap-cost content" not in document
     assert "my own notes" in document
@@ -257,12 +257,16 @@ def use_client(monkeypatch: pytest.MonkeyPatch, client: StubClient) -> None:
     monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
 
 
-def report_argv(out: Path) -> list[str]:
+TASK_ID = uuid.UUID("01990000-0000-7000-8000-000000000030")
+
+
+def report_argv(
+    out: Path, selector: tuple[str, ...] = ("--import-id", str(IMPORT_ID))
+) -> list[str]:
     return [
         "insight",
         "report",
-        "--import-id",
-        str(IMPORT_ID),
+        *selector,
         "--out",
         str(out),
         "-o",
@@ -303,4 +307,46 @@ def test_command_fails_without_insights(
 
     assert app_module.main(report_argv(out)) == 4
     assert not out.exists()
+    capsys.readouterr()
+
+
+def test_command_renders_one_analysis_task(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Insights of a session analysis have no import, so the task selects them."""
+    client = StubClient([analyzer_insight("swap-summary", "<p>swap</p>")])
+    use_client(monkeypatch, client)
+    out = tmp_path / "report.html"
+
+    assert app_module.main(report_argv(out, ("--task-id", str(TASK_ID)))) == 0
+
+    response = json.loads(capsys.readouterr().out)
+    assert response["item"]["task_id"] == str(TASK_ID)
+    assert "import_id" not in response["item"]
+    [params] = client.list_params
+    assert params.filter is not None
+    assert params.filter.model_dump()["field"] == "task_id"
+    assert params.filter.model_dump()["value"] == str(TASK_ID)
+    assert f"Analysis task {TASK_ID}" in out.read_text()
+
+
+@pytest.mark.parametrize(
+    "selector",
+    [(), ("--import-id", str(IMPORT_ID), "--task-id", str(TASK_ID))],
+)
+def test_command_needs_exactly_one_selector(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    selector: tuple[str, ...],
+) -> None:
+    client = StubClient([CHART])
+    use_client(monkeypatch, client)
+    out = tmp_path / "r.html"
+
+    assert app_module.main(report_argv(out, selector)) == 2
+    assert not out.exists()
+    assert client.list_params == []
     capsys.readouterr()
