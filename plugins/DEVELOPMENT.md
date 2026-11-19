@@ -107,7 +107,7 @@ docker run --rm kitaru-plugin-e2e:local \
   python -c 'from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS; print(f"definitions={len(DEFAULT_PLUGIN_DEFINITIONS)}"); [print(d.kind.value, d.name, d.requirement, d.entrypoint) for d in DEFAULT_PLUGIN_DEFINITIONS]'
 ```
 
-The catalog includes importers, evaluators, and both post-import insights analyzers. Adapter distributions are installed directly by agent projects and are not registered in this catalog.
+The catalog includes importers, evaluators, both post-import insights analyzers, and the model-swap analyzer. Adapter distributions are installed directly by agent projects and are not registered in this catalog.
 
 ## Start the candidate server
 
@@ -282,6 +282,7 @@ Use the package directory and distribution name from this table:
 | `langsmith-importer` | `kitaru-langsmith-importer` | `python/kitaru-langsmith-importer/vX.Y.Z` |
 | `mastra-importer` | `kitaru-mastra-importer` | `python/kitaru-mastra-importer/vX.Y.Z` |
 | `mlflow-importer` | `kitaru-mlflow-importer` | `python/kitaru-mlflow-importer/vX.Y.Z` |
+| `model-swap` | `kitaru-model-swap` | `python/kitaru-model-swap/vX.Y.Z` |
 | `openai-agents` | `kitaru-openai-agents` | `python/kitaru-openai-agents/vX.Y.Z` |
 | `pydantic-ai` | `kitaru-pydantic-ai` | `python/kitaru-pydantic-ai/vX.Y.Z` |
 | `typesafe-evaluator` | `kitaru-typesafe-evaluator` | `python/kitaru-typesafe-evaluator/vX.Y.Z` |
