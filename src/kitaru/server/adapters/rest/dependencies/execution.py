@@ -21,6 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.db.encryption import AesGcmCipher
+from kitaru.server.adapters.db.repositories.account_repository import (
+    SQLAccountRepository,
+)
 from kitaru.server.adapters.db.repositories.agent_repository import (
     SQLAgentRepository,
 )
@@ -150,6 +153,7 @@ def _build_task_transitions(
         analytics=analytics,
         plugin_repository=SQLPluginRepository(session),
         import_repository=SQLImportRepository(session),
+        account_repository=SQLAccountRepository(session),
     )
 
 
