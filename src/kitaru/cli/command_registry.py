@@ -164,6 +164,11 @@ local_app = App(
     help=GROUP_DESCRIPTIONS["local"],
     default_parameter=Parameter(negative=False),
 )
+workspace_app = App(
+    name="workspace",
+    help=GROUP_DESCRIPTIONS["workspace"],
+    default_parameter=Parameter(negative=False),
+)
 agent_app.command(agent_version_app, name="version")
 cohort_app.command(cohort_version_app, name="version")
 investigation_app.command(investigation_session_app, name="session")
@@ -189,6 +194,7 @@ app.command(worker_app, name="worker")
 app.command(job_app, name="job")
 app.command(replay_app, name="replay")
 app.command(local_app, name="local")
+app.command(workspace_app, name="workspace")
 
 FUNCTION_SPECS: dict[Callable[..., Any], CommandSpec] = {}
 

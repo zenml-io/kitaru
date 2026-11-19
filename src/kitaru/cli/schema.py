@@ -90,6 +90,7 @@ GROUP_DESCRIPTIONS = {
     "worker": "Run and inspect generic local workers.",
     "job": "Inspect, watch, and cancel jobs.",
     "local": "Inspect the CLI-owned local Kitaru deployment.",
+    "workspace": "Copy workspace content between Kitaru servers.",
 }
 
 
