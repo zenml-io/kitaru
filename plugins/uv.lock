@@ -130,7 +130,7 @@ wheels = [
 
 [[package]]
 name = "arize-phoenix-client"
-version = "3.6.0"
+version = "3.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
@@ -142,9 +142,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6b/f3/350ee5e56455f0813bf93bbd351c8be2d159babcb74cef46af058582a5b6/arize_phoenix_client-3.6.0.tar.gz", hash = "sha256:096733f0b95ac3456e1bd99ae639c2ae3b0b395ac1c651eefd050fd1ecb9c215", size = 310293, upload-time = "2026-10-30T03:39:40.179Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/bb/2baef57a69187b85c00e57b0c439ad1836b634a36ff9dbe38ae3fe9bf43d/arize_phoenix_client-3.7.0.tar.gz", hash = "sha256:79e0e3f4351ff9a6fc30d05144adf9e17bb5ca07b7b0bbcb2a66dcf95d94f63b", size = 316341, upload-time = "2026-11-05T03:10:32.156Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1a/bb/0add971fcf095ca2f0ea9bdd73599db1abb52a4482eae6015debba6e3cca/arize_phoenix_client-3.6.0-py3-none-any.whl", hash = "sha256:6ab26e95fb2cc57d5e289471a4aa12095fee44e930531320c2be0cbdcd5dd3f6", size = 268352, upload-time = "2026-10-30T03:39:38.672Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/61/7a011a51ef9b515fccbdb4e72326b0c1bdae009089ce24e25c14853de9bb/arize_phoenix_client-3.7.0-py3-none-any.whl", hash = "sha256:20a39e524a124ea48a61a6619f2997b938e9fe36996cf686ab2624aadbc3899b", size = 272051, upload-time = "2026-11-05T03:10:30.296Z" },
 ]
 
 [[package]]
@@ -294,7 +294,7 @@ wheels = [
 
 [[package]]
 name = "braintrust"
-version = "0.49.1"
+version = "0.49.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
@@ -309,9 +309,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/75/ec/d94918fed23ae539e7d5be4c30d3641403161d2d46a6630e646862973086/braintrust-0.49.1.tar.gz", hash = "sha256:e1322dfceeaac0170610de258535afb912aaa2d592d3e8bdb244e0e4123edea1", size = 627142, upload-time = "2026-10-30T18:32:27.5Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e5/d1/e2d6e821e0c11ce58d59f6f3af7c61106d8cb2b1df283ba42278540d978a/braintrust-0.49.3.tar.gz", hash = "sha256:ce67fd6cc484e0052452f84e3eb41a1913096b6271ae3f4918300f13c2629051", size = 629996, upload-time = "2026-11-06T19:02:01.95Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/97/6c/b9f557200c2ff855fd7a98297a3c2d460b8fd7c68d5f6c69fbe6b613f694/braintrust-0.49.1-py3-none-any.whl", hash = "sha256:e912b0187e3c9c3a031f86b678d56681e36fbf4ed64b66ac9c0b608c3dc61050", size = 757314, upload-time = "2026-10-30T18:32:25.419Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/45/62fd83dc6d1b1d73498cc20f8bafa5e0cfed6b1ef6a0c88c00510ed032b4/braintrust-0.49.3-py3-none-any.whl", hash = "sha256:e14fccd6d8a197af24571baa56cb58fabbfb131c0d1709d3ce148a7349494291", size = 758822, upload-time = "2026-11-06T19:01:59.722Z" },
 ]
 
 [[package]]
@@ -1859,7 +1859,7 @@ wheels = [
 
 [[package]]
 name = "langfuse"
-version = "5.1.0"
+version = "5.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "backoff" },
@@ -1872,9 +1872,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/45/83/47ed47d5404a15da9a4176dd40f53b173bfa3eebff155a13002b6a3da9d6/langfuse-5.1.0.tar.gz", hash = "sha256:364afbfdfb44b9ae40feba73d08938c8c823a0101c85f3d466dc49d09951b286", size = 371201, upload-time = "2026-10-30T16:05:28.665Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/37/b3/65dbc94d809676053b65e89fda729ef7d8a1d13bbb89f2ab407639f631f2/langfuse-5.2.0.tar.gz", hash = "sha256:8cde9e91b44b53444906af9b37efa9c29c647a9f45f9f8435a638026cb3d4693", size = 383092, upload-time = "2026-11-05T09:53:48.439Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0a/22/36962b043c6f2b8a1612e596670e64bb4b7137c52690aeb9f3b29dc4773d/langfuse-5.1.0-py3-none-any.whl", hash = "sha256:de947b911ead9d95c56d8592b172b7f84953789c430aa0117045f1f4b6e5a6d3", size = 641284, upload-time = "2026-10-30T16:05:26.931Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/48/715e2b612d5d20989e4a338c27d78bef43de327f2192c9b20421f5648868/langfuse-5.2.0-py3-none-any.whl", hash = "sha256:4763cbad358960f1036078a4c6e9f86f04690ea566541709c2c40aa1998e2b0f", size = 660151, upload-time = "2026-11-05T09:53:49.817Z" },
 ]
 
 [[package]]
@@ -1963,14 +1963,14 @@ wheels = [
 
 [[package]]
 name = "logfire"
-version = "5.4.0"
+version = "5.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "logfire-sdk" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/42/f8/91f1cad432053c3b738855b555d21cd63bc9a4baeae41c3eb82428524833/logfire-5.4.0.tar.gz", hash = "sha256:cdf55516ac34244a19dfe2dc9780c904839a2deb932d1b9676df2430583963eb", size = 3256, upload-time = "2026-10-26T15:17:53.151Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/14/e43f91c9c422e23585379a50bd50d111a1b83e348421bafea365a412acd1/logfire-5.5.0.tar.gz", hash = "sha256:8395d3850e4f20f9fb6dd167d442139ea36ff45ba60234d76e4d742e12079e11", size = 3275, upload-time = "2026-11-07T01:00:16.716Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/64/6d/527e1193306920d2d067f55175ebab00518bc1a70993a1bb6f21de4efb8a/logfire-5.4.0-py3-none-any.whl", hash = "sha256:62141324530af622271070627316a9c3aca2bfbd2467144db31ec481d15d56d1", size = 3087, upload-time = "2026-10-26T15:17:48.326Z" },
+    { url = "https://files.pythonhosted.org/packages/04/44/ff0578cc20b2b39588f0e1532f83e6e087e6d5c6945b4277133f9fe0d294/logfire-5.5.0-py3-none-any.whl", hash = "sha256:e2f414cbf7be6175327d1acfbff4c96e725fd8ae8b6a30fe01367b5802614e1e", size = 3095, upload-time = "2026-11-07T01:00:11.653Z" },
 ]
 
 [[package]]
@@ -1984,7 +1984,7 @@ wheels = [
 
 [[package]]
 name = "logfire-sdk"
-version = "5.4.0"
+version = "5.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
@@ -1999,9 +1999,9 @@ dependencies = [
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0d/03/f55c252dfcf7b166f514ed8500da4a2e6492acb5210b7e5e8a6e8d479b9a/logfire_sdk-5.4.0.tar.gz", hash = "sha256:85556016008f824b3e72df85fd1ec7edab56f95394631eb88ed1bb7603862d14", size = 1461661, upload-time = "2026-10-26T15:17:55.754Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b5/b3/835d651a7f492616caa384039499fcbf2ae554827e73037f5d11ab9ccb3a/logfire_sdk-5.5.0.tar.gz", hash = "sha256:34179f9efc69a2162bf62d861098ba3b65cf832400cfb18cc42de726b102792c", size = 1487654, upload-time = "2026-11-07T01:00:19.382Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/1e/4cc2503ed7037bb21242900f078d6283c7c59ed0dae7ad2436f52c13c858/logfire_sdk-5.4.0-py3-none-any.whl", hash = "sha256:81901c0d7e44e1daaeec5b512e177d09489f35e52b6cc2ae717efa3250a061d1", size = 1001433, upload-time = "2026-10-26T15:17:51.662Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/e0/9b8a02344f3fa2d6cf404661a5e3ad20b1d829923e801c107fb3f61016d9/logfire_sdk-5.5.0-py3-none-any.whl", hash = "sha256:dba84c025f09426c00161daf5fd6e3ba87896a329478febf931bc8e202013a83", size = 1023393, upload-time = "2026-11-07T01:00:15Z" },
 ]
 
 [[package]]
@@ -2151,7 +2151,7 @@ wheels = [
 
 [[package]]
 name = "mlflow-tracing"
-version = "3.17.2"
+version = "3.18.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cachetools" },
@@ -2163,9 +2163,9 @@ dependencies = [
     { name = "protobuf" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/af/81/bf76610e755643d454fe1eb52fd6aae99d2e7d472a4a4cd119fa11a7a653/mlflow_tracing-3.17.2.tar.gz", hash = "sha256:35da9f6cc450feae7173941d0d119391f6fe3a41973c0a28ae4a021e6e285c99", size = 1688723, upload-time = "2026-10-21T02:07:48.333Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/83/44/287497466417d3ce106a54daee21aa4ee70520e77e8e04dd8be1be356e0b/mlflow_tracing-3.18.0.tar.gz", hash = "sha256:1e8300b2718be455de2765ea1db293603636bc3fc38852f0ba25d61761616d27", size = 1762529, upload-time = "2026-11-03T23:40:55.893Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/db/6b/ebac062a2c6619c16feaafba349b07c1f03ce6b0b0f6d3af79d936a17380/mlflow_tracing-3.17.2-py3-none-any.whl", hash = "sha256:1502aa892144cbe93b0c2a706b9564011be92903bbb343d19038dcd322ae5e7c", size = 1981686, upload-time = "2026-10-21T02:07:46.027Z" },
+    { url = "https://files.pythonhosted.org/packages/25/4a/be8c74849a96abeae4e61d9fe51646d8e648f53df308e46bcc9a999a0a93/mlflow_tracing-3.18.0-py3-none-any.whl", hash = "sha256:bd756183ee73ec5964a806e2f8cb87cc13689252a51cf09833b25cf9df110d42", size = 2066108, upload-time = "2026-11-03T23:40:53.699Z" },
 ]
 
 [[package]]
