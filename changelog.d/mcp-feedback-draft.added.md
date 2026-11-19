@@ -1,0 +1,1 @@
+- Add the `kitaru_feedback_draft` MCP tool. When a Kitaru tool fails or misleads an assistant, the assistant can write up the problem and a proposed fix, and the tool returns a prefilled GitHub issue link that you review and submit yourself. Nothing is sent automatically.
