@@ -69,6 +69,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         "evaluation",
         "evaluator",
         "experiment",
+        "feedback",
         "import",
         "importer",
         "info",

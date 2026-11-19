@@ -38,4 +38,4 @@ async def test_draft_returns_a_prefilled_issue_link() -> None:
     query = parse_qs(urlsplit(data["issue_url"]).query)
     assert query["title"] == ["MCP feedback: session_read drops tool errors"]
     assert query["body"] == [data["body"]]
-    assert data["body"].endswith("MCP mode `read-only`")
+    assert data["body"].endswith(", mode `read-only`")

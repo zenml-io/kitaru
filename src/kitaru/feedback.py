@@ -13,7 +13,9 @@
 #  permissions and limitations under the License.
 """Build prefilled GitHub issue links for Kitaru feedback."""
 
+import platform
 from collections.abc import Sequence
+from importlib.metadata import version
 from typing import NamedTuple
 from urllib.parse import quote
 
@@ -22,6 +24,8 @@ from kitaru.redaction import redact
 ISSUE_URL = "https://github.com/zenml-io/kitaru/issues/new"
 # GitHub rejects issue links much longer than about 8 KB, so stay below that.
 MAX_URL_LENGTH = 7500
+# Titles are never cut, so a cap keeps them from using up the link budget.
+MAX_TITLE_LENGTH = 120
 TRUNCATION_MARKER = "\n\n[cut to fit the issue link]"
 
 Section = tuple[str, str]
@@ -62,6 +66,43 @@ def build_issue_draft(
     trimmed = _trim_sections(kept, MAX_URL_LENGTH - fixed_length)
     body = _render_body([*trimmed, tail])
     return IssueDraft(_build_url(title, body), body, trimmed != kept)
+
+
+def draft_feedback(
+    source: str,
+    title: str,
+    problem: str,
+    *,
+    expected: str | None = None,
+    proposed_fix: str | None = None,
+    context: str = "",
+) -> IssueDraft:
+    """Draft a feedback issue with the standard sections and version details.
+
+    Args:
+        source: Where the report comes from, such as `CLI` or `MCP`.
+        title: Issue title, prefixed with the source.
+        problem: What went wrong.
+        expected: What the reporter expected instead.
+        proposed_fix: The change that would fix it.
+        context: Extra environment details appended to the version line.
+
+    Returns:
+        The issue link, its body, and whether any section text was cut.
+    """
+    environment = (
+        f"Kitaru {version('kitaru')}, {source}, "
+        f"Python {platform.python_version()} on {platform.system()}"
+    )
+    return build_issue_draft(
+        f"{source} feedback: {title.strip()}",
+        [
+            ("What happened", problem),
+            ("What I expected", expected),
+            ("Proposed fix", proposed_fix),
+        ],
+        f"{environment}, {context}" if context else environment,
+    )
 
 
 def _encode(text: str) -> str:

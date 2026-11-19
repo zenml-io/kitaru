@@ -5,13 +5,14 @@
 
 from pydantic import Field
 
+from kitaru.feedback import MAX_TITLE_LENGTH
 from kitaru.mcp.models.common import MCPModel, ToolResult
 
 
 class FeedbackDraftRequest(MCPModel):
     """Describe a problem with Kitaru or its MCP tools for a GitHub issue draft."""
 
-    title: str = Field(min_length=8, max_length=120)
+    title: str = Field(min_length=8, max_length=MAX_TITLE_LENGTH)
     problem: str = Field(
         min_length=20,
         max_length=6000,
