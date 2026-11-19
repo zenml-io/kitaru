@@ -1,0 +1,1 @@
+- `kitaru-pydantic-ai` now supports the PydanticAI 2.67 and 2.68 minor lines, and `kitaru-pydantic-ai`, `kitaru-openai-agents`, and `kitaru-langgraph` accept genai-prices 0.2. The plugin workspace lockfile resolves `pydantic-ai-slim` 2.68.0, `genai-prices` 0.2.3, and `pydantic` 2.14.3.
