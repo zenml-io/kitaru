@@ -32,6 +32,7 @@ from kitaru.cli.invocation_context import get_invocation
 from kitaru.cli.output import CLIError, CommandResult, emit_event, get_output_context
 from kitaru.cli.schema import ParameterSpec, describe_schema
 from kitaru.client.config import get_config_path
+from kitaru.feedback import MAX_TITLE_LENGTH, draft_feedback
 
 _MACHINE_TRUE = {"1", "true", "yes", "on"}
 _MACHINE_FALSE = {"0", "false", "no", "off"}
@@ -406,6 +407,66 @@ async def setup(
 def version() -> CommandResult:
     """Show the installed package version without local or network access."""
     return CommandResult(item={"version": diagnostics.package_version()})
+
+
+@register_command(
+    app,
+    build_spec(
+        ("feedback",),
+        "Draft a GitHub issue about a Kitaru bug and print its link; send nothing.",
+        parameters=(
+            ParameterSpec(
+                "--title",
+                "string",
+                "option",
+                True,
+                f"Issue title, at most {MAX_TITLE_LENGTH} characters.",
+            ),
+            ParameterSpec(
+                "--problem",
+                "string",
+                "option",
+                True,
+                "What went wrong: the command, its arguments, and its output.",
+            ),
+            ParameterSpec(
+                "--expected", "string", "option", False, "What you expected instead."
+            ),
+            ParameterSpec(
+                "--proposed-fix",
+                "string",
+                "option",
+                False,
+                "The change to Kitaru that would fix it.",
+            ),
+        ),
+        offline=True,
+    ),
+)
+def feedback(
+    *,
+    title: Annotated[str, Parameter(name="--title")],
+    problem: Annotated[str, Parameter(name="--problem")],
+    expected: Annotated[str | None, Parameter(name="--expected")] = None,
+    proposed_fix: Annotated[str | None, Parameter(name="--proposed-fix")] = None,
+) -> CommandResult:
+    """Build a prefilled issue link that the user reviews and submits."""
+    if not title.strip() or not problem.strip():
+        raise CLIError("invalid_arguments", "--title and --problem must not be empty.")
+    if len(title.strip()) > MAX_TITLE_LENGTH:
+        raise CLIError(
+            "invalid_arguments",
+            f"--title must be at most {MAX_TITLE_LENGTH} characters; "
+            "put the details in --problem.",
+        )
+    draft = draft_feedback(
+        "CLI", title, problem, expected=expected, proposed_fix=proposed_fix
+    )
+    return CommandResult(
+        item={"body": draft.body, "truncated": draft.truncated},
+        links={"issue": draft.url},
+        warnings=["Nothing was sent. Open the issue link to review and submit it."],
+    )
 
 
 @register_command(
