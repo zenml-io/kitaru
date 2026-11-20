@@ -17,13 +17,13 @@ from kitaru.mcp.settings import CapabilityMode, MCPSettings
 SNAPSHOT_DIRECTORY = Path(__file__).parents[1] / "tests" / "mcp" / "snapshots"
 METRICS_PATH = SNAPSHOT_DIRECTORY / "metrics.json"
 EXPECTED_TOOL_COUNTS = {
-    CapabilityMode.READ_ONLY: 8,
-    CapabilityMode.STANDARD: 16,
-    CapabilityMode.DESTRUCTIVE: 18,
+    CapabilityMode.READ_ONLY: 9,
+    CapabilityMode.STANDARD: 17,
+    CapabilityMode.DESTRUCTIVE: 19,
 }
-MAX_TOOLS = 18
+MAX_TOOLS = 19
 MAX_TOOL_SCHEMA_BYTES = 45 * 1024
-MAX_DESTRUCTIVE_DISCOVERY_BYTES = 239 * 1024
+MAX_DESTRUCTIVE_DISCOVERY_BYTES = 242 * 1024
 
 
 def _canonical_bytes(value: object) -> bytes:

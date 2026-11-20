@@ -68,6 +68,11 @@ from kitaru.client.exceptions import (
     parse_mastra_replay_refusal,
 )
 
+FEEDBACK_HINT = (
+    "Retry once. If it keeps failing, this may be a Kitaru bug: run "
+    '`kitaru feedback --title "..." --problem "..."` and open the printed link.'
+)
+
 
 @app.meta.default
 async def _launch(
@@ -411,7 +416,11 @@ def _convert_error(
     exception: BaseException, *, server_url: str | None = None
 ) -> CLIError:
     """Map SDK, validation, and transport failures to stable CLI errors."""
+    # Only crashes, unmapped responses, and HTTP 500s point at `kitaru feedback`;
+    # wrong arguments, missing records, and auth failures are the caller's to fix.
     if isinstance(exception, CLIError):
+        if exception.kind == "internal_error" and exception.hint is None:
+            exception.hint = FEEDBACK_HINT
         return exception
     if isinstance(exception, PydanticValidationError):
         location, message = describe_validation_error(exception)
@@ -445,8 +454,16 @@ def _convert_error(
         if exception.status_code in {400, 413, 422}:
             return CLIError("invalid_arguments", detail, details=details)
         if exception.status_code >= 500:
-            return CLIError("network_error", detail, retryable=True, details=details)
-        return CLIError("internal_error", str(exception), details=details)
+            return CLIError(
+                "network_error",
+                detail,
+                retryable=True,
+                details=details,
+                hint=FEEDBACK_HINT if exception.status_code == 500 else None,
+            )
+        return CLIError(
+            "internal_error", str(exception), details=details, hint=FEEDBACK_HINT
+        )
     if isinstance(exception, httpx.TransportError):
         server_url = _get_transport_server_url(exception, server_url)
     if isinstance(exception, httpx.TimeoutException):
@@ -471,7 +488,11 @@ def _convert_error(
             details={"server_url": server_url} if server_url else None,
             hint="Check the selected server with `kitaru status`, then retry.",
         )
-    return CLIError("internal_error", str(exception) or type(exception).__name__)
+    return CLIError(
+        "internal_error",
+        str(exception) or type(exception).__name__,
+        hint=FEEDBACK_HINT,
+    )
 
 
 def _get_transport_server_url(
