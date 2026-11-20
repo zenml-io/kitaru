@@ -104,6 +104,38 @@ def build_user_enriched_properties(account: Account) -> dict[str, Any]:
     return properties
 
 
+def build_survey_traits(account: Account) -> dict[str, Any]:
+    """Build the traits of an account from its onboarding survey answers.
+
+    Args:
+        account: Account that finished the survey.
+
+    Returns:
+        User traits.
+    """
+    metadata = account.metadata
+    traits: dict[str, Any] = {
+        key: metadata[key]
+        for key in ("newsletter", "framework", "trace_provider")
+        if metadata.get(key) is not None
+    }
+    survey_name = metadata.get("name")
+    traits["name"] = (
+        survey_name if isinstance(survey_name, str) and survey_name else account.name
+    )
+    # An address only goes on the profile with consent to be contacted. The
+    # one typed into the survey is the newer answer, so it wins over the email
+    # the account was created with.
+    if metadata.get("newsletter") is True:
+        work_email = metadata.get("work_email")
+        email = (
+            work_email if isinstance(work_email, str) and work_email else account.email
+        )
+        if email:
+            traits["email"] = email
+    return traits
+
+
 def build_session_completed_properties(session: Session) -> dict[str, Any]:
     """Build the properties of a session's transition to a terminal status.
 
