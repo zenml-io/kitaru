@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 keywords = ["ai-agents", "evaluation", "kitaru", "llm", "typesafe", "jev"]
-dependencies = ["kitaru>=0.22.0", "typesafe-sdk==0.6.0"]
+dependencies = ["kitaru>=0.22.0", "typesafe-sdk==0.7.5"]
 
 [project.urls]
 Homepage = "https://kitaru.ai"

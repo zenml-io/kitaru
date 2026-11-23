@@ -16,7 +16,7 @@
 from collections.abc import Iterable
 from typing import Literal
 
-from typesafe_sdk import ChoiceAnswer, NoulAnswer, ScoreAnswer
+from typesafe_sdk import BoxAnswer, ChoiceAnswer, NoulAnswer, ScoreAnswer
 
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru_typesafe_evaluator.params import ChoiceQuestion, NoulQuestion, ScoreQuestion
@@ -24,7 +24,7 @@ from kitaru_typesafe_evaluator.params import ChoiceQuestion, NoulQuestion, Score
 # TypeSafe advises never acting on a choice whose confidence is under 0.5.
 CHOICE_MIN_CONFIDENCE = 0.5
 
-Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer
+Answer = NoulAnswer | ChoiceAnswer | ScoreAnswer | BoxAnswer
 Question = NoulQuestion | ChoiceQuestion | ScoreQuestion
 
 
