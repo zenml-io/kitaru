@@ -252,6 +252,7 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
         "--wait",
         "--interval",
         "--timeout",
+        "--fail-on-failures",
     } <= set(import_parameters)
     import_errors = {error["kind"] for error in session_import["errors"]}
     assert {
