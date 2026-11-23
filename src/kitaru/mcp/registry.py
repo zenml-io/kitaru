@@ -102,7 +102,8 @@ class ToolSpec:
         annotations: MCP tool annotations.
         handler: MCP tool function taking the request and the MCP context.
         meta: MCP `_meta` for the tool, if any.
-        run: The tool's work, taking server state and the request. It returns
+        run: The tool's work, taking server state and the validated request
+            model, whose validation holds the input checks. It returns
             the tool's data, or a `ToolSuccessPayload`, unredacted and without
             a result envelope, timeout, or concurrency bound, and raises on
             failure.

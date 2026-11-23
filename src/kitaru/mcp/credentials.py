@@ -35,7 +35,9 @@ _SENSITIVE_PAIRS = frozenset(
 
 def is_credential_like(name: str) -> bool:
     """Return whether a setting name looks like it holds a credential."""
-    spaced = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+    # One capital before the word, not `[A-Z]+`: the same split, without
+    # backtracking that grows with the square of a long all-caps name.
+    spaced = re.sub(r"([A-Z])([A-Z][a-z])", r"\1_\2", name)
     spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", spaced)
     segments = [part for part in re.split(r"[^a-z0-9]+", spaced.lower()) if part]
     return any(part in _SENSITIVE_SEGMENTS for part in segments) or any(
