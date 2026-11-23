@@ -1,13 +1,17 @@
 #  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
 """Capability inventories, SDK schemas, and protocol result contracts."""
 
+import inspect
 import json
 import uuid
 from datetime import UTC, datetime
+from typing import Any, cast
 
+import pytest
 from mcp.types import TextContent
 
 from kitaru.api_models.v1.agent import AgentResponse
+from kitaru.mcp import registry
 from kitaru.mcp.errors import (
     MCPToolError,
     error_result,
@@ -15,6 +19,7 @@ from kitaru.mcp.errors import (
     success_result,
 )
 from kitaru.mcp.models.common import RegistryReadResult, ToolResult
+from kitaru.mcp.registry import TOOL_SPECS
 from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
 
@@ -98,6 +103,25 @@ async def test_exact_capability_filtered_inventories_and_annotations() -> None:
                     "kitaru_failure_matrix_cell",
                 }
             )
+
+
+async def test_each_tool_runs_the_handler_its_spec_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[object, object]] = []
+
+    async def record(
+        _context: object, _request: object, result_type: object, handler: object
+    ) -> None:
+        calls.append((result_type, handler))
+
+    monkeypatch.setattr(registry, "_invoke", record)
+    for spec in TOOL_SPECS:
+        await spec.handler(cast(Any, None), cast(Any, None))
+        [(result_type, handler)] = calls
+        calls.clear()
+        assert handler is spec.run, spec.name
+        assert result_type is inspect.signature(spec.handler).return_annotation
 
 
 async def test_actual_sdk_discovery_schemas_fit_budgets() -> None:

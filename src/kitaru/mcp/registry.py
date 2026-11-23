@@ -6,7 +6,7 @@
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 from mcp.server import MCPServer
@@ -93,7 +93,18 @@ ToolHandler = Callable[[MCPServerState, Any], Awaitable[object]]
 
 @dataclass(frozen=True, slots=True)
 class ToolSpec:
-    """One public tool and its minimum cumulative capability."""
+    """One public tool and its minimum cumulative capability.
+
+    Attributes:
+        name: Tool name.
+        minimum_mode: Lowest capability mode that lists the tool.
+        description: Tool description.
+        annotations: MCP tool annotations.
+        handler: MCP tool function taking the request and the MCP context.
+        meta: MCP `_meta` for the tool, if any.
+        run: The tool's work, taking server state and the request; `handler`
+            runs it and wraps its data in the tool's result envelope.
+    """
 
     name: str
     minimum_mode: CapabilityMode
@@ -101,6 +112,7 @@ class ToolSpec:
     annotations: ToolAnnotations
     handler: Callable[..., Awaitable[BaseModel]]
     meta: dict[str, Any] | None = None
+    run: ToolHandler = field(kw_only=True)
 
 
 def _describe(tool: Callable[..., Awaitable[BaseModel]]) -> str:
@@ -386,6 +398,7 @@ TOOL_SPECS = (
         _describe(registry_read_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         registry_read_tool,
+        run=handle_registry_read,
     ),
     ToolSpec(
         "kitaru_activity_read",
@@ -393,6 +406,7 @@ TOOL_SPECS = (
         _describe(activity_read_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         activity_read_tool,
+        run=handle_activity_read,
     ),
     ToolSpec(
         "kitaru_session_read",
@@ -400,6 +414,7 @@ TOOL_SPECS = (
         _describe(session_read_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         session_read_tool,
+        run=handle_session_read,
     ),
     ToolSpec(
         "kitaru_review_read",
@@ -407,6 +422,7 @@ TOOL_SPECS = (
         _describe(review_read_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         review_read_tool,
+        run=handle_review_read,
     ),
     ToolSpec(
         "kitaru_connection_read",
@@ -414,6 +430,7 @@ TOOL_SPECS = (
         _describe(connection_read_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         connection_read_tool,
+        run=handle_connection_read,
     ),
     ToolSpec(
         "kitaru_docs_search",
@@ -421,6 +438,7 @@ TOOL_SPECS = (
         _describe(docs_search_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         docs_search_tool,
+        run=handle_docs_search,
     ),
     ToolSpec(
         "kitaru_feedback_draft",
@@ -428,6 +446,7 @@ TOOL_SPECS = (
         _describe(feedback_draft_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         feedback_draft_tool,
+        run=handle_feedback_draft,
     ),
     ToolSpec(
         "kitaru_failure_matrix",
@@ -435,6 +454,7 @@ TOOL_SPECS = (
         _describe(failure_matrix_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         failure_matrix_tool,
+        run=handle_failure_matrix,
         meta=ui_meta(FAILURE_MATRIX_URI),
     ),
     ToolSpec(
@@ -443,6 +463,7 @@ TOOL_SPECS = (
         _describe(failure_cell_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         failure_cell_tool,
+        run=handle_failure_cell,
         # Only the matrix view calls this; hosts keep it out of the model's tools.
         meta=ui_meta(FAILURE_MATRIX_URI, visibility=["app"]),
     ),
@@ -452,6 +473,7 @@ TOOL_SPECS = (
         _describe(cohorts_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         cohorts_manage_tool,
+        run=handle_cohorts_manage,
     ),
     ToolSpec(
         "kitaru_experiments_manage",
@@ -459,6 +481,7 @@ TOOL_SPECS = (
         _describe(experiments_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         experiments_manage_tool,
+        run=handle_experiments_manage,
     ),
     ToolSpec(
         "kitaru_session_import",
@@ -466,6 +489,7 @@ TOOL_SPECS = (
         _describe(session_import_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         session_import_tool,
+        run=handle_session_import,
     ),
     ToolSpec(
         "kitaru_review_manage",
@@ -473,6 +497,7 @@ TOOL_SPECS = (
         _describe(review_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         review_manage_tool,
+        run=handle_review_manage,
     ),
     ToolSpec(
         "kitaru_workflow_start",
@@ -480,6 +505,7 @@ TOOL_SPECS = (
         _describe(workflow_start_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         workflow_start_tool,
+        run=handle_workflow_start,
     ),
     ToolSpec(
         "kitaru_evaluators_manage",
@@ -487,6 +513,7 @@ TOOL_SPECS = (
         _describe(evaluators_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         evaluators_manage_tool,
+        run=handle_evaluators_manage,
     ),
     ToolSpec(
         "kitaru_analyzers_manage",
@@ -494,6 +521,7 @@ TOOL_SPECS = (
         _describe(analyzers_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         analyzers_manage_tool,
+        run=handle_analyzers_manage,
     ),
     ToolSpec(
         "kitaru_connections_manage",
@@ -501,6 +529,7 @@ TOOL_SPECS = (
         _describe(connections_manage_tool),
         _annotations(read_only=False, destructive=False, idempotent=False),
         connections_manage_tool,
+        run=handle_connections_manage,
     ),
     ToolSpec(
         "kitaru_workflow_cancel",
@@ -508,6 +537,7 @@ TOOL_SPECS = (
         _describe(workflow_cancel_tool),
         _annotations(read_only=False, destructive=True, idempotent=False),
         workflow_cancel_tool,
+        run=handle_workflow_cancel,
     ),
     ToolSpec(
         "kitaru_delete",
@@ -515,6 +545,7 @@ TOOL_SPECS = (
         _describe(delete_tool),
         _annotations(read_only=False, destructive=True, idempotent=False),
         delete_tool,
+        run=handle_delete,
     ),
 )
 
