@@ -37,7 +37,7 @@ def evaluate(session: SessionView, **params) -> EvaluationResult:
 
 `SessionView` gives you the session and all its nodes with payloads. Return one `EvaluationResult` or a list; each becomes one stored evaluation row. `params` are per-run knobs you pass when you attach the evaluator to a replay or experiment.
 
-Scaffold, exercise, and register it with the CLI:
+Scaffold, check that it loads, and register it with the CLI:
 
 ```bash
 kitaru evaluator scaffold refund-check          # writes refund_check_evaluator.py
@@ -45,6 +45,8 @@ kitaru evaluator test refund_check_evaluator.py --entrypoint evaluate
 kitaru evaluator register refund-check \
   --script refund_check_evaluator.py --entrypoint evaluate
 ```
+
+`kitaru evaluator test` only verifies that the script imports cleanly and matches the callable signature (`invoked: false`); it does not call `evaluate`. After registering, run `kitaru session evaluate <session-id> --evaluator refund-check@1 --wait` on a real session to test your evaluation logic end to end.
 
 Evaluators are versioned like agents: registering again with `kitaru evaluator version register` creates version 2, and every stored evaluation remembers exactly which evaluator version wrote it. An LLM judge follows the same contract by calling a model inside `evaluate`. The walkthrough is in [Write an evaluator](../guides/write-an-evaluator.md).
 

@@ -40,7 +40,7 @@ async def main() -> None:
             description="Would gpt-5-nano have held on refund tickets?",
             override=ReplayOverride(model={"openai:gpt-5.4": "openai:gpt-5-nano"}),
             tool_policy=ToolPolicy(
-                default=HistoryConfig(scope="cohort_version", on_miss="fail")
+                default=HistoryConfig(scope="baseline", on_miss="fail")
             ),
             evaluators=[EvaluatorConfig(evaluator="refund-check")],
         )
@@ -69,7 +69,7 @@ kitaru experiment create cheaper-model \
   --agent support-agent \
   --evaluator refund-check@latest \
   --override '{"model": {"openai:gpt-5.4": "openai:gpt-5-nano"}}' \
-  --tool-policy '{"default": {"type": "history", "scope": "cohort_version", "on_miss": "fail"}}'
+  --tool-policy '{"default": {"type": "history", "scope": "baseline", "on_miss": "fail"}}'
 
 kitaru experiment run start cheaper-model \
   --cohort-version <cohort-version-id> \
@@ -79,7 +79,7 @@ kitaru experiment run start cheaper-model \
 
 Starting a run fans out **one replay per session** in the cohort version. [Workers](workers.md) in your environment execute them; the run's `progress` counts replays through `pending → evaluating → completed` (plus `failed` / `canceled`), and the run settles when the last replay does. `baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING` reuses the latest matching baseline evaluations for the same evaluator versions and parameters, and schedules any missing ones. Result sessions receive fresh evaluations, giving each completed replay paired measurements.
 
-With a `history` tool policy scoped to `cohort_version`, replayed tool calls can be answered from any recording in the cohort (useful when runs share tool traffic), and `on_miss="fail"` keeps anything unrecorded from reaching a live system.
+With a `history` tool policy scoped to `baseline`, each replay answers tool calls only from its own baseline session, and `on_miss="fail"` keeps anything unrecorded from reaching a live system. Use `baseline` as the default whenever a tool's answer depends on the conversation, such as `get_current_order()` or `get_user_profile()`, where arguments do not uniquely identify the session. Use `scope="cohort_version"` only for tools whose arguments uniquely identify the answer across every session in the cohort and when you want cross-session fallback; otherwise `cohort_version` returns the newest matching recording from another conversation. See [Tool policies](../guides/tool-policies.md).
 
 ## Reading a run
 

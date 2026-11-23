@@ -10,12 +10,13 @@ Most problems are one of three things: the client can't reach the server, no wor
 ## Start with the diagnostics
 
 ```bash
-kitaru status      # who am I, which server, which context
+kitaru status      # selected server, credential state, compatibility, and live workers
+kitaru info        # local runtime details and resolved server info
 kitaru doctor      # connection and environment checks
 kitaru version
 ```
 
-The CLI and SDK read `KITARU_API_URL` and `KITARU_API_KEY` from the environment; `kitaru login` stores credentials per server context (`kitaru context list` shows them). When a script fails with `KITARU_API_URL is not set`, it's the environment, not the server.
+The CLI and SDK read `KITARU_API_URL` and `KITARU_API_KEY` from the environment; `kitaru login` stores credentials per server URL, and `kitaru status` and `kitaru info` show the active server and where it was resolved from (run `kitaru doctor` to check the local config and credential files). When a script fails with `KITARU_API_URL is not set`, it's the environment, not the server.
 
 ## Nothing is happening
 

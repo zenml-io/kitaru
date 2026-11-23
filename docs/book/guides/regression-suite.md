@@ -84,9 +84,7 @@ experiment = await client.experiments.create(
         agent_id=uuid.UUID(os.environ["KITARU_AGENT_ID"]),
         name="cheaper-model",
         override=ReplayOverride(model={"openai:gpt-5.4": "openai:gpt-5-nano"}),
-        tool_policy=ToolPolicy(
-            default=HistoryConfig(scope="cohort_version", on_miss="fail")
-        ),
+        tool_policy=ToolPolicy(default=HistoryConfig(scope="baseline", on_miss="fail")),
         evaluators=[
             EvaluatorConfig(evaluator="refund-check"),
             EvaluatorConfig(evaluator="tone-judge"),
@@ -99,7 +97,7 @@ Both evaluators must already be registered. In this example, `tone-judge` repres
 
 {% hint style="info" %} The OpenAI Agents adapter does not support a `history` default. Keep its default as `passthrough` and add a named `history` override for each direct function tool you want to replay. See the [OpenAI Agents adapter page](../adapters/openai-agents.md). {% endhint %}
 
-To test a code change, omit `override` and register the branch as a new agent version. The experiment run selects that version. The `history` policy with `scope="cohort_version"` can answer tool calls from any recording in the cohort. With `on_miss="fail"`, an unmatched call stops its replay instead of reaching the live tool.
+To test a code change, omit `override` and register the branch as a new agent version. The experiment run selects that version. The `history` policy with `scope="baseline"` answers each replay's tool calls only from its own baseline session, which is the safe default whenever tool answers depend on the conversation. With `on_miss="fail"`, an unmatched call stops its replay instead of reaching the live tool. Use `scope="cohort_version"` only when calls with the same arguments should return the same answer across conversations and you want cross-session fallback; otherwise `cohort_version` returns the newest matching recording from another session in the cohort. See [Tool policies](tool-policies.md).
 
 The CLI form takes the override and tool policy as JSON:
 
@@ -108,7 +106,7 @@ kitaru experiment create cheaper-model \
   --agent support-agent \
   --evaluator refund-check@latest --evaluator tone-judge@latest \
   --override '{"model": {"openai:gpt-5.4": "openai:gpt-5-nano"}}' \
-  --tool-policy '{"default": {"type": "history", "scope": "cohort_version", "on_miss": "fail"}}'
+  --tool-policy '{"default": {"type": "history", "scope": "baseline", "on_miss": "fail"}}'
 ```
 
 ## 4. Run it and read it

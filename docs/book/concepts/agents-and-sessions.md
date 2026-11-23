@@ -22,7 +22,11 @@ kitaru agent register support-agent \
   --description "Resolves support tickets"
 ```
 
-This creates the agent and its first **agent version** in one step. A version pins what "the agent" meant at a point in time: a run spec (the command that starts your agent, its working directory, environment, secrets, and timeout) plus optional capability metadata (tools, MCP servers, skills). The run spec is what a [worker](workers.md) executes when a replay or experiment re-runs the agent in your environment.
+This creates the agent and its first **agent version** in one step. An agent version stores a `RunSpec` pointer (the command that starts your agent, its working directory, environment, secrets, and timeout) plus optional capability metadata (tools, MCP servers, skills). The run spec is what a [worker](workers.md) executes when a replay or experiment re-runs the agent in your environment.
+
+{% hint style="warning" %}
+An agent version does **not** snapshot your source code or pin a git commit hash. If you edit files in place inside the same working directory, older agent versions pointing at that directory run the mutated code rather than the code they were registered with. For reproducible baselines, point each version at its own directory, git worktree, or container image, and attach a `--display-version` label (such as a git SHA or tag).
+{% endhint %}
 
 To register from a YAML or JSON spec, put the agent's description under `parent` and the version's description under `version`:
 
