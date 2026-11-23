@@ -179,7 +179,7 @@ updates:
       default-days: 7
       semver-major-days: 14
       semver-minor-days: 7
-      semver-patch-days: 3
+      semver-patch-days: 7
     target-branch: develop
   # The plugins workspace (plugins/pyproject.toml, plugins/uv.lock) gets its own
   # block instead of joining the root block as `directories: ["/", "/plugins"]`.
@@ -336,7 +336,7 @@ updates:
       default-days: 7
       semver-major-days: 14
       semver-minor-days: 7
-      semver-patch-days: 3
+      semver-patch-days: 7
     target-branch: develop
   - package-ecosystem: npm
     directory: /docs
