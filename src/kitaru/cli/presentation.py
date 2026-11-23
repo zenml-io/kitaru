@@ -250,6 +250,8 @@ _JOB_SECTIONS = (
             HumanField("terminal", "Terminal"),
             HumanField("job.status|run.status|status", "Status"),
             HumanField("job.id|run.id|id", "ID", no_wrap=True),
+            HumanField("batch_count", "Batches"),
+            HumanField("job_ids", "Job IDs"),
         ),
     ),
     HumanSection(

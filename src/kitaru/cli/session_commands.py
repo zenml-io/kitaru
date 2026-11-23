@@ -680,7 +680,7 @@ async def session_read(
         side_effects=("reads_local_file", "creates_remote_state"),
         idempotency="non_idempotent_job_created_per_request",
         errors=(
-            *ASSET_READ_ERRORS,
+            *ASSET_WRITE_ERRORS,
             *JOB_WAIT_ERRORS,
         ),
         streams=True,

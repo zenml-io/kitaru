@@ -8671,6 +8671,11 @@ export interface components {
              */
             dashboard_url?: string | null;
             /**
+             * Evaluation Pair Limit
+             * @description Maximum accepted (session, evaluator) pairs per evaluation request.
+             */
+            evaluation_pair_limit?: number | null;
+            /**
              * Id
              * @description Server ID.
              */

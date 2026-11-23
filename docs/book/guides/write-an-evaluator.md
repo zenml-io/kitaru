@@ -162,7 +162,7 @@ kitaru session evaluate --tag imported-baseline \
   --evaluator refund-quality@latest --wait
 ```
 
-Or from the client, with explicit IDs:
+`kitaru session evaluate` automatically splits large selections into batches within the server's per-request limit (default 100 `(session, evaluator)` pairs, configurable with `KITARU_SERVER_EVALUATION_PAIR_LIMIT`) and combines the results when `--wait` is set. Direct Python SDK and REST callers send one request per call and should batch `input_session_ids` within that cap:
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationBatchCreateRequest
