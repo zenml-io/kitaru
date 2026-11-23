@@ -141,7 +141,7 @@ Ephemeral workers register under the same rule. Set `KITARU_SERVER_EPHEMERAL_WOR
 
 ## SDK and MCP
 
-`client.connections` exposes `create`, `get`, `list`, `iter`, `update`, and `delete`, mirroring the CLI. On the MCP server, `kitaru_connection_read` reads connections in `read-only` mode, without secret values, `kitaru_connections_manage` creates, updates, and sets defaults in `standard` mode, and `kitaru_delete` deletes a connection (`kind: "connection"`) in `destructive` mode.
+`client.connections` exposes `create`, `get`, `list`, `iter`, `update`, and `delete`, mirroring the CLI. On the MCP server, `kitaru_connection_read` reads connections in `read-only` mode, without secret values, `kitaru_connections_manage` creates, updates, and sets defaults in `standard` mode, and `kitaru_delete` deletes a connection (`kind: "connection"`) in `destructive` mode. `kitaru_connections_manage` refuses an `env` key that looks like a credential, such as `OPENAI_API_KEY` or `HF_TOKEN`, and asks for it in `secrets` instead, because `env` values are stored and returned as they are.
 
 ## Next
 

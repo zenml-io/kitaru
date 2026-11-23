@@ -13,6 +13,7 @@ from jsonschema import Draft202012Validator
 from pydantic import TypeAdapter
 from test_fuzz_tools import (
     _bound_free_json,
+    _draw_plain_env_keys,
     _import_query_strategy,
     _require_discriminator_tags,
     _update_strategy,
@@ -111,6 +112,7 @@ def test_sparse_updates_validate_without_model_filter(
     adapter = request_adapter_for(tool)
     schema = _bound_free_json(_require_discriminator_tags(adapter.json_schema()))
     defs = schema["$defs"]
+    _draw_plain_env_keys(defs)
     request = data.draw(_update_strategy(defs[model], defs))
     adapter.validate_python(request)
     assert Draft202012Validator(adapter.json_schema()).is_valid(request)

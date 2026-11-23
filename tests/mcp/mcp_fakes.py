@@ -37,11 +37,15 @@ from kitaru.mcp.settings import CapabilityMode, MCPSettings
 
 
 def build_server_context(
-    client: object, *, mode: CapabilityMode = CapabilityMode.READ_ONLY
+    client: object,
+    *,
+    mode: CapabilityMode = CapabilityMode.READ_ONLY,
+    stateless: bool = False,
 ) -> tuple[MCPServer[MCPServerState], Context[MCPServerState, Any]]:
     """Build a server and request context bound to a fake SDK client."""
-    state = MCPServerState(MCPSettings(), cast(Any, client))
-    server = create_server(MCPSettings(mode=mode))
+    settings = MCPSettings(mode=mode, stateless=stateless)
+    state = MCPServerState(settings, cast(Any, client))
+    server = create_server(settings)
     request_context = ServerRequestContext(
         session=cast(Any, None),
         lifespan_context=state,

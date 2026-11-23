@@ -6,9 +6,10 @@
 import uuid
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import AfterValidator, Field, model_validator
 
 from kitaru.api_models.v1.base import PlainSerializedSecretStr
+from kitaru.mcp.credentials import is_credential_like
 from kitaru.mcp.models.common import IDEMPOTENCY_KEY_DESCRIPTION, MCPModel, PageOptions
 
 
@@ -26,6 +27,27 @@ class ConnectionGetRequest(MCPModel):
     reference: str = Field(min_length=1)
 
 
+def _refuse_credential_like(name: str) -> str:
+    # Check keys, not the map: a refused map would echo its values, which may
+    # be the very credential, in the validation error.
+    if is_credential_like(name):
+        raise ValueError(
+            "looks like a credential; move it to `secrets`, which are stored "
+            "encrypted and never returned"
+        )
+    return name
+
+
+PlainEnv = Annotated[
+    dict[Annotated[str, AfterValidator(_refuse_credential_like)], str],
+    Field(
+        description="Plain settings, stored and returned as they are. Keys that "
+        "look like credentials (API keys, tokens, passwords, secrets) are "
+        "refused: put those in `secrets`."
+    ),
+]
+
+
 ConnectionReadRequest = Annotated[
     ConnectionListRequest | ConnectionGetRequest,
     Field(discriminator="operation"),
@@ -38,7 +60,7 @@ class ConnectionCreate(MCPModel):
     operation: Literal["create"]
     name: str = Field(min_length=1)
     provider: str = Field(min_length=1)
-    env: dict[str, str] = Field(default_factory=dict)
+    env: PlainEnv = Field(default_factory=dict)
     secrets: dict[str, PlainSerializedSecretStr] = Field(default_factory=dict)
     default: bool = False
     idempotency_key: str | None = Field(
@@ -52,7 +74,7 @@ class ConnectionUpdate(MCPModel):
 
     operation: Literal["update"]
     connection_id: uuid.UUID
-    env: dict[str, str] | None = None
+    env: PlainEnv | None = None
     secrets: dict[str, PlainSerializedSecretStr] | None = None
     default: bool | None = None
 

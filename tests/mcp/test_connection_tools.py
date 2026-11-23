@@ -19,6 +19,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp_fakes import build_server_context
 
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.connection import ConnectionListParams, ConnectionResponse
@@ -33,7 +35,7 @@ from kitaru.mcp.models.connections import (
     ConnectionUpdate,
 )
 from kitaru.mcp.references import ReferenceResolutionError
-from kitaru.mcp.settings import MCPSettings
+from kitaru.mcp.settings import CapabilityMode, MCPSettings
 from kitaru.mcp.tools.connections import (
     handle_connection_read,
     handle_connections_manage,
@@ -245,3 +247,46 @@ async def test_connection_update_rejects_explicit_nulls() -> None:
         ConnectionUpdate(
             operation="update", connection_id=uuid.uuid4(), env=cast(Any, None)
         )
+
+
+@pytest.mark.parametrize(
+    "request_body",
+    [
+        {"operation": "create", "name": "openai", "provider": "openai"},
+        {"operation": "update", "connection_id": str(uuid.uuid4())},
+    ],
+    ids=["create", "update"],
+)
+async def test_credential_like_env_keys_are_refused_without_echoing_values(
+    request_body: dict[str, object],
+) -> None:
+    """A key that looks like a credential belongs in `secrets`, never in `env`."""
+    client = SimpleNamespace()
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    env = {
+        "OPENAI_API_KEY": "sk-planted-value",
+        "awsSecretAccessKey": "planted-camel-value",
+        "MAX_TOKENS": "4096",
+    }
+
+    with pytest.raises(ToolError) as refused:
+        await server.call_tool(
+            "kitaru_connections_manage",
+            {"request": {**request_body, "env": env}},
+            context,
+        )
+
+    message = str(refused.value)
+    assert "OPENAI_API_KEY" in message and "awsSecretAccessKey" in message
+    assert "MAX_TOKENS" not in message
+    assert "secrets" in message
+    assert "planted" not in message
+
+
+async def test_plain_env_keys_that_only_resemble_credentials_are_kept() -> None:
+    """Settings such as token limits are not credentials."""
+    env = {"MAX_TOKENS": "4096", "TOKENIZER_NAME": "cl100k", "LANGFUSE_BASE_URL": "x"}
+
+    created = ConnectionCreate(operation="create", name="n", provider="p", env=env)
+
+    assert created.env == env
