@@ -11,28 +11,31 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).parents[2] / "scripts/benchmark-typescript-ci.mjs"
+REPO_ROOT = Path(__file__).parents[2]
+SCRIPT = REPO_ROOT / "scripts/benchmark-typescript-ci.mjs"
 PUBLISHED = ["kitaru", "kitaru-mastra", "kitaru-vercel-ai"]
 EXAMPLES = [
     "kitaru-example-mastra-support-triage",
     "kitaru-example-mastra-adaptive-conversation",
 ]
 
+
+def _discover_compat_packages() -> list[str]:
+    entries: list[tuple[tuple[int, ...], str]] = []
+    for manifest_path in (REPO_ROOT / "packages/mastra-compat").glob("*/package.json"):
+        manifest = json.loads(manifest_path.read_text())
+        core_version = str(manifest["devDependencies"]["@mastra/core"])
+        version_key = tuple(int(part) for part in core_version.split("."))
+        package_name = str(manifest["name"]).removeprefix("@zenml-io/")
+        entries.append((version_key, package_name))
+    return [name for _, name in sorted(entries)]
+
+
+COMPAT_PACKAGES = _discover_compat_packages()
 CANONICAL = [
     "kitaru",
     "kitaru-mastra",
-    "kitaru-mastra-compat-1.68",
-    "kitaru-mastra-compat-1.69",
-    "kitaru-mastra-compat-1.70",
-    "kitaru-mastra-compat-1.71",
-    "kitaru-mastra-compat-1.72",
-    "kitaru-mastra-compat-1.73",
-    "kitaru-mastra-compat-1.74",
-    "kitaru-mastra-compat-1.75",
-    "kitaru-mastra-compat-1.76",
-    "kitaru-mastra-compat-1.77",
-    "kitaru-mastra-compat-1.78",
-    "kitaru-mastra-compat-1.79",
+    *COMPAT_PACKAGES,
     "kitaru-vercel-ai",
     *EXAMPLES,
 ]
@@ -166,7 +169,21 @@ def test_trial_retains_canonical_suites_and_postgres_coverage_environment(
     selected_packages = [
         package
         for pattern in selected_packages
-        for package in sorted(manifests)
+        for package in sorted(
+            manifests,
+            key=lambda name: (
+                tuple(
+                    int(part)
+                    for part in str(
+                        manifests[name][1]
+                        .get("devDependencies", {})
+                        .get("@mastra/core", "0")
+                    ).split(".")
+                )
+                if name.startswith("@zenml-io/kitaru-mastra-compat-")
+                else ()
+            ),
+        )
         if fnmatch.fnmatchcase(package, pattern)
     ]
     assert [
@@ -231,7 +248,7 @@ def test_trial_boundary_compat_scope_runs_oldest_and_newest_mastra(
         json.loads(line)
         for line in Path(fake_pnpm["PNPM_CALLS"]).read_text().splitlines()
     ]
-    newest_compat = [p for p in CANONICAL if p.startswith("kitaru-mastra-compat-")][-1]
+    newest_compat = COMPAT_PACKAGES[-1]
     expected_packages = [
         "kitaru",
         "kitaru-mastra",

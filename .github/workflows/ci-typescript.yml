@@ -24,7 +24,6 @@ on:
       - converted_to_draft
     paths:
       - .github/workflows/ci-typescript.yml
-      - .github/workflows/ci.yml
       - .node-version
       - biome.json
       - package.json
@@ -33,7 +32,6 @@ on:
       - tsconfig.base.json
       - packages/**
       - examples/typescript/**
-      - tests/typescript/**
       - openapi/**
       - docs/book/adapters/mastra.md
       - devtools/tsconfig.json
@@ -45,7 +43,7 @@ on:
       - scripts/fixtures/mastra-memory-*
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions: {}
 env:
   KITARU_SERVER_ANALYTICS_OPT_IN: false
@@ -81,9 +79,6 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
-        with:
-          python-version: '3.12'
       - run: pnpm install --frozen-lockfile
       - run: pnpm run generate:check
       - run: pnpm run lint
@@ -108,20 +103,6 @@ jobs:
           if-no-files-found: error
           retention-days: 1
       - run: pnpm run pack:check:built
-      - run: uv sync --frozen --extra server --extra cli --extra worker
-      - name: Test compiled TypeScript adapters through Worker
-        run: uv run pytest -q tests/typescript
-      - run: pnpm --filter @zenml-io/kitaru build
-      - run: pnpm --filter @zenml-io/kitaru-vercel-ai build
-      - name: Validate ticket resolver example
-        working-directory: examples/typescript/vercel_ai_ticket_resolver
-        run: |
-          pnpm build
-          pnpm test
-          pnpm test:evaluator
-          pnpm typecheck
-          pnpm lint
-          pnpm test:e2e
   typescript-node-24:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest

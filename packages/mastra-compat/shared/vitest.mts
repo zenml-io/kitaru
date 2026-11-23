@@ -6,17 +6,18 @@ import { MEMORY_REPLAY_TESTED_VERSIONS } from "../../mastra/src/memory-replay-ve
 
 const PACKAGES_DIR = fileURLToPath(new URL("../..", import.meta.url));
 
-// Heavy payload-budget, large-blob, and wall-clock-timeout suites that verify
-// Kitaru's own bounds rather than intermediate Mastra point releases. Both
-// endpoints of the supported range (`packages/mastra` at the oldest release
-// and the newest compat package) always run the full suite; intermediate
-// compat packages skip these unless KITARU_MASTRA_COMPAT_FULL=1 is set.
+// Heavy payload-budget, large-blob, and Kitaru-API-hang suites skipped on
+// intermediate Mastra compatibility packages during routine CI runs. Both
+// endpoints of the supported range (`packages/mastra` at the oldest tested
+// release and the newest compat package) always run every file, and
+// `release-typescript.yml` sets KITARU_MASTRA_COMPAT_FULL=1 so releases run
+// the full suite against every tested Mastra version. Version-branching suites
+// (`memory-lease-lifecycle.test.ts` and `om-replay-tolerance.test.ts`) stay
+// enabled on every intermediate release.
 const INTERMEDIATE_COMPAT_EXCLUDES = [
   "mastra/test/file-blob-replay.test.ts",
   "mastra/test/memory-evidence-budget.test.ts",
-  "mastra/test/memory-lease-lifecycle.test.ts",
   "mastra/test/memory-slow-kitaru.test.ts",
-  "mastra/test/om-replay-tolerance.test.ts",
   "mastra/test/signed-url-history.test.ts",
 ];
 

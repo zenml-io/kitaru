@@ -1,21 +1,27 @@
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const [mode, outputPath, ...extraArguments] = process.argv.slice(2);
 let mastraCompat = "all";
+let hasUnknownArgument = false;
 for (const argument of extraArguments) {
   if (argument.startsWith("--mastra-compat=")) {
     mastraCompat = argument.slice("--mastra-compat=".length);
   } else {
-    console.error(
-      "Usage: benchmark-typescript-ci.mjs repeated|coverage-once OUTPUT_DIR [--mastra-compat=all|boundary]",
-    );
-    process.exit(1);
+    hasUnknownArgument = true;
   }
 }
 if (
+  hasUnknownArgument ||
   !["repeated", "coverage-once"].includes(mode) ||
   !outputPath ||
   !["all", "boundary"].includes(mastraCompat)
@@ -37,20 +43,37 @@ const examples = [
   "kitaru-example-mastra-support-triage",
   "kitaru-example-mastra-adaptive-conversation",
 ];
-const compatPackages = [
-  "kitaru-mastra-compat-1.68",
-  "kitaru-mastra-compat-1.69",
-  "kitaru-mastra-compat-1.70",
-  "kitaru-mastra-compat-1.71",
-  "kitaru-mastra-compat-1.72",
-  "kitaru-mastra-compat-1.73",
-  "kitaru-mastra-compat-1.74",
-  "kitaru-mastra-compat-1.75",
-  "kitaru-mastra-compat-1.76",
-  "kitaru-mastra-compat-1.77",
-  "kitaru-mastra-compat-1.78",
-  "kitaru-mastra-compat-1.79",
-];
+
+function discoverMastraCompatPackages() {
+  const compatRoot = resolve(repositoryRoot, "packages/mastra-compat");
+  return readdirSync(compatRoot, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        existsSync(resolve(compatRoot, entry.name, "package.json")),
+    )
+    .map((entry) => {
+      const manifest = JSON.parse(
+        readFileSync(resolve(compatRoot, entry.name, "package.json"), "utf8"),
+      );
+      return {
+        packageName: String(manifest.name).replace(/^@zenml-io\//, ""),
+        coreVersion: String(manifest.devDependencies?.["@mastra/core"] ?? ""),
+      };
+    })
+    .sort((left, right) =>
+      left.coreVersion.localeCompare(right.coreVersion, undefined, {
+        numeric: true,
+      }),
+    )
+    .map(({ packageName }) => packageName);
+}
+
+const compatPackages = discoverMastraCompatPackages();
+if (compatPackages.length === 0) {
+  console.error("No packages found under packages/mastra-compat");
+  process.exit(1);
+}
 const selectedCompatPackages =
   mastraCompat === "boundary" ? [compatPackages.at(-1)] : compatPackages;
 const canonicalPackages = [
