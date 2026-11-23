@@ -28,6 +28,7 @@ from kitaru.server.adapters.auth.control_plane import (
 )
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.base import ListFilter
+from kitaru.server.domain.base import ValidationError
 from kitaru.server.filtering import (
     AndExpression,
     FilterCondition,
@@ -169,7 +170,10 @@ def _paginate_fake(
     ordered = sorted(items, key=lambda item: item.id, reverse=descending)
 
     if cursor is not None:
-        last_id = uuid.UUID(cursor.id)
+        try:
+            last_id = uuid.UUID(cursor.id)
+        except ValueError as exc:
+            raise ValidationError("Invalid cursor") from exc
         ordered = [
             item
             for item in ordered

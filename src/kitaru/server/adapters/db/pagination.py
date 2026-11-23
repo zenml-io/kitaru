@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Any, Protocol, TypeVar
 
 from asyncpg.exceptions import QueryCanceledError
-from sqlalchemy import ColumnElement, Select, and_, func, or_, select
+from sqlalchemy import ColumnElement, Select, and_, func, or_, select, tuple_
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
@@ -30,6 +30,8 @@ from kitaru.server.base import ListFilter
 from kitaru.server.domain.base import QueryTimeoutError, ValidationError
 
 LIST_QUERY_TIMEOUT_INFO_KEY = "list_query_timeout_seconds"
+_PG_INT32_MIN = -(2**31)
+_PG_INT32_MAX = 2**31 - 1
 
 RowT = TypeVar("RowT", bound=UUIDPrimaryKeyMixin)
 
@@ -178,21 +180,25 @@ class IndexOrder:
 
 
 class StartOrder:
-    """Page order by an ascending nullable start time, untimed rows last."""
+    """Page order by a nullable start time, untimed rows last."""
 
     def __init__(
         self,
         started_at_column: InstrumentedAttribute[datetime | None],
         id_column: InstrumentedAttribute[uuid.UUID],
+        sort: str = "started_at:asc",
     ) -> None:
         """Initialize the order.
 
         Args:
             started_at_column: Start time column defining the sort order.
             id_column: Primary key column breaking start time ties.
+            sort: List sort, whose direction the order follows.
         """
+        _, _, direction = sort.partition(":")
         self._started_at_column = started_at_column
         self._id_column = id_column
+        self._descending = direction == "desc"
 
     @property
     def columns(self) -> Sequence[InstrumentedAttribute[Any]]:
@@ -201,6 +207,11 @@ class StartOrder:
 
     def order_by(self) -> Sequence[ColumnElement[Any]]:
         """Return the ordering clauses of the keyset columns."""
+        if self._descending:
+            return [
+                self._started_at_column.desc().nulls_last(),
+                self._id_column.desc(),
+            ]
         return [self._started_at_column.asc().nulls_last(), self._id_column.asc()]
 
     def after(self, payload: str) -> ColumnElement[bool]:
@@ -223,8 +234,26 @@ class StartOrder:
             last_id = uuid.UUID(row_id)
         except ValueError as exc:
             raise ValidationError("Invalid cursor") from exc
+        if last_started_at is not None and (
+            last_started_at.tzinfo is None or last_started_at.utcoffset() is None
+        ):
+            raise ValidationError("Invalid cursor")
         if last_started_at is None:
-            return and_(self._started_at_column.is_(None), self._id_column > last_id)
+            id_after = (
+                self._id_column < last_id
+                if self._descending
+                else self._id_column > last_id
+            )
+            return and_(self._started_at_column.is_(None), id_after)
+        if self._descending:
+            return or_(
+                self._started_at_column < last_started_at,
+                and_(
+                    self._started_at_column == last_started_at,
+                    self._id_column < last_id,
+                ),
+                self._started_at_column.is_(None),
+            )
         return or_(
             self._started_at_column > last_started_at,
             and_(self._started_at_column == last_started_at, self._id_column > last_id),
@@ -242,6 +271,80 @@ class StartOrder:
         """
         started_at, row_id = values
         return f"{started_at.isoformat() if started_at is not None else ''}|{row_id}"
+
+
+class IntegerOrder:
+    """Page order by a non-null integer column, breaking ties by id."""
+
+    def __init__(
+        self,
+        column: InstrumentedAttribute[int],
+        id_column: InstrumentedAttribute[uuid.UUID],
+        sort: str,
+    ) -> None:
+        """Initialize the order.
+
+        Args:
+            column: Non-null integer column defining the sort order.
+            id_column: Primary key column breaking integer ties.
+            sort: List sort, whose direction the order follows.
+        """
+        _, _, direction = sort.partition(":")
+        self._column = column
+        self._id_column = id_column
+        self._descending = direction == "desc"
+
+    @property
+    def columns(self) -> Sequence[InstrumentedAttribute[Any]]:
+        """Keyset columns, in sort precedence."""
+        return [self._column, self._id_column]
+
+    def order_by(self) -> Sequence[ColumnElement[Any]]:
+        """Return the ordering clauses of the keyset columns."""
+        if self._descending:
+            return [self._column.desc(), self._id_column.desc()]
+        return [self._column.asc(), self._id_column.asc()]
+
+    def after(self, payload: str) -> ColumnElement[bool]:
+        """Build the predicate matching the rows that follow a cursor.
+
+        Args:
+            payload: Cursor payload written by ``payload()``.
+
+        Raises:
+            ValidationError: The payload does not carry an integer and an id.
+
+        Returns:
+            Predicate matching the rows after the cursor row.
+        """
+        raw_value, separator, row_id = payload.rpartition("|")
+        if not separator or not raw_value:
+            raise ValidationError("Invalid cursor")
+        try:
+            last_value = int(raw_value)
+            last_id = uuid.UUID(row_id)
+        except ValueError as exc:
+            raise ValidationError("Invalid cursor") from exc
+        if str(last_value) != raw_value or not (
+            _PG_INT32_MIN <= last_value <= _PG_INT32_MAX
+        ):
+            raise ValidationError("Invalid cursor")
+        keyset = tuple_(self._column, self._id_column)
+        if self._descending:
+            return keyset < (last_value, last_id)
+        return keyset > (last_value, last_id)
+
+    def payload(self, values: Sequence[Any]) -> str:
+        """Write the keyset values of a row into a cursor payload.
+
+        Args:
+            values: Integer value and id of the row.
+
+        Returns:
+            Cursor payload.
+        """
+        value, row_id = values
+        return f"{value}|{row_id}"
 
 
 async def _apply_list_query_timeout(session: AsyncSession) -> None:

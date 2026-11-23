@@ -29,6 +29,7 @@ from kitaru.cli.command_registry import (
     IDEMPOTENCY_KEY_PARAMETER,
     JOB_WAIT_ERRORS,
     LIST_PARAMETERS,
+    SESSION_LIST_PARAMETERS,
     UUID_READ_ERRORS,
     WAIT_PARAMETERS,
     build_spec,
@@ -381,7 +382,7 @@ async def session_import(
         "List one page of sessions. Continue with --cursor using page.next_cursor; "
         "--size/--limit sets the page size, not a total across pages.",
         parameters=(
-            *LIST_PARAMETERS,
+            *SESSION_LIST_PARAMETERS,
             ParameterSpec(
                 "--status",
                 "in_progress|completed|failed",
