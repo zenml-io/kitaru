@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Render an import's insights as one self-contained HTML file.
+"""Render the insights of an import or analysis task as one HTML file.
 
 Every insight is drawn from its stored data, so no model is called. An
 analyzer can supply its own rendered section by storing
@@ -43,35 +43,53 @@ _TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M UTC"
 
 
 async def write_insight_report(
-    client: Any, *, import_id: uuid.UUID, out: Path
+    client: Any,
+    *,
+    import_id: uuid.UUID | None = None,
+    task_id: uuid.UUID | None = None,
+    out: Path,
 ) -> CommandResult:
-    """Render the insights of one import to an HTML file."""
+    """Render the insights of one import or one analysis task to an HTML file.
+
+    Raises:
+        CLIError: Neither or both of the ids are given, nothing matches, or
+            the file cannot be written.
+    """
+    if (import_id is None) == (task_id is None):
+        raise CLIError(
+            "invalid_arguments", "Pass exactly one of --import-id or --task-id."
+        )
+    # An analysis over sessions picked with `kitaru session analyze` has no
+    # import, so its insights are only reachable through their task.
+    field, value, source = (
+        ("task_id", task_id, f"Analysis task {task_id}")
+        if import_id is None
+        else ("import_id", import_id, f"Import {import_id}")
+    )
     insights = [
         insight
         async for insight in client.insights.iter(
             InsightListParams(
-                filter=FilterCondition(
-                    field="import_id", op=FilterOp.EQ, value=str(import_id)
-                )
+                filter=FilterCondition(field=field, op=FilterOp.EQ, value=str(value))
             )
         )
     ]
     if not insights:
-        raise CLIError(
-            "not_found",
-            f"Import {import_id} has no insights. Run an analyzer with "
-            f"`kitaru import analyze {import_id} --analyzer ...` first.",
+        hint = (
+            "Check the task id in the output of `kitaru session analyze`."
+            if import_id is None
+            else "Run an analyzer with "
+            f"`kitaru import analyze {import_id} --analyzer ...` first."
         )
+        raise CLIError("not_found", f"{source} has no insights. {hint}")
     try:
-        out.write_text(
-            render_insight_report(insights, import_id=import_id), encoding="utf-8"
-        )
+        out.write_text(render_insight_report(insights, source=source), encoding="utf-8")
     except OSError as error:
         raise CLIError("invalid_arguments", f"Cannot write {out}: {error}") from error
     return CommandResult(
         item={
             "path": str(out),
-            "import_id": str(import_id),
+            field: str(value),
             "insights": len(insights),
             "sections": [
                 insight.name for insight, _ in _get_sections(_get_latest_runs(insights))
@@ -84,10 +102,19 @@ async def write_insight_report(
 def render_insight_report(
     insights: list[InsightResponse],
     *,
-    import_id: uuid.UUID,
+    source: str,
     generated_at: datetime | None = None,
 ) -> str:
-    """Build the HTML document for an import's insights."""
+    """Build the HTML document for a set of insights.
+
+    Args:
+        insights: Insights to render.
+        source: What the insights belong to, shown under the title.
+        generated_at: Time shown as the generation time; now when omitted.
+
+    Returns:
+        The HTML document.
+    """
     generated = (generated_at or datetime.now(UTC)).strftime(_TIMESTAMP_FORMAT)
     latest = _get_latest_runs(insights)
     sections = _get_sections(latest)
@@ -110,7 +137,7 @@ def render_insight_report(
     return _PAGE.format(
         style=_STYLE,
         title="Insight report",
-        subtitle=html.escape(f"Import {import_id} · generated {generated}"),
+        subtitle=html.escape(f"{source} · generated {generated}"),
         body="".join(body),
     )
 

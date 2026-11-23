@@ -19,6 +19,8 @@ const [{ InMemoryStore }, { Memory }] = await Promise.all([
   nativeImport("@mastra/memory"),
 ]);
 const directory = process.env.CHECK_DIRECTORY;
+const agentId = process.env.CHECK_AGENT_ID;
+assert(directory && agentId, "Expected CHECK_DIRECTORY and CHECK_AGENT_ID");
 const replayId = process.env.KITARU_REPLAY_ID;
 const report = {
   task_id: process.env.KITARU_TASK_ID,
@@ -26,7 +28,7 @@ const report = {
   classifier_calls: 0,
   actor_calls: 0,
   source_calls: 0,
-  actor_inputs: [],
+  actor_inputs: /** @type {string[]} */ ([]),
 };
 assert(process.env.KITARU_API_TOKEN, "Expected the worker's task token");
 assert.equal(process.env.KITARU_API_KEY, undefined);
@@ -45,7 +47,7 @@ const classifier = {
   specificationVersion: "v2",
   provider: "fixture",
   modelId: "classifier",
-  doGenerate: async () => {
+  doGenerate: async (_options) => {
     report.classifier_calls++;
     const skill = (
       await readFile(join(directory, "router.txt"), "utf8")
@@ -59,10 +61,13 @@ const classifier = {
   },
 };
 const actor = {
-  specificationVersion: "v2",
+  specificationVersion: /** @type {const} */ ("v2"),
   provider: "fixture",
   modelId: "actor",
   supportedUrls: {},
+  doGenerate: async () => {
+    throw new Error("Unexpected generate call");
+  },
   doStream: async (args) => {
     report.actor_calls++;
     report.actor_inputs.push(JSON.stringify(args.prompt));
@@ -132,7 +137,7 @@ const adapter = createMemoryReplayAgent(
     };
   },
   {
-    agentId: process.env.CHECK_AGENT_ID,
+    agentId,
     requestedModelId: "fixture/actor",
     sourceMemory: () => {
       report.source_calls++;

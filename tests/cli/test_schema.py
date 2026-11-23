@@ -69,6 +69,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         "evaluation",
         "evaluator",
         "experiment",
+        "feedback",
         "import",
         "importer",
         "info",
@@ -215,16 +216,18 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
 
     session_commands = {item["command"]: item for item in describe_schema(("session",))}
     assert set(session_commands) == {
+        "session.analyze",
         "session.evaluate",
         "session.get",
         "session.import",
         "session.list",
         "session.nodes",
+        "session.read",
     }
     assert all(
         command["read_only"]
         for name, command in session_commands.items()
-        if name not in {"session.evaluate", "session.import"}
+        if name not in {"session.analyze", "session.evaluate", "session.import"}
     )
     session_import = session_commands["session.import"]
     assert session_import["read_only"] is False

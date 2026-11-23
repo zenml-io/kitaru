@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tomllib
 import uuid
+from collections.abc import Collection
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
@@ -329,14 +330,16 @@ def build_process_env(
     extra_env: dict[str, str],
     secret_env: dict[str, str],
     token: str,
+    unset_env: Collection[str] = (),
 ) -> dict[str, str]:
     """Build a task process environment from the inherited and spec layers.
 
-    Layers the inherited environment, the run spec env, the creator-set
-    extras, and the secret env, then clears any inherited contract variable
-    and resets KITARU_API_URL, KITARU_API_TOKEN, and KITARU_TASK_ID from the
-    worker's own state. An inherited KITARU_API_KEY is cleared and never
-    reset, since the task process authenticates with its own task token.
+    Layers the inherited environment without the unset variables, the run
+    spec env, the creator-set extras, and the secret env, then clears any
+    inherited contract variable and resets KITARU_API_URL, KITARU_API_TOKEN,
+    and KITARU_TASK_ID from the worker's own state. An inherited
+    KITARU_API_KEY is cleared and never reset, since the task process
+    authenticates with its own task token.
 
     Args:
         task_id: Id of the task the process runs.
@@ -344,11 +347,12 @@ def build_process_env(
         extra_env: Creator-set environment extras from the spec.
         secret_env: Secrets merged into the process environment.
         token: Bearer token scoped to this task and attempt.
+        unset_env: Inherited variables left out of the process environment.
 
     Returns:
         Process environment ready to launch the task process with.
     """
-    env = dict(os.environ)
+    env = {name: value for name, value in os.environ.items() if name not in unset_env}
     env.update(run_env)
     env.update(extra_env)
     env.update(secret_env)

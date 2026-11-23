@@ -19,6 +19,8 @@ from importlib.metadata import version
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
@@ -53,6 +55,7 @@ from kitaru.server.adapters.rest.routers import (
     accounts,
     agent_versions,
     agents,
+    analyses,
     analyzers,
     annotations,
     api_keys,
@@ -94,6 +97,7 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.api.otel import configure_otel, instrument_engine, shutdown_otel
 from kitaru.server.api.task_sweeper import start_task_sweeper, stop_task_sweeper
 from kitaru.server.api.ui import get_ui_version, register_ui
+from kitaru.server.api.user_activity import UserActivityRecorder
 from kitaru.server.application.services.server_analytics import (
     ServerAnalytics,
     build_analytics_context,
@@ -111,6 +115,7 @@ from kitaru.server.domain.base import (
     ValidationError,
 )
 from kitaru.server.ephemeral_worker_settings import EphemeralWorkerBackend
+from kitaru.server.utils import replace_non_finite_floats
 
 _COMMON_ERROR_RESPONSES = error_responses(401, 403, 503) | {
     422: {"model": ValidationErrorBody, "description": "Validation Error"}
@@ -173,6 +178,26 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
     async def domain_error(request: Request, exc: DomainError) -> JSONResponse:
         _ = request
         return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+
+def _register_request_validation_exception_handler(app: FastAPI) -> None:
+    """Register the JSON error response for a request that fails validation.
+
+    Clients receive HTTP 422 with FastAPI's usual list of errors. A rejected
+    inf or nan echoed in an error's ``input`` is sent as a string such as
+    ``"inf"``, because JSON cannot represent it.
+
+    Args:
+        app: FastAPI application that will serve the v1 API.
+    """
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        _ = request
+        errors = replace_non_finite_floats(jsonable_encoder(exc.errors()))
+        return JSONResponse(status_code=422, content={"detail": errors})
 
 
 def _register_database_exception_handler(app: FastAPI) -> None:
@@ -340,11 +365,13 @@ def create_app(settings: APISettings) -> FastAPI:
         async for session in database.get_async_session():
             await register_default_plugins(SQLPluginRepository(session))
             await session.commit()
+        app.state.user_activity = UserActivityRecorder(database)
         sweep_task = start_task_sweeper(database, settings, analytics)
         try:
             yield
         finally:
             await stop_task_sweeper(sweep_task)
+            await app.state.user_activity.aclose()
             await analytics.aclose()
             if app.state.control_plane_client is not None:
                 await app.state.control_plane_client.close()
@@ -373,12 +400,15 @@ def create_app(settings: APISettings) -> FastAPI:
     app.state.control_plane_client = None
     # Replaced with the persisted server id at startup.
     app.state.server_id = None
+    # Replaced with a live recorder at startup.
+    app.state.user_activity = None
     # Replaced with a live store at startup when S3 blob storage is configured.
     app.state.s3_blob_data_store = None
     # Replaced with a live backend at startup when an ephemeral worker backend
     # is configured.
     app.state.ephemeral_workers = None
     _register_domain_exception_handlers(app)
+    _register_request_validation_exception_handler(app)
     _register_database_exception_handler(app)
     _register_pool_timeout_exception_handler(app)
     _register_token_grant_exception_handler(app)
@@ -454,6 +484,12 @@ def create_app(settings: APISettings) -> FastAPI:
         devices.router,
         prefix="/api/v1/devices",
         tags=["devices"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        analyses.router,
+        prefix="/api/v1/analyses",
+        tags=["analyses"],
         responses=_COMMON_ERROR_RESPONSES,
     )
     app.include_router(

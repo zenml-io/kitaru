@@ -29,7 +29,7 @@ from kitaru.api_models.v1.session import (
     SessionOrigin,
     SessionStatus,
 )
-from kitaru.api_models.v1.session_node import NodeType, SessionNodeBatchRequest
+from kitaru.api_models.v1.session_node import NodeType, SessionIngestRequest
 from kitaru.task.importer import ImportedSession
 from kitaru_phoenix_importer.adapter import PhoenixAdapter
 from kitaru_phoenix_importer.importer import parse
@@ -43,17 +43,15 @@ class _FakeSessionsResource:
     def __init__(self) -> None:
         self.session_id = uuid.uuid4()
         self.created: list[SessionCreateRequest] = []
-        self.batches: list[SessionNodeBatchRequest] = []
+        self.ingested: list[SessionIngestRequest] = []
 
     async def create(self, request: SessionCreateRequest) -> Any:
         self.created.append(request)
         return SimpleNamespace(id=self.session_id)
 
-    async def ingest_nodes(
-        self, session_id: uuid.UUID, batch: SessionNodeBatchRequest
-    ) -> list[Any]:
-        self.batches.append(batch)
-        return []
+    async def ingest(self, request: SessionIngestRequest) -> Any:
+        self.ingested.append(request)
+        return SimpleNamespace(id=self.session_id)
 
 
 class _FakeClient:
@@ -106,16 +104,16 @@ def test_run_imports_the_phoenix_trace_around_the_function(
     trace_id = format_trace_id(recorded.context.trace_id)
     assert fake_phoenix.requested == [trace_id] * 2
     assert fake_phoenix.project_identifiers == [PROJECT] * 2
-    assert len(client.sessions.created) == 1
-    request = client.sessions.created[0]
+    assert client.sessions.created == []
+    assert len(client.sessions.ingested) == 1
+    request = client.sessions.ingested[0].session
     assert request.agent_id is None
     assert request.origin == SessionOrigin.RECORDED
     assert request.status == SessionStatus.COMPLETED
     assert request.external_id == f"{PROJECT}:{trace_id}"
     assert request.imported_from == "phoenix"
     assert request.metadata["normalization_warnings"] == []
-    assert len(client.sessions.batches) == 1
-    nodes = client.sessions.batches[0].nodes
+    nodes = client.sessions.ingested[0].nodes
     assert [node.name for node in nodes] == ["kitaru-run", "llm-call"]
     assert nodes[0].parent_external_id is None
     assert nodes[1].parent_external_id == nodes[0].external_id

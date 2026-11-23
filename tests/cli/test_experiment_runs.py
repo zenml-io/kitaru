@@ -340,6 +340,13 @@ async def test_poll_timeout_is_recoverable_and_does_not_cancel() -> None:
         "run_id": str(client.run_id),
         "last_status": "running",
         "remote_continues": True,
+        "task_diagnostics": {
+            "live_worker_count": 1,
+            "pending_task_count": 0,
+            "groups": [],
+            "truncated": False,
+        },
+        "warnings": [],
     }
     assert f"experiment run watch {client.run_id}" in str(error.value.hint)
     assert client.cancel_calls == 0

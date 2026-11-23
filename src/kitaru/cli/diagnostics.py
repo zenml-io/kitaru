@@ -45,6 +45,7 @@ from kitaru.cli.skill_discovery import (
     get_kitaru_skill_status,
     select_visible_skill_names,
 )
+from kitaru.cli.task_diagnostics import get_task_diagnostics
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.config import (
     DIRECTORY_MODE,
@@ -53,6 +54,7 @@ from kitaru.client.config import (
 )
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ServerCredentials
+from kitaru.client.dashboard_urls import get_dashboard_base_url
 from kitaru.client.exceptions import APIError, NotFoundError
 
 # Worker tasks install freshly released Kitaru plugins under a project's
@@ -157,6 +159,12 @@ async def status(
             warnings.append(
                 "The server requires authentication but no credential is available."
             )
+        task_diagnostics = None
+        if live_workers is not None:
+            task_diagnostics, task_warnings = await get_task_diagnostics(
+                client, timeout=timeout
+            )
+            warnings.extend(task_warnings)
         compatibility = _compatibility(info.version)
         compatibility_warning = _compatibility_warning(compatibility)
         if compatibility_warning is not None:
@@ -167,12 +175,15 @@ async def status(
             "credential_status": _credential_summary(credential),
             "authentication": authentication,
             "server": info.model_dump(mode="json"),
-            "dashboard_url": info.dashboard_url,
+            "dashboard_url": get_dashboard_base_url(info, target.server_url),
             "compatibility": compatibility,
             "live_worker_count": len(live_workers)
             if live_workers is not None
             else None,
             "live_workers": live_workers,
+            "task_diagnostics": task_diagnostics.model_dump(mode="json")
+            if task_diagnostics
+            else None,
         }
         return CommandResult(item=item, warnings=warnings)
     finally:

@@ -83,8 +83,16 @@ _INVESTIGATION_SESSION_VERDICT_PARAMETERS = (
                 "--insight",
                 "JSON[]",
                 "option",
-                True,
+                False,
                 "Insight JSON object; repeat for each created insight.",
+            ),
+            ParameterSpec(
+                "--insight-file",
+                "path",
+                "option",
+                False,
+                "UTF-8 JSON file with one insight object or an array of them; "
+                "replaces --insight.",
             ),
             IDEMPOTENCY_KEY_PARAMETER,
         ),
@@ -97,7 +105,8 @@ _INVESTIGATION_SESSION_VERDICT_PARAMETERS = (
 async def insight_create(
     *,
     agent: str,
-    insight: list[str],
+    insight: list[str] | None = None,
+    insight_file: Path | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create a batch of insights for one agent."""
@@ -106,6 +115,7 @@ async def insight_create(
             client,
             agent=agent,
             insight=insight,
+            insight_file=insight_file,
             idempotency_key=idempotency_key,
         )
 
@@ -254,14 +264,22 @@ async def insight_delete(
     insight_app,
     build_spec(
         ("insight", "report"),
-        "Render an import's insights as a self-contained HTML file.",
+        "Render an import's or analysis task's insights as a self-contained HTML file.",
         parameters=(
             ParameterSpec(
                 "--import-id",
                 "UUID",
                 "option",
-                True,
+                False,
                 "Import whose insights to render.",
+            ),
+            ParameterSpec(
+                "--task-id",
+                "UUID",
+                "option",
+                False,
+                "Analysis task whose insights to render, for analyses started "
+                "with `kitaru session analyze`.",
             ),
             ParameterSpec(
                 "--out", "path", "option", False, "HTML file to write (report.html)."
@@ -275,13 +293,14 @@ async def insight_delete(
 )
 async def insight_report_command(
     *,
-    import_id: Annotated[uuid.UUID, Parameter(name="--import-id")],
+    import_id: Annotated[uuid.UUID | None, Parameter(name="--import-id")] = None,
+    task_id: Annotated[uuid.UUID | None, Parameter(name="--task-id")] = None,
     out: Annotated[Path, Parameter(name="--out")] = Path("report.html"),
 ) -> CommandResult:
-    """Render the insights of one import to an HTML file."""
+    """Render the insights of one import or analysis task to an HTML file."""
     async with invocation_context.open_asset_client() as client:
         return await insight_report.write_insight_report(
-            client, import_id=import_id, out=out
+            client, import_id=import_id, task_id=task_id, out=out
         )
 
 
@@ -292,7 +311,13 @@ async def insight_report_command(
         "Create an investigation with linked sessions.",
         parameters=(
             ParameterSpec(
-                "NAME", "string", "argument", True, "New investigation name."
+                "NAME",
+                "string",
+                "argument",
+                True,
+                "Name of 1-255 ASCII letters or digits with internal hyphens or "
+                "underscores, for example extraction-review. Start and end with a "
+                "letter or digit.",
             ),
             ParameterSpec(
                 "--agent",
@@ -409,7 +434,15 @@ async def investigation_get(investigation: uuid.UUID, /) -> CommandResult:
             ParameterSpec(
                 "INVESTIGATION", "UUID", "argument", True, "Investigation ID."
             ),
-            ParameterSpec("--name", "string", "option", False, "New name."),
+            ParameterSpec(
+                "--name",
+                "string",
+                "option",
+                False,
+                "New name of 1-255 ASCII letters or digits with internal hyphens or "
+                "underscores, for example extraction-review. Start and end with a "
+                "letter or digit.",
+            ),
             ParameterSpec(
                 "--description", "string", "option", False, "New curator rationale."
             ),

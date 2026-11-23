@@ -1,0 +1,1 @@
+- Add `kitaru feedback`, which drafts a GitHub issue about a Kitaru bug and prints a prefilled link that you review and submit yourself. Nothing is sent automatically. When a command crashes or the server returns HTTP 500, the error hint now suggests it.

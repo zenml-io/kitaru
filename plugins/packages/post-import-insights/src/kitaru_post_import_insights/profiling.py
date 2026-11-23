@@ -22,17 +22,16 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from enum import Enum
+from functools import partial
 from itertools import pairwise
 from types import TracebackType
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from kitaru.api_models.v1.insight import (
-    Bin,
-    BinnedInsightData,
     CategoricalInsightData,
     CategoryValue,
 )
@@ -43,12 +42,24 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeResponse,
     SessionWithNodesResponse,
 )
-from kitaru.redaction import redact_data
+from kitaru_post_import_insights.findings import (
+    CandidateCoverage,
+    CandidateFinding,
+    DeterministicFact,
+    build_binned,
+    calculate_percent,
+    format_briefing,
+    pluralize,
+)
+from kitaru_post_import_insights.labels import (
+    MAX_SELECTOR_LENGTH,
+    MAX_SELECTOR_SEGMENTS,
+    UNAVAILABLE_TOOL,
+    sanitize_label,
+)
 from kitaru_post_import_insights.models import (
     DISTRIBUTION_TOP_BIN_SIGNAL,
     MAX_CONTRIBUTING_SESSIONS,
-    MAX_EVIDENCE_LOCATORS,
-    MAX_INVESTIGATION_PROMPT_LENGTH,
     Coverage,
     CoverageTruncation,
     EvidenceLocator,
@@ -60,14 +71,14 @@ from kitaru_post_import_insights.profiling_state import (
     LabelCounts,
     SessionReferences,
 )
+from kitaru_post_import_insights.resource_inputs import FindingLimits
+from kitaru_post_import_insights.resource_profile import ResourceProfile
 
-ANALYSIS_VERSION = "2026-10-23.1"
+ANALYSIS_VERSION = "2026-11-18.1"
 MAX_DISTRIBUTION_EXAMPLES = 5
-MAX_LABEL_LENGTH = 120
 MAX_ROLE_LENGTH = 32
-MAX_SELECTOR_LENGTH = 1_024
-MAX_SELECTOR_SEGMENTS = 64
 _DECIMAL_BASE_SIZE = Decimal(0).__sizeof__()
+_JSON_STRING_ENCODER = json.JSONEncoder(ensure_ascii=False)
 
 _CORRECTION_PATTERN = re.compile(
     r"\b(?:that(?:'s| is) not|you (?:didn't|did not)|doesn't work|does not work|"
@@ -79,41 +90,6 @@ _PROFANITY_PATTERN = re.compile(
     r"\b(?:fuck(?:ed|er|ers|ing|s)?|shit(?:ty|ting|s)?|bullshit|asshole|"
     r"bastard|bitch(?:es)?)\b",
     flags=re.IGNORECASE,
-)
-_CONTROL_PATTERN = re.compile(r"[\x00-\x1f\x7f]")
-_PRIVATE_KEY_PATTERN_SUFFIX = "PRIVATE" + r" KEY-----"
-_CREDENTIAL_PATTERNS = (
-    re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}\b", re.IGNORECASE),
-    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b", re.IGNORECASE),
-    re.compile(r"\bxox[a-z]-[A-Za-z0-9-]{20,}\b", re.IGNORECASE),
-    re.compile(r"\b(?:AK" r"IA|AS" r"IA)[A-Z0-9]{16}\b"),
-    re.compile(r"\be" r"yJ[A-Za-z0-9_-]+\.e" r"yJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
-    re.compile(r"-----BEGIN [A-Z ]*" + _PRIVATE_KEY_PATTERN_SUFFIX, re.IGNORECASE),
-    re.compile(r"\bauthorization\s*:\s*(?:bearer|basic)\s+\S+", re.IGNORECASE),
-    re.compile(
-        r"\b(?:authorization|proxy-authorization|x-api-key|api-key|token|secret)"
-        r"\s*[:=]\s*\S+",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\b(?:password|passwd|pwd|credentials?|client[_-]?secret|private[_-]?key)"
-        r"\s*[:=]\s*\S+",
-        re.IGNORECASE,
-    ),
-    re.compile(r"https?://[^\s/@:]+:[^\s/@]+@", re.IGNORECASE),
-    re.compile(
-        r"https?://[^\s?#]+[?&](?:api[_-]?key|access[_-]?token|token|secret)="
-        r"[^\s&#]+",
-        re.IGNORECASE,
-    ),
-)
-_INSTRUCTION_PATTERN = re.compile(
-    r"\b(?:ignore|disregard|override)\s+(?:(?:all|any|every|the)\s+)?"
-    r"(?:previous|prior|above|later|following)?\s*"
-    r"(?:instructions?|directions?|prompts?|rules?)\b|"
-    r"\breveal\s+(?:the\s+)?system\s+prompt\b|"
-    r"\byou\s+are\s+now\s+(?:an?|the)\b",
-    re.IGNORECASE,
 )
 
 
@@ -142,74 +118,10 @@ class ProfilingConfig(_ProfilingModel):
     max_projection_bytes: int = Field(default=512_000, ge=1_000, le=10_000_000)
 
 
-class DeterministicFact(_ProfilingModel):
-    """One computed fact safe to include in a model projection."""
-
-    name: str = Field(min_length=1, max_length=80)
-    value: int | float | str
-
-
-class CandidateCoverage(_ProfilingModel):
-    """Signal-specific coverage and bounded-reference accounting."""
-
-    sessions_analyzed: int = Field(ge=0)
-    affected_sessions: int = Field(ge=0)
-    occurrences: int = Field(ge=0)
-    evidence_available: int = Field(ge=0)
-    evidence_retained: int = Field(ge=0)
-    contributing_sessions_available: int = Field(ge=0)
-    contributing_sessions_retained: int = Field(ge=0)
-
-    @model_validator(mode="after")
-    def _validate_counts(self) -> Self:
-        """Keep retained and affected counts within their available totals."""
-        if self.affected_sessions > self.sessions_analyzed:
-            raise ValueError("affected sessions exceed analyzed sessions")
-        if self.evidence_retained > self.evidence_available:
-            raise ValueError("retained evidence exceeds available evidence")
-        if self.contributing_sessions_retained > self.contributing_sessions_available:
-            raise ValueError("retained contributions exceed available contributions")
-        return self
-
-
-class CandidateFinding(_ProfilingModel):
-    """One chart-backed finding eligible for model selection."""
-
-    id: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-    family: str = Field(min_length=1, max_length=80)
-    rank: int = Field(ge=0)
-    eyebrow: str = Field(min_length=1, max_length=80)
-    title: str = Field(min_length=1, max_length=255)
-    fallback_description: str = Field(min_length=1, max_length=1000)
-    caveat: str | None = Field(default=None, min_length=1, max_length=1000)
-    data: CategoricalInsightData | BinnedInsightData
-    facts: list[DeterministicFact] = Field(default_factory=list, max_length=20)
-    coverage: CandidateCoverage
-    contributing_session_ids: list[uuid.UUID] = Field(
-        min_length=1, max_length=MAX_CONTRIBUTING_SESSIONS
-    )
-    evidence: list[EvidenceLocator] = Field(
-        default_factory=list, max_length=MAX_EVIDENCE_LOCATORS
-    )
-    investigation_prompt: str = Field(
-        min_length=1, max_length=MAX_INVESTIGATION_PROMPT_LENGTH
-    )
-
-    @model_validator(mode="after")
-    def _validate_references(self) -> Self:
-        """Keep contribution and evidence references consistent."""
-        contributing = set(self.contributing_session_ids)
-        if len(contributing) != len(self.contributing_session_ids):
-            raise ValueError("contributing session IDs must be unique")
-        if any(item.session_id not in contributing for item in self.evidence):
-            raise ValueError("evidence session must be a contributing session")
-        return self
-
-
 class ProfilingResult(_ProfilingModel):
     """Stable candidate envelope produced without a model or evaluations."""
 
-    analysis_version: Literal["2026-10-23.1"] = ANALYSIS_VERSION
+    analysis_version: Literal["2026-11-18.1"] = ANALYSIS_VERSION
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     coverage: Coverage
     candidates: list[CandidateFinding]
@@ -226,27 +138,15 @@ class _Aggregate:
 
 
 def _calculate_json_string_size(value: str, limit: int) -> int | None:
-    """Return exact UTF-8 JSON string size, stopping once it exceeds a limit."""
-    size = 2  # Opening and closing quotes.
-    short_escapes = {"\b", "\t", "\n", "\f", "\r", '"', "\\"}
-    for character in value:
-        codepoint = ord(character)
-        if character in short_escapes:
-            size += 2
-        elif codepoint < 0x20:
-            size += 6
-        elif codepoint < 0x80:
-            size += 1
-        elif codepoint < 0x800:
-            size += 2
-        elif codepoint < 0x10000:
-            if 0xD800 <= codepoint <= 0xDFFF:
-                return None
-            size += 3
-        else:
-            size += 4
-        if size > limit:
-            return None
+    """Return exact UTF-8 JSON string size, or None past a limit or on a surrogate."""
+    # Every character encodes to at least one byte, so the length alone rejects
+    # an oversized string before the escaped copy is built.
+    if len(value) + 2 > limit:
+        return None
+    try:
+        size = len(_JSON_STRING_ENCODER.encode(value).encode("utf-8"))
+    except UnicodeEncodeError:
+        return None
     return size if size <= limit else None
 
 
@@ -454,6 +354,7 @@ class _State:
     ambiguous_tool_outputs: int = 0
     contribution_truncated: bool = False
     maximum_contributors_available: int = 0
+    resources: ResourceProfile = field(init=False)
 
     def __post_init__(self) -> None:
         """Initialize the traversal budget from the immutable config."""
@@ -481,6 +382,13 @@ class _State:
         self.highest_activity_counts = HighestValueSessions(evidence_limit)
         self.highest_durations = HighestValueSessions(evidence_limit)
         self.models = LabelCounts(self.counts_store, "models")
+        self.resources = ResourceProfile(
+            FindingLimits.from_bounds(
+                max_evidence=self.config.max_evidence_per_candidate,
+                max_contributors=self.config.max_contributing_sessions,
+                max_text_bytes=self.config.max_text_bytes,
+            )
+        )
         self.reset_payload_budget()
 
     def reset_payload_budget(self) -> None:
@@ -493,36 +401,9 @@ class _State:
         )
 
 
-def sanitize_label(value: str | None) -> str | None:
-    """Return a bounded exact label, or omit it when it may contain a secret."""
-    if value is None:
-        return None
-    if len(value) > MAX_LABEL_LENGTH:
-        return None
-    candidate = value
-    if not candidate.strip():
-        return None
-    try:
-        candidate.encode("utf-8")
-    except UnicodeEncodeError:
-        return None
-    redacted = redact_data(candidate)
-    if not isinstance(redacted, str) or redacted != candidate or "***" in redacted:
-        return None
-    if _CONTROL_PATTERN.search(candidate):
-        return None
-    if any(pattern.search(candidate) for pattern in _CREDENTIAL_PATTERNS):
-        return None
-    if _INSTRUCTION_PATTERN.search(candidate):
-        return None
-    return candidate
-
-
 def _validate_exact_name(value: str | None) -> str | None:
     """Return a safe bounded name without changing exact identity semantics."""
     if value is None or sanitize_label(value) is None:
-        return None
-    if _CONTROL_PATTERN.search(value):
         return None
     return value
 
@@ -877,28 +758,40 @@ def _find_cycles(
 def _count_output_tool_requests(
     nodes: Sequence[SessionNodeResponse], budget: _PayloadBudget
 ) -> int | None:
-    """Count explicit tool-call parts in assistant outputs within payload bounds."""
+    """Count requests in fully inspected assistant outputs, or return unknown."""
+    if not nodes:
+        return None
     count = 0
     for node in nodes:
         if not isinstance(node.outputs, (list, dict)):
-            continue
+            return None
+        assistant_seen = False
         stack: list[tuple[Any, int, bool]] = [(node.outputs, 0, False)]
         while stack:
             current, depth, in_parts = stack.pop()
             if not budget.consume(current, depth=depth):
                 return None
             if not isinstance(current, (list, dict)):
-                continue
+                return None
             if isinstance(current, list):
                 if not budget.can_enter(len(current)):
                     return None
                 stack.extend((item, depth + 1, in_parts) for item in current)
             elif in_parts:
+                if current.get("type") not in ("text", "tool_call", "tool_result"):
+                    return None
                 count += current.get("type") == "tool_call"
             elif current.get("role") == "assistant":
+                if not isinstance(current.get("parts"), list):
+                    return None
+                assistant_seen = True
                 stack.append((current.get("parts"), depth + 1, True))
             elif "role" not in current and "messages" in current:
                 stack.append((current["messages"], depth + 1, False))
+            elif "role" not in current:
+                return None
+        if not assistant_seen:
+            return None
     return count
 
 
@@ -961,7 +854,7 @@ def _scan_session(
     identities = [_get_tool_identity(call, state.payload_budget) for call in calls]
     state.identity_available += sum(identity is not None for identity in identities)
     for call in calls:
-        label = sanitize_label(call.tool_name) or "Unavailable tool"
+        label = sanitize_label(call.tool_name) or UNAVAILABLE_TOOL
         if call.status is NodeStatus.FAILED:
             _record(
                 state,
@@ -986,7 +879,7 @@ def _scan_session(
         second_identity = identities[position + 1]
         first_tool_name = _validate_exact_name(first.tool_name)
         second_tool_name = _validate_exact_name(second.tool_name)
-        label = sanitize_label(first.tool_name) or "Unavailable tool"
+        label = sanitize_label(first.tool_name) or UNAVAILABLE_TOOL
         if first_identity is not None and first_identity == second_identity:
             _record(
                 state,
@@ -1018,7 +911,7 @@ def _scan_session(
             )
 
     for start, _, tools in _find_cycles(calls, identities):
-        safe_tools = [sanitize_label(tool) or "Unavailable tool" for tool in tools]
+        safe_tools = [sanitize_label(tool) or UNAVAILABLE_TOOL for tool in tools]
         _record(
             state,
             "short-tool-cycles",
@@ -1095,21 +988,6 @@ def _scan_session(
             )
 
 
-def _calculate_percent(numerator: int, denominator: int) -> int | float:
-    """Round percentages, preserving the scale of very sparse shares."""
-    if not denominator:
-        return 0
-    exact = Decimal(numerator) * 100 / Decimal(denominator)
-    quantum = Decimal("0.01")
-    value = exact.quantize(quantum, rounding=ROUND_HALF_UP)
-    while 0 < numerator < denominator and value in (0, 100):
-        quantum /= 10
-        value = exact.quantize(quantum, rounding=ROUND_HALF_UP)
-    if value == value.to_integral_value():
-        return int(value)
-    return float(value)
-
-
 def _get_contributions(
     state: _State,
     session_ids: SessionReferences,
@@ -1133,38 +1011,6 @@ def _get_contributions(
     )
 
 
-_BRIEFING_CAUTION = (
-    "This pattern is a lead, not proof of a bad result. The finding data at the "
-    "end of this prompt carries the exact session IDs, the chart, and any "
-    "evidence locators; use those, not this summary, when choosing sessions."
-)
-
-
-def _format_briefing(
-    *,
-    odd: str,
-    look_first: str,
-    cohort: str,
-    hypothesis: str,
-    held: str,
-) -> str:
-    """Lay out one finding briefing in the fixed section order."""
-    return (
-        f"What is odd: {odd}\n"
-        f"Where to look first: {look_first}\n"
-        f"Candidate cohort: {cohort}\n"
-        f"One hypothesis to test: {hypothesis}\n"
-        f"The hypothesis held if: {held}\n"
-        f"{_BRIEFING_CAUTION}"
-    )
-
-
-def _pluralize(count: int, singular: str, plural: str | None = None) -> str:
-    """Return the count with the matching noun form."""
-    noun = singular if count == 1 else (plural or f"{singular}s")
-    return f"{count} {noun}"
-
-
 def _format_ratio(numerator: int, denominator: int) -> str:
     """Format a per-session average with at most one decimal place."""
     if not denominator:
@@ -1186,9 +1032,9 @@ def _build_signal_briefing(
 ) -> str:
     """Build the briefing for a trajectory, tool-health, or language signal."""
     odd = (
-        f"{_pluralize(occurrences, 'occurrence')} of {subject} across "
-        f"{_pluralize(affected, 'session')}, which is {share}% of the "
-        f"{_pluralize(analyzed, 'session')} analyzed for this marker."
+        f"{pluralize(occurrences, 'occurrence')} of {subject} across "
+        f"{pluralize(affected, 'session')}, which is {share}% of the "
+        f"{pluralize(analyzed, 'session')} analyzed for this marker."
     )
     if chart_groups > 1:
         odd += (
@@ -1202,13 +1048,13 @@ def _build_signal_briefing(
         )
     if excluded_sessions:
         odd += (
-            f" {_pluralize(excluded_sessions, 'session was', 'sessions were')} left "
+            f" {pluralize(excluded_sessions, 'session was', 'sessions were')} left "
             "out because their user text was missing or not fully inspected."
         )
     marker_look_first = (
         "Open the sessions named in evidence_locators; each locator points at "
-        "the node where the marker was recorded. Compare them with sessions "
-        "from the same import that have no occurrence"
+        "the node where the marker was recorded. Compare them with analyzed "
+        "sessions that have no occurrence"
     )
     if family == "language":
         look_first = (
@@ -1216,9 +1062,8 @@ def _build_signal_briefing(
             "is null the matching text is in the session's recorded inputs, "
             "otherwise it is in that node's inputs. First confirm that the matching "
             "text is customer input rather than agent policy or harness instructions. "
-            "Compare them with sessions from "
-            "the same import that have no occurrence, and read the agent turn "
-            "immediately before each flagged user message."
+            "Compare them with analyzed sessions that have no occurrence, and "
+            "read the agent turn immediately before each flagged user message."
         )
         cohort = (
             f"sessions with at least one user message matching this marker (the "
@@ -1233,7 +1078,7 @@ def _build_signal_briefing(
         )
         held = (
             "the marker recurs in fewer replayed sessions than the "
-            f"{_pluralize(affected, 'session')} it appears in now, and the "
+            f"{pluralize(affected, 'session')} it appears in now, and the "
             "failed-session rate for the cohort does not rise."
         )
     elif family == "tool_health":
@@ -1281,7 +1126,7 @@ def _build_signal_briefing(
             f"{_format_ratio(occurrences, affected)}, tool calls per session drop, "
             "and the failed-session rate does not rise."
         )
-    return _format_briefing(
+    return format_briefing(
         odd=odd,
         look_first=look_first,
         cohort=cohort,
@@ -1300,7 +1145,7 @@ def _build_outcome_briefing(
 ) -> str:
     """Build the briefing for the recorded session outcome finding."""
     odd = (
-        f"{_pluralize(failed, 'session')} out of {analyzed} analyzed "
+        f"{pluralize(failed, 'session')} out of {analyzed} analyzed "
         f"({failed_percent}%) {'carries' if failed == 1 else 'carry'} the recorded "
         "status failed."
     )
@@ -1311,16 +1156,17 @@ def _build_outcome_briefing(
     if completed:
         look_first = (
             "Open the failed sessions listed in contributing_session_ids and read "
-            "their last recorded node. Compare each with a completed session from "
-            "the same import that starts with a similar input."
+            "their last recorded node. Compare each with a completed analyzed "
+            "session that starts with a similar input."
         )
     else:
         look_first = (
             "Open the failed sessions listed in contributing_session_ids and read "
-            "their last recorded node. No completed session exists in this import, "
-            "so pick the comparison set from another import or agent version."
+            "their last recorded node. None of the analyzed sessions completed, so "
+            "pick the comparison set from other sessions of this agent or from "
+            "another agent version."
         )
-    return _format_briefing(
+    return format_briefing(
         odd=odd,
         look_first=look_first,
         cohort=f"sessions whose recorded status is failed (the {failed} listed).",
@@ -1332,34 +1178,6 @@ def _build_outcome_briefing(
         held=(
             f"the failed share of the replayed cohort falls below {failed_percent}% "
             "without a rise in duration or cost per session."
-        ),
-    )
-
-
-def _build_flat_distribution_briefing(
-    *, family: str, values: Histogram, unit: str, quantity: str
-) -> str:
-    """Build the briefing for a distribution whose observations share one value."""
-    observations = len(values)
-    minimum = f"{values.minimum:g}"
-    recorded = "a recorded duration" if family == "timing" else f"recorded {unit}"
-    return _format_briefing(
-        odd=(
-            f"All {observations} observations have exactly {minimum} {unit}; there "
-            "is no tail to compare against the middle."
-        ),
-        look_first=(
-            "Open a few of the sessions in contributing_session_ids to confirm the "
-            "value is real rather than a fixed instrumentation default."
-        ),
-        cohort=f"every session with {recorded} (the {observations} listed).",
-        hypothesis=(
-            "Treat this as a baseline: check that one intended agent change moves "
-            f"{quantity} away from {minimum} {unit} in the direction you expect."
-        ),
-        held=(
-            f"the replayed cohort's {quantity} differs from {minimum} {unit} in the "
-            "expected direction while the failed-session rate does not rise."
         ),
     )
 
@@ -1377,11 +1195,6 @@ def _build_distribution_briefing(
     observations = len(values)
     minimum = f"{values.minimum:g}"
     maximum = f"{values.maximum:g}"
-    if values.minimum == values.maximum:
-        return _build_flat_distribution_briefing(
-            family=family, values=values, unit=unit, quantity=quantity
-        )
-
     tail_index = values.get_highest_occupied_bin()
     assert tail_index is not None
     tail_count = values.bins[tail_index]
@@ -1399,7 +1212,7 @@ def _build_distribution_briefing(
     rest = observations - tail_count
     odd = (
         f"{observations} sessions range from {minimum} to {maximum} {unit}. "
-        f"{_pluralize(tail_count, 'session sits', 'sessions sit')} in the "
+        f"{pluralize(tail_count, 'session sits', 'sessions sit')} in the "
         f"{bin_name} ({bin_label})"
         + (
             f"; the other {rest} sit below it."
@@ -1467,7 +1280,7 @@ def _build_distribution_briefing(
             f"the cohort's {quantity} decreases against its recorded baseline while "
             "the failed-session rate does not rise."
         )
-    return _format_briefing(
+    return format_briefing(
         odd=odd,
         look_first=look_first,
         cohort=cohort,
@@ -1485,42 +1298,30 @@ def _build_model_mix_briefing(
     analyzed: int,
 ) -> str:
     """Build the briefing for the recorded model mix finding."""
-    leading_share = _calculate_percent(leading_model_calls, model_calls)
+    leading_share = calculate_percent(leading_model_calls, model_calls)
     odd = (
-        f"{_pluralize(models, 'distinct recorded model label')} across "
-        f"{_pluralize(model_calls, 'model call')} in {affected} of {analyzed} "
+        f"{pluralize(models, 'distinct recorded model label')} across "
+        f"{pluralize(model_calls, 'model call')} in {affected} of {analyzed} "
         f"sessions. The most frequent label accounts for "
-        f"{_pluralize(leading_model_calls, 'call')} ({leading_share}%)."
+        f"{pluralize(leading_model_calls, 'call')} ({leading_share}%)."
     )
-    if models == 1:
-        look_first = (
-            "Open a few sessions from contributing_session_ids and read the model "
-            "label on their model-call nodes. With a single label there is no "
-            "in-import comparison; compare candidate models on these recorded "
-            "calls instead."
-        )
-        cohort = (
-            f"sessions with a recorded model label (all {affected} listed), since "
-            "every recorded call uses the same label."
-        )
-    else:
-        look_first = (
-            "Open sessions from contributing_session_ids and group them by the model "
-            "label on their model-call nodes. Compare sessions with at least one "
-            "model-call node recording the chart's leading label against sessions "
-            "with none."
-        )
-        cohort = (
-            "sessions with at least one model-call node recording the chart's "
-            f"leading label ({leading_model_calls} of {model_calls} calls)."
-        )
-    return _format_briefing(
+    look_first = (
+        "Open sessions from contributing_session_ids and group them by the model "
+        "label on their model-call nodes. Compare sessions with at least one "
+        "model-call node recording the chart's leading label against sessions "
+        "with none."
+    )
+    cohort = (
+        "sessions with at least one model-call node recording the chart's "
+        f"leading label ({leading_model_calls} of {model_calls} calls)."
+    )
+    return format_briefing(
         odd=odd,
         look_first=look_first,
         cohort=cohort,
         hypothesis=(
             "Check whether another model is better, cheaper, faster, or open for "
-            "these calls: run kitaru/model-swap on this import with the "
+            "these calls: run kitaru/model-swap on these sessions with the "
             "kitaru-model-swap skill, then review where the candidates differ."
         ),
         held=(
@@ -1543,20 +1344,6 @@ def _build_categorical(
         unit=unit,
         values=[CategoryValue(label=label, value=value) for label, value in ordered],
     )
-
-
-def _build_binned(values: Histogram, *, unit: str) -> BinnedInsightData:
-    """Count values into contiguous half-open bins."""
-    bounds = values.bounds
-    bins = [
-        Bin(
-            lower_bound=None if index == 0 else bounds[index - 1],
-            upper_bound=bounds[index] if index < len(bounds) else None,
-            count=count,
-        )
-        for index, count in enumerate(values.bins)
-    ]
-    return BinnedInsightData(unit=unit, bins=bins)
 
 
 def _build_signal_candidate(
@@ -1583,7 +1370,7 @@ def _build_signal_candidate(
         if family == "language"
         else state.node_session_ids
     )
-    share = _calculate_percent(len(aggregate.sessions), len(eligible_session_ids))
+    share = calculate_percent(len(aggregate.sessions), len(eligible_session_ids))
     values: Counter[str] | LabelCounts = aggregate.categories
     unit = "occurrences"
     if len(values) == 1:
@@ -1819,7 +1606,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
         contributions = _get_contributions(state, affected_ids)
         contribution_ids = set(contributions)
         completed_sessions = state.statuses.get(SessionStatus.COMPLETED.value, 0)
-        failed_percent = _calculate_percent(
+        failed_percent = calculate_percent(
             state.statuses.get("failed", 0), analyzed_sessions
         )
         outcome_description = (
@@ -1921,7 +1708,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             title="Model calls per session have a measurable spread",
             description=(
                 "The distribution shows how model-call activity varies across the "
-                "imported sessions."
+                "analyzed sessions."
             ),
             values=state.model_counts,
             highest_values=state.highest_model_counts,
@@ -1964,48 +1751,30 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
         ),
     )
     for spec in distribution_specs:
-        if len(spec.values) < 2:
+        if len(spec.values) < 2 or spec.values.minimum == spec.values.maximum:
             continue
-        uniform = spec.values.minimum == spec.values.maximum
         highest_bin = spec.values.get_highest_occupied_bin()
         assert highest_bin is not None
-        evidence = (
-            []
-            if uniform
-            else [
-                EvidenceLocator(
-                    session_id=session_id, signal=DISTRIBUTION_TOP_BIN_SIGNAL
-                )
-                for session_id, value in spec.highest_values.get_entries()
-                if spec.values.get_bin_index(value) == highest_bin
-            ]
-        )
+        evidence = [
+            EvidenceLocator(session_id=session_id, signal=DISTRIBUTION_TOP_BIN_SIGNAL)
+            for session_id, value in spec.highest_values.get_entries()
+            if spec.values.get_bin_index(value) == highest_bin
+        ]
         contributing = _get_contributions(
             state, spec.session_ids, reserved_ids=[item.session_id for item in evidence]
         )
         if not contributing:
             continue
-        unit = spec.unit.removesuffix("s") if spec.values.minimum == 1 else spec.unit
-        title = (
-            f"All recorded observations have {spec.values.minimum:g} {unit}"
-            if uniform
-            else spec.title
-        )
-        description = (
-            "This uniform baseline can anchor comparisons after an agent change."
-            if uniform
-            else spec.description
-        )
         candidates.append(
             CandidateFinding(
                 id=spec.candidate_id,
                 family=spec.family,
                 rank=spec.rank,
                 eyebrow=spec.eyebrow,
-                title=title,
-                fallback_description=description,
+                title=spec.title,
+                fallback_description=spec.description,
                 caveat=spec.caveat,
-                data=_build_binned(spec.values, unit=spec.unit),
+                data=build_binned(spec.values, unit=spec.unit),
                 facts=[
                     DeterministicFact(name="observations", value=len(spec.values)),
                     DeterministicFact(name="minimum", value=spec.values.minimum),
@@ -2031,7 +1800,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             )
         )
 
-    if state.models:
+    if len(state.models) > 1:
         model_sessions = state.model_sessions
         contributions = _get_contributions(state, model_sessions)
         candidates.append(
@@ -2041,8 +1810,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 rank=160,
                 eyebrow="MODEL MIX",
                 title=(
-                    f"{len(state.models)} recorded model identifier"
-                    f"{' appears' if len(state.models) == 1 else 's appear'} in "
+                    f"{len(state.models)} recorded model identifiers appear in "
                     "these sessions"
                 ),
                 fallback_description=(
@@ -2085,6 +1853,9 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 ),
             )
         )
+    candidates.extend(
+        state.resources.build_candidates(partial(_get_contributions, state))
+    )
     candidates.sort(key=lambda candidate: (candidate.rank, candidate.id))
     return candidates
 
@@ -2139,6 +1910,7 @@ class SessionProfiler:
     def close(self) -> None:
         """Release temporary storage; no further consumption is allowed."""
         self._state.counts_store.close()
+        self._state.resources.close()
         self._closed = True
 
     def consume(self, session: SessionWithNodesResponse) -> None:
@@ -2158,6 +1930,7 @@ class SessionProfiler:
             # The server returns nodes ordered by position already.
             ordered_nodes = list(session.nodes)
             _scan_session(state, session, ordered_nodes)
+            state.resources.consume(session, ordered_nodes)
             state.nodes_analyzed += len(ordered_nodes)
             state.payload_truncation_count += state.payload_budget.truncation_count
         except BaseException:
@@ -2246,11 +2019,19 @@ def _finish_profile(state: _State, source_session_count: int | None) -> Profilin
     if sessions_available > sessions_analyzed:
         caveats[0] += (
             " Some source sessions were not supplied for profiling. nodes_available "
-            "counts only nodes in the supplied sessions, not the entire source import."
+            "counts only nodes in the supplied sessions, not every source session."
         )
     if state.timing_available < sessions_analyzed:
         caveats.append(
             "Timing coverage is incomplete because valid session bounds are missing."
+        )
+    unknown_tool_sessions = sessions_analyzed - len(state.tool_count_session_ids)
+    if unknown_tool_sessions:
+        caveats.append(
+            f"Tool activity coverage is incomplete for {unknown_tool_sessions} "
+            "sessions because tool nodes or fully inspected supported assistant "
+            "outputs were unavailable. These sessions were excluded from tool "
+            "counts; zero counts mean no recorded requests, not proof of no tool use."
         )
     if state.identity_available < state.tool_calls:
         caveats.append(

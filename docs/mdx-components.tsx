@@ -1,4 +1,10 @@
-import * as Python from "fumadocs-python/components";
+import {
+  PyAttribute,
+  PyAttributes,
+  PyFunction,
+  PyFunctionReturn,
+  PyParameter,
+} from "fumadocs-python/components";
 import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
@@ -30,7 +36,11 @@ import { PySourceCode } from "@/components/py-source-code";
 export function getMDXComponents(components?: MDXComponents): MDXComponents {
   return {
     ...defaultMdxComponents,
-    ...Python,
+    PyAttribute,
+    PyAttributes,
+    PyFunction,
+    PyFunctionReturn,
+    PyParameter,
     // Shadow the broken PySourceCode from fumadocs-python 0.1.1; see the
     // comment in components/py-source-code.tsx.
     PySourceCode,

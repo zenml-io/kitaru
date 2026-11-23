@@ -36,9 +36,8 @@ from kitaru.api_models.v1.evaluator import (
     EvaluatorVersionCreateRequest,
 )
 from kitaru.api_models.v1.job import JobStatus
-from kitaru.api_models.v1.plugin import ScriptPluginSource
+from kitaru.api_models.v1.plugin import EvaluatorConfig, ScriptPluginSource
 from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayCreateRequest
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
     SessionOrigin,
@@ -90,7 +89,7 @@ async def record_agent() -> None:
             SessionNodeBatchRequest(
                 nodes=[
                     SessionNodeCreateRequest(
-                        index=0,
+                        external_id="read-color",
                         node_type=NodeType.TOOL_CALL,
                         name="read_color",
                         tool_name="read_color",

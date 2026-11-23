@@ -2,9 +2,14 @@
 
 ## Unreleased
 
+- Import prompt-cache writes from `gen_ai.usage.details.cache_write_tokens` or `llm.token_count.prompt_details.cache_write` as `cache_write_input_tokens`.
 - Preserve function `strict` flags and retain unsupported offered tool definitions so replay can reject an incomplete request instead of silently loosening its constraints.
 - Stop reading Pydantic AI's `model_request_parameters` attribute as model parameters. It lists the tools offered to the model, not sampling settings.
 - Keep LLM span tool definitions under the `kitaru.tool_definitions` node metadata key, normalized to the OpenAI chat-completions form, from OpenInference `llm.tools.N.tool.json_schema` or `gen_ai.tool.definitions`.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
 
 ## 0.4.0 - 2026-09-21
 

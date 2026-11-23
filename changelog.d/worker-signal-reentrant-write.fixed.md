@@ -1,0 +1,1 @@
+- Fixed `kitaru worker start` occasionally crashing with exit code 1 instead of draining when Ctrl-C or SIGTERM arrived while the worker was writing a lifecycle event.

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Record PydanticAI's `cache_write_tokens` as `cache_write_input_tokens`, include cache writes in genai-prices cost estimates, and pass them to custom cost calculators as `PydanticAIUsageSummary.cache_write_input_tokens`.
+- Support PydanticAI 2.62 through 2.66 in addition to the existing 2.14 through 2.61 minor lines.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
+
+## 0.4.0 - 2026-10-30
+
 - Add `use_task_inputs_as_prompt=False` to preserve caller prompts and message history while recording task inputs. Explicit replay prompt overrides still apply.
 - Document manual benchmark grades after session completion and registered evaluator metrics for experiments.
 - Support PydanticAI 2.52 through 2.61 in addition to the existing 2.14 through 2.51 minor lines.

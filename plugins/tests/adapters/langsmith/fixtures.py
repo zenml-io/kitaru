@@ -17,7 +17,7 @@ import re
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -256,7 +256,7 @@ class FakeLangSmith:
         self.client = FakeLangSmithClient(self)
 
     @contextmanager
-    def tracing_context(self, *, enabled: bool) -> Iterator[None]:
+    def tracing_context(self, *, enabled: bool) -> Generator[None, None, None]:
         assert enabled is True
         self.events.append("tracing-enter")
         yield
@@ -265,7 +265,7 @@ class FakeLangSmith:
     @contextmanager
     def trace(
         self, *, name: str, run_id: uuid.UUID, parent: str
-    ) -> Iterator[FakeRunTree]:
+    ) -> Generator[FakeRunTree, None, None]:
         assert name == "kitaru-run"
         assert parent == "ignore"
         self.pinned_run_ids.append(run_id)

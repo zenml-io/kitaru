@@ -300,8 +300,7 @@ async def send(
                     reply,
                     unmetered_attempts=unmetered + (not reply.usage.reported),
                 )
-            failure = "rate_limited" if response.status_code == 429 else "http_error"
-            detail = f"HTTP {response.status_code}" + _error_message(response)
+            failure, detail = _classify_http_error(response)
             if response.status_code not in _RETRYABLE_STATUS:
                 break
         if attempts <= settings.max_retries:
@@ -317,21 +316,37 @@ async def send(
     )
 
 
-def _error_message(response: httpx.Response) -> str:
-    """Return the provider's error message, which says how to fix the request.
+def _classify_http_error(response: httpx.Response) -> tuple[FailureCategory, str]:
+    """Classify an HTTP error and retain the provider's message.
 
     Whole error bodies can echo the request, so only the `error.message`
     field of a JSON body is kept; `_failure` bounds it.
     """
+    failure: FailureCategory = (
+        "rate_limited" if response.status_code == 429 else "http_error"
+    )
+    detail = f"HTTP {response.status_code}"
     try:
         payload = response.json()
     except ValueError:
-        return ""
+        return failure, detail
     error = payload.get("error") if isinstance(payload, dict) else None
+    code = error.get("code") if isinstance(error, dict) else None
     message = error.get("message") if isinstance(error, dict) else error
-    if not isinstance(message, str) or not message.strip():
-        return ""
-    return ": " + " ".join(message.split())
+    message = " ".join(message.split()) if isinstance(message, str) else ""
+    if message:
+        detail += ": " + message
+    normalized = message.casefold()
+    if response.status_code == 400 and (
+        code in ("content_policy_violation", "content_filter")
+        or (
+            "prompt" in normalized
+            and "flagged as potentially violating" in normalized
+            and "usage policy" in normalized
+        )
+    ):
+        failure = "refusal"
+    return failure, detail
 
 
 def _classify(
@@ -564,11 +579,11 @@ def read_usage(usage: Any) -> Usage:
             return Usage(reported=False)
         input_details = _as_dict(usage.get("input_tokens_details"))
         output_details = _as_dict(usage.get("output_tokens_details"))
-        return Usage(
-            input_tokens=_count(usage.get("input_tokens")),
-            cached_input_tokens=_count(input_details.get("cached_tokens")),
-            output_tokens=_count(usage.get("output_tokens")),
-            reasoning_tokens=_count(output_details.get("reasoning_tokens")),
+        return _build_usage(
+            usage.get("input_tokens"),
+            input_details.get("cached_tokens"),
+            usage.get("output_tokens"),
+            output_details.get("reasoning_tokens"),
         )
     if not all(
         _is_token_count(usage.get(key))
@@ -577,11 +592,30 @@ def read_usage(usage: Any) -> Usage:
         return Usage(reported=False)
     prompt_details = _as_dict(usage.get("prompt_tokens_details"))
     completion_details = _as_dict(usage.get("completion_tokens_details"))
+    return _build_usage(
+        usage.get("prompt_tokens"),
+        prompt_details.get("cached_tokens"),
+        usage.get("completion_tokens"),
+        completion_details.get("reasoning_tokens"),
+    )
+
+
+def _build_usage(input_tokens: Any, cached: Any, output: Any, reasoning: Any) -> Usage:
+    """Build usage whose input count includes the cached tokens.
+
+    OpenAI counts cached tokens inside the prompt tokens. An endpoint that
+    reports more cached tokens than prompt tokens counts them beside the
+    prompt, so they are added; otherwise pricing would bill only the few
+    uncached tokens and drop the rest of the prompt.
+    """
+    total, cached_tokens = _count(input_tokens), _count(cached)
+    if cached_tokens > total:
+        total += cached_tokens
     return Usage(
-        input_tokens=_count(usage.get("prompt_tokens")),
-        cached_input_tokens=_count(prompt_details.get("cached_tokens")),
-        output_tokens=_count(usage.get("completion_tokens")),
-        reasoning_tokens=_count(completion_details.get("reasoning_tokens")),
+        input_tokens=total,
+        cached_input_tokens=cached_tokens,
+        output_tokens=_count(output),
+        reasoning_tokens=_count(reasoning),
     )
 
 

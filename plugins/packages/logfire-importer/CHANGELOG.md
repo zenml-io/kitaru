@@ -2,9 +2,14 @@
 
 ## Unreleased
 
+- Import prompt-cache writes from `gen_ai.usage.details.cache_write_tokens` or `gen_ai.usage.cache_creation.input_tokens` as `cache_write_input_tokens`.
 - Preserve function `strict` flags and retain unsupported offered tool definitions so replay can reject an incomplete request instead of silently loosening its constraints.
 - Keep model-call tool definitions under the `kitaru.tool_definitions` node metadata key, normalized to the OpenAI chat-completions form, from PydanticAI `model_request_parameters` function and output tools or `gen_ai.tool.definitions`.
 - Stop importing PydanticAI `model_request_parameters` as `model_params`; `gen_ai.request.parameters`, `model_parameters`, and `model_settings` still populate them.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
 
 ## 0.4.1 - 2026-10-08
 

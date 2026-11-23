@@ -25,6 +25,8 @@ Nested observation trees support up to 64 nodes along any root-to-leaf path, cou
 
 ## Adapter
 
+API imports and the adapter require Langfuse Python SDK 5 and Langfuse Cloud or self-hosted Langfuse 4.59.0 or later. They read traces through the observations API. File-only imports do not require the Langfuse SDK or a running Langfuse server.
+
 Install the package with the `adapter` extra to use the adapter, which adds the provider SDK it needs:
 
 ```bash

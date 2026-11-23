@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.13/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.3/schema.json",
   "files": {
     "includes": [
       "packages/core/**",
@@ -21,6 +21,11 @@
     "enabled": true,
     "rules": {
       "preset": "recommended"
+    }
+  },
+  "markdown": {
+    "formatter": {
+      "enabled": false
     }
   }
 }

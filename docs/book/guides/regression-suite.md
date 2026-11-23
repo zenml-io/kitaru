@@ -119,7 +119,7 @@ If the candidate version does not exist yet, register it with `kitaru agent vers
 kitaru experiment run start cheaper-model \
   --cohort-version <cohort-version-id> \
   --agent support-agent@2 \
-  --evaluate-baselines \
+  --baseline-evaluation-mode if_missing \
   --wait --timeout 1800
 ```
 
@@ -127,18 +127,19 @@ Or from the client:
 
 ```python
 from kitaru.api_models.v1.experiment_run import ExperimentRunCreateRequest
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 
 run = await client.experiments.start_run(
     experiment.id,
     ExperimentRunCreateRequest(
         cohort_version_id=version.id,
         agent_version_id=AGENT_VERSION_ID,  # e.g. your PR's registered version
-        evaluate_baselines=True,
+        baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
     ),
 )
 ```
 
-Workers create one replay task per session, and `run.progress` reports how many have finished. When the run settles, each replay has a result session. If `evaluate_baselines=True`, the baseline and result sessions both have evaluations. The example below compares boolean pass results:
+Workers create one replay task per session, and `run.progress` reports how many have finished. When the run settles, each replay has a result session. `BaselineEvaluationMode.IF_MISSING` reuses the latest baseline evaluations for the same evaluator versions and parameters, and schedules any missing ones. Result sessions receive fresh evaluations. The example below compares boolean pass results:
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationListParams
@@ -185,7 +186,7 @@ kitaru agent version register support-agent --command "python support.py"
 kitaru experiment run start cheaper-model \
   --cohort-version <cohort-version-id> \
   --agent support-agent@<new-version> \
-  --evaluate-baselines --wait --timeout 1800
+  --baseline-evaluation-mode if_missing --wait --timeout 1800
 ```
 
 `--wait` blocks until the run settles and exits nonzero if it fails, so the CI job can use the command as a gate. `--output jsonl` streams progress in a machine-readable format. A long-running worker pool can execute the suite, or the CI job can start a worker with `kitaru worker start`.

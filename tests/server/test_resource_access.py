@@ -15,8 +15,11 @@
 
 import uuid
 
+import pytest
+
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.imports import ImportQuery
+from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.server.application.models.auth import (
     AuthContext,
@@ -26,9 +29,11 @@ from kitaru.server.application.models.auth import (
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.services.resource_access import (
     build_task_grants,
+    check_task_session_read,
     scope_task_session_filter,
 )
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.session import Session, SessionAccessDenied
 from kitaru.server.domain.task import (
     AgentTaskDetails,
     AnalysisTaskDetails,
@@ -42,6 +47,7 @@ from kitaru.server.domain.task import (
     TaskSpec,
 )
 from kitaru.server.filtering import AndExpression, FilterCondition, OrExpression
+from kitaru_test_support import FakeSessionRepository
 
 
 def _script_plugin(blob_id: uuid.UUID) -> ScriptPluginSpec:
@@ -213,6 +219,26 @@ def test_analysis_spec_grants_its_import_and_script_blob() -> None:
     }
 
 
+def test_analysis_spec_with_a_session_group_grants_the_group() -> None:
+    """Grant a session-group analyzer task its group."""
+    agent_id = uuid.uuid4()
+    session_group_id = uuid.uuid4()
+    spec = TaskSpec(
+        task_id=uuid.uuid4(),
+        kind=TaskKind.ANALYZER,
+        timeout_seconds=60,
+        details=AnalysisTaskDetails(
+            analyzer_name="trends",
+            plugin=PackagePluginSpec(entrypoint="pkg:run", requirement="pkg==1"),
+            agent_id=agent_id,
+            session_group_id=session_group_id,
+        ),
+    )
+    assert build_task_grants(spec) == {
+        GrantKind.SESSION_GROUP: frozenset({session_group_id})
+    }
+
+
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
 
@@ -260,6 +286,24 @@ def test_scope_task_session_filter_restricts_a_task_to_its_own_and_imports() -> 
     assert scoped.expression == scope
 
 
+def test_scope_task_session_filter_adds_a_tasks_session_groups() -> None:
+    """Let a task principal list the sessions of the groups it is granted."""
+    session_group_id = uuid.uuid4()
+    actor = _task_actor({GrantKind.SESSION_GROUP: frozenset({session_group_id})})
+    assert isinstance(actor.principal, TaskPrincipal)
+    scoped = scope_task_session_filter(SessionFilter(), actor)
+    assert scoped.expression == OrExpression(
+        operands=(
+            FilterCondition(
+                field="task_id", op=FilterOp.EQ, value=actor.principal.task_id
+            ),
+            FilterCondition(
+                field="session_group_id", op=FilterOp.IN, value=[session_group_id]
+            ),
+        )
+    )
+
+
 def test_scope_task_session_filter_limits_a_task_without_imports_to_its_own() -> None:
     """Restrict a task principal holding no import grant to its own sessions."""
     actor = _task_actor({GrantKind.SESSION: frozenset({uuid.uuid4()})})
@@ -268,3 +312,51 @@ def test_scope_task_session_filter_limits_a_task_without_imports_to_its_own() ->
     assert scoped.expression == FilterCondition(
         field="task_id", op=FilterOp.EQ, value=actor.principal.task_id
     )
+
+
+async def test_session_group_grant_reads_only_the_groups_sessions() -> None:
+    """Let a session group grant read the group's sessions, not the agent's others."""
+    agent_id = uuid.uuid4()
+    sessions = FakeSessionRepository()
+    grouped, ungrouped = [
+        await sessions.create(
+            Session(
+                owner_id=ACCOUNT.id,
+                agent_id=agent_id,
+                number=number,
+                origin=SessionOrigin.RECORDED,
+            )
+        )
+        for number in (1, 2)
+    ]
+    session_group_id = await sessions.create_group(uuid.uuid4(), [grouped.id])
+    actor = _task_actor({GrantKind.SESSION_GROUP: frozenset({session_group_id})})
+
+    await check_task_session_read(grouped, actor, sessions)
+    with pytest.raises(SessionAccessDenied):
+        await check_task_session_read(ungrouped, actor, sessions)
+
+
+async def test_session_group_grant_loses_a_deleted_session() -> None:
+    """Drop a deleted session from the group a task lists."""
+    sessions = FakeSessionRepository()
+    kept, deleted = [
+        await sessions.create(
+            Session(
+                owner_id=ACCOUNT.id,
+                agent_id=uuid.uuid4(),
+                number=number,
+                origin=SessionOrigin.RECORDED,
+            )
+        )
+        for number in (1, 2)
+    ]
+    session_group_id = await sessions.create_group(uuid.uuid4(), [kept.id, deleted.id])
+    actor = _task_actor({GrantKind.SESSION_GROUP: frozenset({session_group_id})})
+
+    await sessions.delete(deleted.id)
+
+    listed, _ = await sessions.query(
+        scope_task_session_filter(SessionFilter(), actor), include_payloads=False
+    )
+    assert [session.id for session in listed] == [kept.id]

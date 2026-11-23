@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Service providers bound to request-scoped SQL repositories."""
 
+from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -74,6 +75,9 @@ from kitaru.server.adapters.db.repositories.replay_repository import (
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
+from kitaru.server.adapters.db.repositories.server_settings_repository import (
+    SQLServerSettingsRepository,
+)
 from kitaru.server.adapters.db.repositories.session_node_repository import (
     SQLSessionNodeRepository,
 )
@@ -94,6 +98,7 @@ from kitaru.server.adapters.rest.dependencies.request import (
     get_session,
 )
 from kitaru.server.api.config import APISettings
+from kitaru.server.api.user_activity import UserActivityRecorder
 from kitaru.server.application.interfaces.blob_data_store import (
     BlobDataStore,
     BlobDataStores,
@@ -132,14 +137,47 @@ from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.application.services.server_analytics import (
     ServerAnalytics,
 )
+from kitaru.server.application.services.session_ingestion_service import (
+    SessionIngestionService,
+)
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
 )
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.application.services.tag_service import TagService
+from kitaru.server.application.services.user_activity import UserActivityService
 from kitaru.server.application.services.worker_service import WorkerService
+from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.blob import BlobStorageBackend
 from kitaru.server.domain.plugin import PluginKind
+
+
+async def get_user_activity_service(
+    request: Request,
+) -> AsyncGenerator[UserActivityService | None, None]:
+    """Provide a user activity service reading on a session of its own.
+
+    Args:
+        request: Incoming request.
+
+    Yields:
+        User activity service bound to the SQL repositories, or None before
+        startup created the recorder.
+    """
+    recorder: UserActivityRecorder | None = request.app.state.user_activity
+    if recorder is None:
+        yield None
+        return
+    database: DatabaseService = request.app.state.database
+    # Open a session apart from the request session, because a read that
+    # timed out can leave its transaction unusable and the route commits the
+    # request session before responding.
+    async for session in database.get_async_session():
+        yield UserActivityService(
+            settings_repository=SQLServerSettingsRepository(session),
+            task_repository=SQLTaskRepository(session),
+            in_memory_time=recorder.latest,
+        )
 
 
 def get_permission_service(
@@ -447,6 +485,7 @@ def get_task_policy(settings: APISettings) -> TaskPolicy:
         analyzer_timeout_seconds=settings.ANALYZER_TASK_TIMEOUT_SECONDS,
         max_result_bytes=settings.MAX_TASK_RESULT_BYTES,
         evaluation_pair_limit=settings.EVALUATION_PAIR_LIMIT,
+        analysis_session_limit=settings.ANALYSIS_SESSION_LIMIT,
     )
 
 
@@ -471,6 +510,22 @@ def get_session_node_service(
         task_repository=SQLTaskRepository(session),
         payload_store=payload_store,
     )
+
+
+def get_session_ingestion_service(
+    sessions: Annotated[SessionService, Depends(get_session_service)],
+    nodes: Annotated[SessionNodeService, Depends(get_session_node_service)],
+) -> SessionIngestionService:
+    """Return the atomic session ingestion service.
+
+    Args:
+        sessions: Session service for the current request.
+        nodes: Node service for the current request.
+
+    Returns:
+        Ingestion service sharing the request transaction.
+    """
+    return SessionIngestionService(sessions, nodes)
 
 
 def get_cohort_service(

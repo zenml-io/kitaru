@@ -61,7 +61,9 @@ class ImportHandler:
         """
         assert isinstance(spec.details, ImportTaskDetails)
         details = spec.details
-        env = build_process_env(task_id, {}, spec.env, spec.secret_env, token)
+        env = build_process_env(
+            task_id, {}, spec.env, spec.secret_env, token, spec.unset_env
+        )
         materializations: dict[str, Coroutine[Any, Any, Path]] = {}
         if isinstance(details.plugin, ScriptPluginSpec):
             materializations["KITARU_TASK_PLUGIN_PATH"] = materialize_blob(

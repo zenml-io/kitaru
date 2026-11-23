@@ -57,8 +57,10 @@ OTHER_ACCOUNT = Account(id=uuid.uuid4(), name="bob")
 
 EXPECTED_IDEMPOTENT_ROUTES = {
     ("POST", "/api/v1/sessions"),
+    ("POST", "/api/v1/sessions/ingest"),
     ("POST", "/api/v1/replays"),
     ("POST", "/api/v1/evaluations"),
+    ("POST", "/api/v1/analyses"),
     ("POST", "/api/v1/session-runs"),
     ("POST", "/api/v1/imports"),
     ("POST", "/api/v1/imports/{import_id}/analyze"),

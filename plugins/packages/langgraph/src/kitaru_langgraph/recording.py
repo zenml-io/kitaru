@@ -51,6 +51,11 @@ ADAPTER_VERSION = version("kitaru-langgraph")
 FRAMEWORK = "langgraph"
 ROOT_EXTERNAL_ID = "root"
 _LOGGER = logging.getLogger(__name__)
+_CACHE_WRITE_DETAIL_KEYS = (
+    "cache_creation",
+    "ephemeral_5m_input_tokens",
+    "ephemeral_1h_input_tokens",
+)
 
 
 def _error_text(error: BaseException) -> str:
@@ -487,8 +492,11 @@ class InvocationRecorder:
                 output = capture_value(outputs, self.policy).value
         else:
             output = capture_value(outputs, self.policy).value
-        model_fields = (
-            _describe_model_call(pending, outputs)
+        model_fields: dict[str, Any] = (
+            {
+                **_describe_model_call(pending, outputs),
+                "output_text_selector": _get_output_text_selector(output),
+            }
             if pending.node_type is NodeType.LLM_CALL
             else {}
         )
@@ -699,6 +707,30 @@ def get_text_field(mapping: dict[str, Any] | None, key: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _get_cache_write_tokens(details: Mapping[str, Any]) -> int | None:
+    """Sum LangChain's prompt-cache write counts.
+
+    langchain-anthropic zeroes ``cache_creation`` when Anthropic splits the
+    writes by cache lifetime and reports each part under its own key.
+    """
+    counts = [details.get(key) for key in _CACHE_WRITE_DETAIL_KEYS]
+    present = [count for count in counts if isinstance(count, int)]
+    return sum(present) if present else None
+
+
+def _get_output_text_selector(output: Any) -> str | None:
+    """Select the reply text of a captured ``LLMResult`` with one generation.
+
+    LangChain joins a message's text content blocks into ``generation.text``
+    and leaves reasoning and tool-call blocks out. A call that returned several
+    generations has no single reply to point at.
+    """
+    match output:
+        case {"generations": [[{"text": str(text)}]]} if text:
+            return "/generations/0/0/text"
+    return None
+
+
 def _describe_model_call(pending: PendingRun, response: Any) -> dict[str, Any]:
     """Return model identity, usage, and cost fields for one model node.
 
@@ -733,6 +765,9 @@ def _describe_model_call(pending: PendingRun, response: Any) -> dict[str, Any]:
         input_tokens=usage["input_tokens"],
         output_tokens=usage["output_tokens"],
         cached_input_tokens=usage.get("input_token_details", {}).get("cache_read"),
+        cache_write_input_tokens=_get_cache_write_tokens(
+            usage.get("input_token_details", {})
+        ),
         reasoning_tokens=usage.get("output_token_details", {}).get("reasoning"),
     )
     cost, cost_attributes = estimate_cost(tokens, model, provider, pending.started_at)

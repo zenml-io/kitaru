@@ -54,9 +54,11 @@ from kitaru.mcp.models.failure_matrix import (
     FailureMatrixRequest,
     FailureMatrixResult,
 )
+from kitaru.mcp.models.feedback import FeedbackDraftRequest, FeedbackDraftResult
 from kitaru.mcp.models.management import CohortsManageRequest, ExperimentsManageRequest
 from kitaru.mcp.models.registry import RegistryReadRequest
 from kitaru.mcp.models.review import ReviewManageRequest, ReviewReadRequest
+from kitaru.mcp.models.sessions import SessionReadRequest, SessionReadResult
 from kitaru.mcp.models.workflows import (
     DeleteRequest,
     SessionImportRequest,
@@ -77,8 +79,10 @@ from kitaru.mcp.tools.docs import handle_docs_search
 from kitaru.mcp.tools.evaluators import handle_evaluators_manage
 from kitaru.mcp.tools.experiments import handle_experiments_manage
 from kitaru.mcp.tools.failure_matrix import handle_failure_cell, handle_failure_matrix
+from kitaru.mcp.tools.feedback import handle_feedback_draft
 from kitaru.mcp.tools.registry import handle_registry_read
 from kitaru.mcp.tools.review import handle_review_manage, handle_review_read
+from kitaru.mcp.tools.sessions import handle_session_read
 from kitaru.mcp.tools.workflow_start import handle_workflow_start
 from kitaru.mcp.tools.workflows import handle_session_import
 
@@ -129,10 +133,31 @@ async def registry_read_tool(
 async def activity_read_tool(
     request: ActivityReadRequest, context: Context
 ) -> ActivityReadResult:
-    """Read Kitaru sessions, runs, jobs, and bounded child pages."""
+    """Read Kitaru sessions, runs, jobs, and bounded child pages.
+
+    To read whole sessions as text rather than node pages, use
+    `kitaru_session_read`.
+    """
     return cast(
         ActivityReadResult,
         await _invoke(context, request, ActivityReadResult, handle_activity_read),
+    )
+
+
+async def session_read_tool(
+    request: SessionReadRequest, context: Context
+) -> SessionReadResult:
+    """Read whole sessions as compact transcripts, one node per line.
+
+    Prefer this over paging `kitaru_activity_read` session nodes with payloads.
+
+    Each model call shows only its new text, tool calls show short arguments and
+    results, errors are never cut, and every cut ends in `[+N chars]`. Step
+    numbers are node positions; pass `node` with `full` to read one node whole.
+    """
+    return cast(
+        SessionReadResult,
+        await _invoke(context, request, SessionReadResult, handle_session_read),
     )
 
 
@@ -163,6 +188,23 @@ async def docs_search_tool(
     return cast(
         DocsSearchResult,
         await _invoke(context, request, DocsSearchResult, handle_docs_search),
+    )
+
+
+async def feedback_draft_tool(
+    request: FeedbackDraftRequest, context: Context
+) -> FeedbackDraftResult:
+    """Draft a GitHub issue about a Kitaru bug or confusing tool; send nothing.
+
+    Use this when a Kitaru tool fails, returns something surprising, or its
+    description misled you. Nothing is sent: show the user `issue_url` so they
+    can review the prefilled issue and submit it themselves. Describe the tool,
+    arguments, and result; leave out session content the user has not agreed
+    to share.
+    """
+    return cast(
+        FeedbackDraftResult,
+        await _invoke(context, request, FeedbackDraftResult, handle_feedback_draft),
     )
 
 
@@ -239,7 +281,7 @@ async def review_manage_tool(
 async def workflow_start_tool(
     request: WorkflowStartRequest, context: Context
 ) -> WorkflowStartResult:
-    """Start an evaluation batch or experiment run and return immediately."""
+    """Start an evaluation batch, an analysis, or an experiment run; return at once."""
     return cast(
         WorkflowStartResult,
         await _invoke(context, request, WorkflowStartResult, handle_workflow_start),
@@ -353,6 +395,13 @@ TOOL_SPECS = (
         activity_read_tool,
     ),
     ToolSpec(
+        "kitaru_session_read",
+        CapabilityMode.READ_ONLY,
+        _describe(session_read_tool),
+        _annotations(read_only=True, destructive=False, idempotent=True),
+        session_read_tool,
+    ),
+    ToolSpec(
         "kitaru_review_read",
         CapabilityMode.READ_ONLY,
         _describe(review_read_tool),
@@ -372,6 +421,13 @@ TOOL_SPECS = (
         _describe(docs_search_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         docs_search_tool,
+    ),
+    ToolSpec(
+        "kitaru_feedback_draft",
+        CapabilityMode.READ_ONLY,
+        _describe(feedback_draft_tool),
+        _annotations(read_only=True, destructive=False, idempotent=True),
+        feedback_draft_tool,
     ),
     ToolSpec(
         "kitaru_failure_matrix",

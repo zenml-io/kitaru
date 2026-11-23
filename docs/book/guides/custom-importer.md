@@ -15,19 +15,19 @@ There are two ways to get one, and the fast way is to not write it yourself: the
 from collections.abc import Iterator
 from typing import Any
 
-from kitaru.task.importer import ImportFailure, ParsedNode, ParsedSession
+from kitaru.task.importer import ImportFailure, ImportedNode, ImportedSession
 
 
 def parse(
     payload: bytes, params: dict[str, Any]
-) -> Iterator[ParsedSession | ImportFailure]:
+) -> Iterator[ImportedSession | ImportFailure]:
     for line_number, line in enumerate(payload.splitlines(), start=1):
         try:
             record = decode_my_format(line)
         except ValueError as error:
             yield ImportFailure(line=line_number, error=str(error))
             continue
-        yield ParsedSession(
+        yield ImportedSession(
             status="completed",
             name=record.title,
             inputs=record.question,
@@ -38,18 +38,20 @@ def parse(
             external_id=record.trace_id,
             metadata={},
             nodes=[
-                ParsedNode(
+                ImportedNode(
+                    external_id=f"{record.trace_id}:model",
                     node_type="llm_call",
                     name="model",
                     status="completed",
                     inputs=record.prompt,
                     outputs=record.completion,
+                    attributes={},
                 ),
             ],
         )
 ```
 
-Yield lazily; the import consumes one item at a time, so payload size is bounded by disk, not memory. Yield an `ImportFailure` for a bad record and the import counts it and moves on. Only a crash of the parser itself fails the task, with partial stats preserved. The full field reference for `ParsedSession` and `ParsedNode` is the [portable session contract](importing-sessions.md). `parse` may be a regular or an async generator.
+Yield lazily; the import consumes one item at a time, so payload size is bounded by disk, not memory. Yield an `ImportFailure` for a bad record and the import counts it and moves on. Only a crash of the parser itself fails the task, with partial stats preserved. The full field reference for `ImportedSession` and `ImportedNode` is the [portable session contract](importing-sessions.md). `parse` may be a regular or an async generator.
 
 Set a stable `external_id` from your source system and register a nonempty provider name. In Kitaru 0.24.0 and later, the provider and `external_id` identify an imported session per destination logical agent. Re-importing the same identity under that agent skips the existing session, even if you select another agent version; importing it under a different agent creates a separate session. A session skipped because it was stored by an earlier import is not refreshed with new content.
 
@@ -67,7 +69,7 @@ from typing import Any
 class MyImporter:
     def parse(
         self, payload: bytes, params: dict[str, Any]
-    ) -> Iterator[ParsedSession]: ...
+    ) -> Iterator[ImportedSession]: ...
 
     async def fetch(self, query: dict[str, Any]) -> AsyncIterator[bytes]:
         for trace_id in select_traces(query):

@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from typing import Literal
 
 import pytest
+from tests.cli.task_diagnostic_fakes import EmptyTaskDiagnostics
 
 from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.cli import receipts
@@ -148,7 +149,9 @@ async def test_wait_uses_finite_defaults_then_consumes_all_tasks(
     monkeypatch.setattr(receipts.jobs, "poll_job", poll_job)
 
     job, tasks = await receipts.wait_for_terminal_tasks(
-        SimpleNamespace(jobs=StubJobs()), job_id, initial_job=created
+        SimpleNamespace(tasks=EmptyTaskDiagnostics(), jobs=StubJobs()),
+        job_id,
+        initial_job=created,
     )
 
     assert job is terminal
@@ -206,7 +209,9 @@ async def test_wait_timeout_covers_hanging_task_iteration(
 
     with pytest.raises(CLIError) as error:
         await receipts.wait_for_terminal_tasks(
-            SimpleNamespace(jobs=StubJobs()), job_id, timeout=0.01
+            SimpleNamespace(tasks=EmptyTaskDiagnostics(), jobs=StubJobs()),
+            job_id,
+            timeout=0.01,
         )
 
     assert error.value.kind == "timeout"

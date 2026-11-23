@@ -383,7 +383,19 @@ function createKitaruToolLoopAgentImpl<
     ): Promise<GenerateTextResult<TOOLS, RUNTIME_CONTEXT, OUTPUT>> {
       const state: InvocationState = {};
       try {
-        const result = await invocationAgent(state).generate(options);
+        // Cast because ai 7.0.154 types these options as AgentCallParameters &
+        // ToolLoopAgentCallExtensions, and that all-optional extension fails
+        // TypeScript's weak-type check against the generic AgentCallParameters.
+        const result = await invocationAgent(state).generate(
+          options as Parameters<
+            ToolLoopAgent<
+              CALL_OPTIONS,
+              TOOLS,
+              RUNTIME_CONTEXT,
+              OUTPUT
+            >["generate"]
+          >[0],
+        );
         if (state.recorder === undefined || state.tickets === undefined) {
           throw new Error("Kitaru recorder was not initialized");
         }
@@ -428,7 +440,11 @@ function createKitaruToolLoopAgentImpl<
       if (environment.KITARU_REPLAY_ID !== undefined) {
         throw new TypeError("Agent stream replay is not supported");
       }
-      return await new ToolLoopAgent(settings).stream(options);
+      return await new ToolLoopAgent(settings).stream(
+        options as Parameters<
+          ToolLoopAgent<CALL_OPTIONS, TOOLS, RUNTIME_CONTEXT, OUTPUT>["stream"]
+        >[0],
+      );
     },
   };
 }

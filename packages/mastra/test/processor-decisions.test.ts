@@ -113,7 +113,7 @@ function model() {
     content: [{ type: "text", text: "support" }],
     finishReason: "stop",
     usage: {
-      inputTokens: { total: 10, cacheRead: 2 },
+      inputTokens: { total: 10, cacheRead: 2, cacheWrite: 4 },
       outputTokens: { total: 3, reasoning: 1 },
     },
     response: { modelId: "served" },
@@ -155,10 +155,12 @@ it("captures classifier calls as decision children with usage, costs and model i
       input_tokens: 10,
       output_tokens: 3,
       cached_input_tokens: 2,
+      cache_write_input_tokens: 4,
       reasoning_tokens: 1,
     },
     inputs: [{ role: "user", content: "message" }],
     outputs: { content: result.content, finish_reason: "stop" },
+    output_text_selector: "/content/0/text",
   });
   expect(costCalculator).toHaveBeenCalledWith({
     model: "served",
@@ -168,6 +170,47 @@ it("captures classifier calls as decision children with usage, costs and model i
   });
   expect(JSON.stringify(nodes)).not.toContain("secret");
 });
+
+it.each([
+  {
+    content: [
+      { type: "reasoning", text: "billing words" },
+      { type: "text", text: "billing" },
+    ],
+    selector: "/content/1/text",
+  },
+  {
+    content: [
+      { type: "text", text: "bill" },
+      { type: "text", text: "ing" },
+    ],
+    selector: null,
+  },
+  {
+    content: [
+      {
+        type: "tool-call",
+        toolCallId: "call-1",
+        toolName: "route",
+        input: "{}",
+      },
+    ],
+    selector: null,
+  },
+])(
+  "points at a classifier reply held in exactly one text part",
+  async ({ content, selector }) => {
+    const { capture, decision, nodes } = setup();
+    const { native, result } = model();
+    result.content = content as typeof result.content;
+    const classifier = decision.instrumentModel(native);
+    await decision.run(() => classifier.doGenerate({ prompt: [] }));
+    await capture.finish();
+    expect(
+      nodes.find((node) => node.node_type === "llm_call")?.output_text_selector,
+    ).toBe(selector);
+  },
+);
 
 it("keeps provider errors intact and records failed classifier calls", async () => {
   const { capture, decision, nodes } = setup();

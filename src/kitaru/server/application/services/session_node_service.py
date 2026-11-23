@@ -97,8 +97,8 @@ class SessionNodeService:
         An external id already stored is replaced whole, keeping the node
         id. ``parent_external_id`` and ``links`` are stored as sent and
         resolved by the reader, so a parent may land after its children.
-        Session cost is recomputed from stored nodes so unknown LLM prices
-        stay unknown. Tokens and call counts roll up by one atomic delta-based
+        Session usage is recomputed from stored nodes so incomplete LLM
+        measurements stay unknown. Call counts roll up by one atomic delta-based
         update covering the whole batch. A task principal ingests only into
         a session it owns.
 
@@ -192,8 +192,8 @@ class SessionNodeService:
             _get_node_payloads(resolved), session.owner_id
         )
         stored = await self._repository.upsert_batch(session_id, resolved)
-        cost = await self._repository.get_cost(session_id)
-        await self._sessions.apply_rollups(session_id, combine_rollups(deltas), cost)
+        usage = await self._repository.get_usage(session_id)
+        await self._sessions.apply_rollups(session_id, combine_rollups(deltas), usage)
         return stored
 
     async def list_nodes(
@@ -201,8 +201,8 @@ class SessionNodeService:
     ) -> tuple[list[SessionNode], str | None]:
         """List the nodes of a session, ordered by position ascending.
 
-        A task principal reads only a session it owns or holds as its
-        task's input session.
+        A task principal reads only a session it owns or holds a grant
+        covering.
 
         Args:
             session_node_filter: Filter and pagination parameters.
@@ -211,8 +211,8 @@ class SessionNodeService:
         Raises:
             SessionNotFound: A task principal names a session that does not
                 exist.
-            SessionAccessDenied: A task principal owns neither the session nor
-                holds it as its task's input session.
+            SessionAccessDenied: A task principal neither owns the session nor
+                holds a grant covering it.
 
         Returns:
             Page of matching nodes and the next cursor.
@@ -221,7 +221,7 @@ class SessionNodeService:
             session = await self._sessions.get(
                 session_node_filter.session_id, include_payloads=False
             )
-            check_task_session_read(session, actor)
+            await check_task_session_read(session, actor, self._sessions)
         nodes, next_cursor = await self._repository.query(session_node_filter)
         if session_node_filter.include_payloads:
             await self._resolve_payloads(nodes)
@@ -232,8 +232,8 @@ class SessionNodeService:
     ) -> list[SessionNode]:
         """Read every node of a session, ordered by position ascending.
 
-        A task principal reads only a session it owns or holds as its
-        task's input session.
+        A task principal reads only a session it owns or holds a grant
+        covering.
 
         Args:
             session_id: Id of the session whose nodes to read.
@@ -244,15 +244,15 @@ class SessionNodeService:
         Raises:
             SessionNotFound: A task principal names a session that does not
                 exist.
-            SessionAccessDenied: A task principal owns neither the session nor
-                holds it as its task's input session.
+            SessionAccessDenied: A task principal neither owns the session nor
+                holds a grant covering it.
 
         Returns:
             Every node of the session.
         """
         if isinstance(actor.principal, TaskPrincipal):
             session = await self._sessions.get(session_id, include_payloads=False)
-            check_task_session_read(session, actor)
+            await check_task_session_read(session, actor, self._sessions)
         nodes = await self._repository.list_all(session_id, include_payloads)
         if include_payloads:
             await self._resolve_payloads(nodes)

@@ -251,6 +251,7 @@ def get_task_service(
         spec_builder=spec_builder,
         transitions=_build_task_transitions(session, engine, analytics),
         policy=policy,
+        liveness_timeout_seconds=settings.WORKER_LIVENESS_TIMEOUT_SECONDS,
     )
 
 

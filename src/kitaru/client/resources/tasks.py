@@ -21,6 +21,7 @@ from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.task import (
     TaskClaimRequest,
     TaskClaimResponse,
+    TaskDiagnosticsResponse,
     TaskListParams,
     TaskResponse,
     TaskSpecResponse,
@@ -42,6 +43,35 @@ class TasksResource:
             client: API client used to send requests.
         """
         self._client = client
+
+    async def diagnostics(
+        self,
+        *,
+        job_id: uuid.UUID | None = None,
+        experiment_run_id: uuid.UUID | None = None,
+    ) -> TaskDiagnosticsResponse:
+        """Read pending-task worker coverage.
+
+        Args:
+            job_id: Restrict to one job.
+            experiment_run_id: Restrict to one experiment run.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing job
+                or 422 for conflicting scope filters.
+
+        Returns:
+            Current heartbeat-based coverage snapshot.
+        """
+        params = {}
+        if job_id is not None:
+            params["job_id"] = str(job_id)
+        if experiment_run_id is not None:
+            params["experiment_run_id"] = str(experiment_run_id)
+        response = await self._client.request(
+            "GET", "/api/v1/tasks/diagnostics", params=params
+        )
+        return TaskDiagnosticsResponse.model_validate(response.json())
 
     async def claim(self, request: TaskClaimRequest) -> TaskClaimResponse:
         """Claim pending tasks matching the worker's stored scope.

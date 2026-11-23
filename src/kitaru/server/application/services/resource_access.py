@@ -16,6 +16,7 @@
 import uuid
 
 from kitaru.api_models.v1.filter import FilterOp
+from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import (
     AuthContext,
@@ -82,11 +83,15 @@ def build_task_grants(spec: TaskSpec) -> dict[GrantKind, frozenset[uuid.UUID]]:
     sessions: set[uuid.UUID] = set()
     blobs: set[uuid.UUID] = set()
     imports: set[uuid.UUID] = set()
+    session_groups: set[uuid.UUID] = set()
     details = spec.details
     if isinstance(details, EvaluationTaskDetails):
         sessions.add(details.input_session_id)
     if isinstance(details, AnalysisTaskDetails):
-        imports.add(details.import_id)
+        if details.session_group_id is not None:
+            session_groups.add(details.session_group_id)
+        elif details.import_id is not None:
+            imports.add(details.import_id)
     if isinstance(
         details, (EvaluationTaskDetails, ImportTaskDetails, AnalysisTaskDetails)
     ) and isinstance(details.plugin, ScriptPluginSpec):
@@ -110,18 +115,24 @@ def build_task_grants(spec: TaskSpec) -> dict[GrantKind, frozenset[uuid.UUID]]:
         grants[GrantKind.BLOB] = frozenset(blobs)
     if imports:
         grants[GrantKind.IMPORT] = frozenset(imports)
+    if session_groups:
+        grants[GrantKind.SESSION_GROUP] = frozenset(session_groups)
     return grants
 
 
-def check_task_session_read(session: Session, actor: AuthContext) -> None:
+async def check_task_session_read(
+    session: Session, actor: AuthContext, sessions: SessionRepository
+) -> None:
     """Require a task principal to own the session or hold a grant covering it.
 
-    A grant covers the session directly by id or through the import that
-    created it. An account principal always passes.
+    A grant covers the session directly by id, through the import that
+    created it, or through a session group it belongs to. An account
+    principal always passes.
 
     Args:
         session: Session being read.
         actor: Caller context.
+        sessions: Session repository.
 
     Raises:
         SessionAccessDenied: A task principal neither owns the session nor
@@ -137,6 +148,10 @@ def check_task_session_read(session: Session, actor: AuthContext) -> None:
     if session.import_id is not None and principal.has_grant(
         GrantKind.IMPORT, session.import_id
     ):
+        return
+    # A session row does not name its groups, so membership takes a query.
+    group_ids = principal.grants.get(GrantKind.SESSION_GROUP)
+    if group_ids and await sessions.is_in_group(session.id, group_ids):
         return
     raise SessionAccessDenied(session.id)
 
@@ -185,33 +200,33 @@ def scope_task_session_filter(
 ) -> SessionFilter:
     """Restrict a session listing to the sessions a task principal may read.
 
-    A task principal lists the sessions it produced and those created by the
-    imports it is granted. An account principal's filter passes through
-    unchanged.
+    A task principal lists the sessions it produced, those created by the
+    imports it is granted, and those in the session groups it is granted. An
+    account principal's filter passes through unchanged.
 
     Args:
         session_filter: Filter the caller sent.
         actor: Caller context.
 
     Returns:
-        Filter restricted to the task's own and granted-import sessions.
+        Filter restricted to the task's own and granted sessions.
     """
     if not isinstance(actor.principal, TaskPrincipal):
         return session_filter
     principal = actor.principal
-    scope: FilterExpression = FilterCondition(
-        field="task_id", op=FilterOp.EQ, value=principal.task_id
-    )
-    import_ids = principal.grants.get(GrantKind.IMPORT)
-    if import_ids:
-        scope = OrExpression(
-            operands=(
-                scope,
-                FilterCondition(
-                    field="import_id", op=FilterOp.IN, value=sorted(import_ids)
-                ),
+    scopes: list[FilterExpression] = [
+        FilterCondition(field="task_id", op=FilterOp.EQ, value=principal.task_id)
+    ]
+    for field, kind in (
+        ("import_id", GrantKind.IMPORT),
+        ("session_group_id", GrantKind.SESSION_GROUP),
+    ):
+        granted_ids = principal.grants.get(kind)
+        if granted_ids:
+            scopes.append(
+                FilterCondition(field=field, op=FilterOp.IN, value=sorted(granted_ids))
             )
-        )
+    scope = scopes[0] if len(scopes) == 1 else OrExpression(operands=tuple(scopes))
     expression = (
         scope
         if session_filter.expression is None

@@ -49,6 +49,24 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+/**
+ * Point at a classifier reply held in exactly one text content part.
+ *
+ * One pointer selects one string, so a reply split over several text parts
+ * gets no pointer rather than one to its first part.
+ */
+function classifierTextSelector(outputs: JsonValue): string | null {
+  const content = asRecord(outputs).content;
+  if (!Array.isArray(content)) return null;
+  const textParts = content.flatMap((part, index) => {
+    const record = asRecord(part);
+    return record.type === "text" && typeof record.text === "string"
+      ? [index]
+      : [];
+  });
+  return textParts.length === 1 ? `/content/${textParts[0]}/text` : null;
+}
+
 /** Capture processor decisions without waiting for diagnostic writes. */
 export function createProcessorDecisions(options: ProcessorDecisionOptions) {
   const definitions = new Map<string, ProcessorDecision>();
@@ -397,6 +415,7 @@ export function createProcessorDecisions(options: ProcessorDecisionOptions) {
                           cost: cost.cost,
                           inputs,
                           outputs,
+                          output_text_selector: classifierTextSelector(outputs),
                           attributes: {
                             processor_decision: name,
                             provider_id: provider,

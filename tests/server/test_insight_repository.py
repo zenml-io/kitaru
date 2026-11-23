@@ -483,6 +483,27 @@ async def test_query_filters_by_task_id(setup: Setup) -> None:
     assert [insight.id for insight in insights] == [matching.id]
 
 
+async def test_query_filters_insights_without_an_import(setup: Setup) -> None:
+    """Select the insights recorded by hand, outside any import."""
+    manual = await _create_insight(setup.insights, setup.owner_id, setup.agent_id)
+    version_id = await setup.make_analyzer_version_id()
+    import_id = uuid.uuid4()
+    task_id = await setup.make_task_id(version_id, import_id)
+    await _create_insight(
+        setup.insights,
+        setup.owner_id,
+        setup.agent_id,
+        task_id=task_id,
+        import_id=import_id,
+    )
+    insights, _ = await setup.insights.query(
+        InsightFilter.model_validate(
+            {"expression": {"field": "import_id", "op": "is_null"}}
+        )
+    )
+    assert [insight.id for insight in insights] == [manual.id]
+
+
 @pytest.mark.parametrize("setup", ["postgres"], indirect=True)
 async def test_negated_import_filter_excludes_null_imports(setup: Setup) -> None:
     """Use SQL null semantics when negating a direct import column filter."""

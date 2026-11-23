@@ -152,7 +152,13 @@ def test_invalid_node_cost_isolates_line(value: object) -> None:
 
 @pytest.mark.parametrize(
     "field",
-    ["input_tokens", "output_tokens", "cached_input_tokens", "reasoning_tokens"],
+    [
+        "input_tokens",
+        "output_tokens",
+        "cached_input_tokens",
+        "cache_write_input_tokens",
+        "reasoning_tokens",
+    ],
 )
 def test_negative_tokens_isolate_line(field: str) -> None:
     """Reject each negative mapped count locally."""

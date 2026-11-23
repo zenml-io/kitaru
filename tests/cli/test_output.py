@@ -22,6 +22,7 @@ from rich.console import Console
 from rich.text import Text
 from tests.cli.output_rendering import render_text
 
+from kitaru.cli import app as app_module
 from kitaru.cli.output import (
     ERROR_EXIT_CODES,
     CLIError,
@@ -35,6 +36,7 @@ from kitaru.cli.output import (
     resolve_output_mode,
     set_output_context,
 )
+from kitaru.cli.skill_discovery import SKILLS_URL
 
 
 @pytest.mark.parametrize("rich", [False, True])
@@ -590,6 +592,41 @@ def test_machine_text_renders_links_and_next_actions_after_the_item() -> None:
         "skills: https://kitaru.ai/skills",
         "Next: kitaru session list",
     ]
+
+
+@pytest.mark.parametrize("installed", [False, True])
+@pytest.mark.parametrize("mode", ["text", "json"])
+def test_root_help_summarizes_skills_only_in_text(
+    installed: bool, mode: str, monkeypatch, capsys
+) -> None:
+    """Piped help stays concise while JSON retains full discovery evidence."""
+    names = [f"kitaru-example-{number}" for number in range(6)] if installed else []
+    discovery = {
+        "installed": installed,
+        "skill_count": len(names),
+        "skills": names,
+        "installations": [{"path": "/private/project/.agents/skills"}],
+        "locations_checked": ["/private/home/.codex/skills"],
+    }
+    monkeypatch.setattr(app_module, "get_kitaru_skill_status", lambda: discovery)
+
+    assert app_module.main(["--output", mode, "--help"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    if mode == "json":
+        assert json.loads(captured.out)["item"]["skills"] == discovery
+    else:
+        assert "locations_checked" not in captured.out
+        assert "/private/project" not in captured.out
+        assert "/private/home" not in captured.out
+        assert "\x1b" not in captured.out
+        assert SKILLS_URL in captured.out
+        if installed:
+            assert "Kitaru agent skills detected" in captured.out
+            assert "and 1 more" in captured.out
+        else:
+            assert "Install the Kitaru agent skills" in captured.out
 
 
 def test_root_rich_text_escapes_disk_derived_skill_names() -> None:

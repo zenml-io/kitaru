@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.3/schema.json",
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -10,7 +10,13 @@
     // Build output and generated content are covered by .gitignore. public/ is
     // static assets (SVG logos, favicons), not source; their alt text lives on
     // the <img> that uses them, so the SVG a11y rules do not apply.
-    "includes": ["**", "!public"]
+    "includes": ["**", "!public", "!pnpm-lock.yaml"]
+  },
+  // book/ is GitBook source, formatted by the repo-level Markdown checks.
+  "markdown": {
+    "formatter": {
+      "enabled": false
+    }
   },
   "css": {
     "parser": {

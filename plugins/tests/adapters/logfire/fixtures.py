@@ -17,7 +17,7 @@ import asyncio
 import json
 import re
 import secrets
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import datetime
 from types import SimpleNamespace
@@ -307,7 +307,7 @@ class FakeLogfire:
         self.raise_once: Exception | None = None
 
     @contextmanager
-    def span(self, name: str) -> Iterator[SimpleNamespace]:
+    def span(self, name: str) -> Generator[SimpleNamespace, None, None]:
         assert name == "kitaru-run"
         self.events.append("span-enter")
         trace_id = secrets.randbits(128)

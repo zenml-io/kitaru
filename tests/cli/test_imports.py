@@ -9,11 +9,14 @@ import json
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from kitaru.api_models.v1.analysis import AnalysisCreateRequest
+from kitaru.api_models.v1.filter import OrFilter
 from kitaru.api_models.v1.imports import (
     BlobImportSource,
     ImportAnalyzeRequest,
@@ -25,6 +28,7 @@ from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskResponse, Tas
 from kitaru.cli import app as app_module
 from kitaru.cli import imports, invocation_context
 from kitaru.cli.output import CLIError
+from kitaru.cli.session_selection import FILTER_IN_VALUE_LIMIT, build_session_filter
 
 
 def _job(status: JobStatus = JobStatus.PENDING) -> JobResponse:
@@ -100,9 +104,30 @@ class StubImportClient:
         self.analyze_calls: list[
             tuple[uuid.UUID, ImportAnalyzeRequest, str | None]
         ] = []
+        self.analysis_calls: list[tuple[AnalysisCreateRequest, str | None]] = []
         self.imports = self._Imports(self)
+        self.analyses = self._Analyses(self)
+        self.agents = self._Agents(self)
         self.analyzers = self._Analyzers(self)
         self.connections = self._Connections(self)
+
+    class _Analyses:
+        def __init__(self, owner: "StubImportClient") -> None:
+            self.owner = owner
+
+        async def create(
+            self, request: AnalysisCreateRequest, idempotency_key: str | None = None
+        ) -> JobResponse:
+            self.owner.analysis_calls.append((request, idempotency_key))
+            return self.owner.job
+
+    class _Agents:
+        def __init__(self, owner: "StubImportClient") -> None:
+            self.owner = owner
+
+        async def get(self, agent_id: uuid.UUID) -> Any:
+            assert agent_id == self.owner.agent_id
+            return SimpleNamespace(id=agent_id, name="support-bot")
 
     class _Imports:
         def __init__(self, owner: "StubImportClient") -> None:
@@ -414,3 +439,97 @@ async def test_analyze_raises_for_a_failed_job(
     assert receipt["tasks"] == [
         {"id": str(task.id), "status": "failed", "error": "analyzer crashed"}
     ]
+
+
+async def test_analyze_sessions_sends_every_selector(tmp_path: Path) -> None:
+    """Session analyze sends the agent and every selector as one request."""
+    client = StubImportClient()
+    listed = uuid.uuid4()
+    sessions_file = tmp_path / "sessions.txt"
+    sessions_file.write_text(f"{listed}\n", encoding="utf-8")
+    after = datetime(2026, 10, 1, tzinfo=UTC)
+
+    result = await imports.analyze_sessions(
+        client,
+        str(client.agent_id),
+        None,
+        sessions_file=sessions_file,
+        tag=" refunds ",
+        cohort=None,
+        import_id=client.import_id,
+        started_after=after,
+        started_before=None,
+        filter='{"field":"status","op":"eq","value":"failed"}',
+        analyzers=["clustering@2"],
+        analyzer_params=None,
+        analyzer_connections=None,
+        wait=False,
+        interval=None,
+        timeout=None,
+        idempotency_key="scope-1",
+    )
+
+    [(request, idempotency_key)] = client.analysis_calls
+    assert idempotency_key == "scope-1"
+    assert request.agent_id == client.agent_id
+    expected = {
+        "and": [
+            {"field": "id", "op": "in", "value": [str(listed)]},
+            {"field": "tag", "op": "eq", "value": "refunds"},
+            {"field": "import_id", "op": "eq", "value": str(client.import_id)},
+            {"field": "started_at", "op": "ge", "value": after.isoformat()},
+            {"field": "status", "op": "eq", "value": "failed"},
+        ]
+    }
+    assert request.filter is not None
+    assert request.filter.model_dump(mode="json", by_alias=True) == expected
+    assert result.item["operation"] == "session_analysis"
+    assert result.item["agent_id"] == str(client.agent_id)
+    assert result.item["filter"] == expected
+    assert "kitaru insight list" in result.next_actions
+
+
+def test_build_session_filter_splits_a_long_id_list() -> None:
+    """Split an id list over the per-condition limit into an `or` of `in` lists."""
+    session_ids = [uuid.uuid4() for _ in range(FILTER_IN_VALUE_LIMIT + 1)]
+
+    session_filter = build_session_filter(session_ids=session_ids)
+
+    assert isinstance(session_filter, OrFilter)
+    dumped = session_filter.model_dump(mode="json", by_alias=True)
+    assert [len(condition["value"]) for condition in dumped["or"]] == [
+        FILTER_IN_VALUE_LIMIT,
+        1,
+    ]
+
+
+def test_build_session_filter_returns_none_without_selectors() -> None:
+    """Leave the filter unset so every finished session is analyzed."""
+    assert build_session_filter() is None
+
+
+async def test_analyze_sessions_rejects_a_naive_timestamp() -> None:
+    """Session analyze rejects a timestamp without a timezone locally."""
+    client = StubImportClient()
+
+    with pytest.raises(CLIError, match="--started-before must include a timezone"):
+        await imports.analyze_sessions(
+            client,
+            str(client.agent_id),
+            None,
+            sessions_file=None,
+            tag=None,
+            cohort=None,
+            import_id=None,
+            started_after=None,
+            started_before=datetime.fromisoformat("2026-10-01T00:00:00"),
+            filter=None,
+            analyzers=["clustering@2"],
+            analyzer_params=None,
+            analyzer_connections=None,
+            wait=False,
+            interval=None,
+            timeout=None,
+        )
+
+    assert client.analysis_calls == []

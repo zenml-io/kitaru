@@ -11,7 +11,7 @@ import json
 import tempfile
 import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Generator
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -26,18 +26,22 @@ EXPECTED_TOOLS = {
     "read-only": [
         "kitaru_registry_read",
         "kitaru_activity_read",
+        "kitaru_session_read",
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
+        "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
     ],
     "standard": [
         "kitaru_registry_read",
         "kitaru_activity_read",
+        "kitaru_session_read",
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
+        "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
         "kitaru_cohorts_manage",
@@ -52,9 +56,11 @@ EXPECTED_TOOLS = {
     "destructive": [
         "kitaru_registry_read",
         "kitaru_activity_read",
+        "kitaru_session_read",
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
+        "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
         "kitaru_cohorts_manage",
@@ -114,7 +120,7 @@ class _StubHandler(BaseHTTPRequestHandler):
 
 
 @contextlib.contextmanager
-def _stub_server() -> Iterator[str]:
+def _stub_server() -> Generator[str]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), _StubHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

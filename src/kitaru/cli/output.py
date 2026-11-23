@@ -21,6 +21,7 @@ from dataclasses import dataclass, field, replace
 from types import TracebackType
 from typing import Any, Literal, TextIO
 
+from pydantic import ValidationError
 from rich.console import Console
 from rich.rule import Rule
 from rich.table import Table
@@ -90,6 +91,21 @@ class CLIError(Exception):
             self.exit_code = ERROR_EXIT_CODES.get(self.kind, 1)
 
 
+def describe_validation_error(error: ValidationError) -> tuple[str, str]:
+    """Return the dotted location and message of a validation error's first issue.
+
+    Args:
+        error: Pydantic validation error.
+
+    Returns:
+        The location, or ``value`` when the issue has none, and the message
+        without Pydantic's ``Value error,`` prefix.
+    """
+    issue = error.errors(include_url=False)[0]
+    location = ".".join(str(part) for part in issue["loc"]) or "value"
+    return location, issue["msg"].removeprefix("Value error, ")
+
+
 @dataclass(slots=True)
 class CommandResult:
     """Data returned by a CLI command."""
@@ -102,6 +118,8 @@ class CommandResult:
     next_actions: list[str] = field(default_factory=list)
     event: str | None = None
     exit_code: int = 0
+    text: str | None = None
+    """Prerendered text that text mode prints in place of the item or items."""
 
 
 @dataclass(slots=True)
@@ -250,6 +268,13 @@ def emit_event(event: str, item: Any = None) -> None:
             },
         )
         return
+    if event == "diagnostics" and isinstance(item, dict):
+        warnings = item.get("warnings", [])
+        for warning in warnings:
+            print(f"Warning: {redact(warning)}", file=context.stdout, flush=True)
+        if not warnings:
+            print("Worker coverage restored.", file=context.stdout, flush=True)
+        return
     suffix = "" if item is None else f": {_display_value(redact_data(item))}"
     print(f"{event}{suffix}", file=context.stdout, flush=True)
 
@@ -331,14 +356,15 @@ def _emit_text(context: OutputContext, result: CommandResult) -> None:
     # Sanitize before field selection loses the containing credential key.
     result = replace(
         result,
-        item=redact_data(result.item),
-        items=redact_data(result.items),
         page=redact_data(result.page),
         warnings=redact_data(result.warnings),
         links=redact_data(result.links),
         next_actions=redact_data(result.next_actions),
     )
-    value = result.items if result.items is not None else result.item
+    if result.text is not None:
+        value: Any = redact(result.text)
+    else:
+        value = redact_data(result.items if result.items is not None else result.item)
     if context.rich:
         console = _get_console(context, context.stdout)
         view = get_human_view(context.command)
@@ -356,7 +382,11 @@ def _emit_text(context: OutputContext, result: CommandResult) -> None:
         for warning in result.warnings:
             Console(file=context.stderr).print(Text(f"Warning: {warning}"))
         return
-    if isinstance(value, dict):
+    if context.command == "kitaru" and isinstance(value, dict):
+        summary = _get_root_summary(value)
+        if summary is not None:
+            print(summary.plain, file=context.stdout)
+    elif isinstance(value, dict):
         for key, item in value.items():
             print(f"{key}: {_display_value(item)}", file=context.stdout)
     elif isinstance(value, list):
@@ -466,9 +496,16 @@ def _emit_human_detail(
 
 def _emit_root(console: Console, value: dict[str, Any]) -> None:
     """Render concise agent-skill onboarding after root help."""
+    summary = _get_root_summary(value)
+    if summary is not None:
+        console.print(summary)
+
+
+def _get_root_summary(value: dict[str, Any]) -> Text | None:
+    """Build concise agent-skill onboarding for text output."""
     skills = value.get("skills")
     if not isinstance(skills, dict):
-        return
+        return None
     names = skills.get("skills")
     if skills.get("installed") and isinstance(names, list):
         visible_names, remainder = select_visible_skill_names(
@@ -478,9 +515,8 @@ def _emit_root(console: Console, value: dict[str, Any]) -> None:
         escaped_names = (_escape_terminal_controls(name) for name in visible_names)
         line = Text("Kitaru agent skills detected", style="green")
         line.append(f": {', '.join(escaped_names)}{suffix}.")
-        console.print(line)
-        return
-    console.print(
+        return line
+    return Text(
         "Install the Kitaru agent skills for guided setup and investigation workflows."
     )
 

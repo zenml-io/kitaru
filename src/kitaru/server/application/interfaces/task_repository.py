@@ -47,6 +47,10 @@ class TaskRepository(Protocol):
         Args:
             tasks: Tasks to store.
 
+        Raises:
+            DuplicateEvaluationTask: Two of the tasks are evaluator tasks of
+                one job for the same input session and plugin version.
+
         Returns:
             Stored tasks with timestamps set, in the same order.
         """
@@ -178,6 +182,14 @@ class TaskRepository(Protocol):
 
         Returns:
             Ids of the stale tasks in ascending order.
+        """
+        ...
+
+    async def has_in_flight(self) -> bool:
+        """Report whether any task is claimed or running.
+
+        Returns:
+            Whether at least one task is in flight.
         """
         ...
 

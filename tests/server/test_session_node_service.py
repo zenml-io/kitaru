@@ -158,7 +158,11 @@ async def test_ingest_insert_assigns_ids_and_rollups(
 ) -> None:
     """Insert new nodes and roll up their cost, tokens, and call counts."""
     batch = [
-        _llm_node("n0", cost=Decimal("1.50"), tokens=TokenUsage(input_tokens=10)),
+        _llm_node(
+            "n0",
+            cost=Decimal("1.50"),
+            tokens=TokenUsage(input_tokens=10, cache_write_input_tokens=4),
+        ),
         SessionNodeUpsert(
             external_id="n1",
             parent_external_id="n0",
@@ -178,6 +182,7 @@ async def test_ingest_insert_assigns_ids_and_rollups(
     assert session.cost == Decimal("1.50")
     assert session.tokens is not None
     assert session.tokens.input_tokens == 10
+    assert session.tokens.cache_write_input_tokens == 4
     assert session.llm_call_count == 1
     assert session.tool_call_count == 1
 

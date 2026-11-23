@@ -21,16 +21,11 @@ Note: Ensure you have OCI support enabled in your Helm client.
 
 ## Configuration
 
-This chart offers a multitude of configuration options. For detailed
-information, check the default [`values.yaml`](values.yaml) file. For full
-details of the configuration options, refer to the
-[Kitaru documentation](https://docs.zenml.io/kitaru/).
+This chart offers a multitude of configuration options. For detailed information, check the default [`values.yaml`](values.yaml) file. For full details of the configuration options, refer to the [Kitaru documentation](https://docs.zenml.io/kitaru/).
 
 ### PostgreSQL TLS
 
-Configure PostgreSQL TLS with `server.database.sslMode`. Supported modes are
-`disable`, `require`, `verify-ca`, and `verify-full`. The `verify-full` mode
-uses the system CA trust store unless `sslCa` supplies a custom CA.
+Configure PostgreSQL TLS with `server.database.sslMode`. Supported modes are `disable`, `require`, `verify-ca`, and `verify-full`. The `verify-full` mode uses the system CA trust store unless `sslCa` supplies a custom CA.
 
 Certificates can be supplied inline:
 
@@ -45,8 +40,7 @@ server:
         -----END CERTIFICATE-----
 ```
 
-For production deployments, referencing an existing Kubernetes Secret avoids
-placing certificate material in Helm values:
+For production deployments, referencing an existing Kubernetes Secret avoids placing certificate material in Helm values:
 
 ```yaml
 server:
@@ -66,8 +60,7 @@ server:
         key: tls.key
 ```
 
-`sslCert` and `sslKey` configure mutual TLS and must be supplied together. For
-each certificate, configure either `value` or `secretRef`, but not both.
+`sslCert` and `sslKey` configure mutual TLS and must be supplied together. For each certificate, configure either `value` or `secretRef`, but not both.
 
 ### Custom CA Certificates
 

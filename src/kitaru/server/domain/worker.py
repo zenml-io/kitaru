@@ -18,7 +18,7 @@ from datetime import datetime
 
 from pydantic import Field
 
-from kitaru.api_models.v1.task import REQUIRES_CREDENTIALS_LABEL
+from kitaru.api_models.v1.task import REQUIRES_CREDENTIALS_LABEL, TaskWaitReason
 from kitaru.api_models.v1.worker import (
     LabelSelector,
     WorkerClaim,
@@ -121,6 +121,35 @@ def get_effective_selectors(scope: WorkerScope) -> list[LabelSelector]:
     return selectors
 
 
+def get_scope_mismatch(scope: WorkerScope, task: Task) -> TaskWaitReason | None:
+    """Explain the first requirement a worker scope does not meet.
+
+    Args:
+        scope: Worker scope.
+        task: Candidate task.
+
+    Returns:
+        First mismatch, or None when the scope covers the task.
+    """
+    if scope.job_id is not None and task.job_id != scope.job_id:
+        return TaskWaitReason.JOB_MISMATCH
+    if not any(_claim_matches(claim, task) for claim in scope.claims):
+        return TaskWaitReason.CLAIM_MISMATCH
+    for selector in get_effective_selectors(scope):
+        matches = (
+            not selector.required
+            if selector.key not in task.labels
+            else task.labels[selector.key] in selector.values
+        )
+        if not matches:
+            return (
+                TaskWaitReason.CREDENTIAL_MISMATCH
+                if selector.key == REQUIRES_CREDENTIALS_LABEL
+                else TaskWaitReason.SELECTOR_MISMATCH
+            )
+    return None
+
+
 def scope_covers(scope: WorkerScope, task: Task) -> bool:
     """Report whether a scope claims the task.
 
@@ -134,16 +163,7 @@ def scope_covers(scope: WorkerScope, task: Task) -> bool:
     Returns:
         Whether a worker with the scope would claim the task.
     """
-    if scope.job_id is not None and task.job_id != scope.job_id:
-        return False
-    for selector in get_effective_selectors(scope):
-        if selector.key not in task.labels:
-            if selector.required:
-                return False
-            continue
-        if task.labels[selector.key] not in selector.values:
-            return False
-    return any(_claim_matches(claim, task) for claim in scope.claims)
+    return get_scope_mismatch(scope, task) is None
 
 
 class Worker(DomainModel):

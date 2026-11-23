@@ -146,7 +146,9 @@ def evaluate(session: SessionView) -> EvaluationResult:
     )
 ```
 
-This example uses structured output and recorded tool results. It does not search the customer reply for words such as `refund`, and it does not map ticket IDs to expected answers. Adapt the rule, required evidence, and missing-evidence result to the behavior you confirmed during review.
+This example checks action consistency, not refund-policy correctness. Here, an accepted tool action means that the tool returned `accepted: true`; it does not mean the refund was authorized by the policy. An unauthorized refund that the tool accepts and the final output accurately reports can pass this evaluator. If your reviewed behavior concerns approval or refund limits, implement that rule from the recorded order, policy, and action evidence before using the evaluator to measure an improvement.
+
+The example uses structured output and recorded tool results. It does not search the customer reply for words such as `refund`, and it does not map ticket IDs to expected answers. Adapt the rule, required evidence, and missing-evidence result to the behavior you confirmed during review.
 
 If you want coding-agent help, ask it to implement only the accepted behavior from the persisted investigation and show you how each branch follows from recorded evidence. Tell it not to read or use the example's test-only expected outcomes. Review the resulting code before registering it.
 

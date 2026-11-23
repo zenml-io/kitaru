@@ -112,6 +112,7 @@ def _settings(
     cpu: float | None = None,
     memory_mb: int | None = None,
     environment: str | None = None,
+    region: str | None = None,
     env: dict[str, str] | None = None,
 ) -> EphemeralWorkerSettings:
     return EphemeralWorkerSettings(
@@ -126,6 +127,7 @@ def _settings(
             cpu=cpu,
             memory_mb=memory_mb,
             environment=environment,
+            region=region,
         ),
     )
 
@@ -216,6 +218,19 @@ async def test_start_in_a_configured_environment(fake_modal: _FakeModal) -> None
     assert lookup_kwargs["environment_name"] == "staging"
     _, create_kwargs = fake_modal.sandbox_create.calls[0]
     assert create_kwargs["environment_name"] == "staging"
+
+
+@pytest.mark.parametrize("region", [None, "eu", "eu-west"])
+async def test_start_passes_the_configured_region(
+    fake_modal: _FakeModal, region: str | None
+) -> None:
+    """Use the configured region or preserve Modal's default placement."""
+    ephemeral_workers = ModalEphemeralWorkers(_settings(region=region))
+
+    await ephemeral_workers.start(_spec())
+
+    _, kwargs = fake_modal.sandbox_create.calls[0]
+    assert kwargs["region"] == region
 
 
 async def test_start_without_resource_limits_passes_none_through(

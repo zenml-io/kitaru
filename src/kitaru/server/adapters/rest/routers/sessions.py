@@ -29,6 +29,7 @@ from kitaru.api_models.v1.session import (
     SessionUpdateRequest,
 )
 from kitaru.api_models.v1.session_node import (
+    SessionIngestRequest,
     SessionNodeBatchRequest,
     SessionNodeListParams,
     SessionNodeResponse,
@@ -38,6 +39,7 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
     get_evaluation_service,
+    get_session_ingestion_service,
     get_session_node_service,
     get_session_service,
 )
@@ -47,6 +49,7 @@ from kitaru.server.adapters.rest.mapping.evaluations import (
 )
 from kitaru.server.adapters.rest.mapping.session_nodes import (
     session_node_batch_to_upserts,
+    session_node_create_to_upsert,
     session_node_list_params_to_filter,
     session_node_to_response,
 )
@@ -61,6 +64,9 @@ from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.evaluation_service import EvaluationService
+from kitaru.server.application.services.session_ingestion_service import (
+    SessionIngestionService,
+)
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
 )
@@ -95,6 +101,39 @@ async def create_session(
     """
     command = session_create_to_command(body)
     session = await service.create_session(command, actor=actor)
+    return session_to_response(session)
+
+
+@router.post(
+    "/ingest",
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 404, 409),
+)
+@idempotent
+async def ingest_session(
+    body: SessionIngestRequest,
+    service: Annotated[SessionIngestionService, Depends(get_session_ingestion_service)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
+) -> SessionResponse:
+    """Create a session and all its initial nodes atomically.
+
+    Clients observe HTTP 201 on success, 409 for an existing source identity,
+    and 422 on invalid input. A node failure rolls back the session and all
+    initial nodes.
+
+    Args:
+        body: Session and complete initial nodes.
+        service: Session ingestion service.
+        actor: Caller context.
+
+    Returns:
+        Created session with its node rollups.
+    """
+    session = await service.ingest_session(
+        session_create_to_command(body.session),
+        [session_node_create_to_upsert(node) for node in body.nodes],
+        actor=actor,
+    )
     return session_to_response(session)
 
 

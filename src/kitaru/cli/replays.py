@@ -19,6 +19,7 @@ from kitaru.cli.registration import (
     parse_tool_policy,
     resolve_evaluator_configs,
 )
+from kitaru.cli.task_diagnostics import get_task_diagnostics
 
 
 async def create_replay(
@@ -59,8 +60,18 @@ async def create_replay(
             f"kitaru job cancel {replay.job_id}",
         ]
     next_actions.append(f"kitaru replay get {replay.id}")
+    diagnostics, warnings = (
+        await get_task_diagnostics(client, job_id=replay.job_id)
+        if replay.job_id is not None
+        else (None, [])
+    )
+    item = replay.model_dump(mode="json")
+    item["task_diagnostics"] = (
+        diagnostics.model_dump(mode="json") if diagnostics else None
+    )
     return CommandResult(
-        item=replay.model_dump(mode="json"),
+        item=item,
+        warnings=warnings,
         event="created",
         next_actions=next_actions,
     )

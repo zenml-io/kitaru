@@ -1,1 +1,0 @@
-- Added a PydanticAI adapter option to keep the caller's prompt and history while recording task inputs, with guidance for attaching benchmark grades after completion.

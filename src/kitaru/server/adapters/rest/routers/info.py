@@ -24,9 +24,11 @@ from kitaru.server.adapters.rest.dependencies import (
     get_app_settings,
     get_server_id_state,
     get_ui_version_state,
+    get_user_activity_service,
 )
 from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.services.user_activity import UserActivityService
 
 router = APIRouter(route_class=KitaruAPIRoute)
 
@@ -38,6 +40,7 @@ async def get_info(
     settings: Annotated[APISettings, Depends(get_app_settings)],
     server_id: Annotated[uuid.UUID | None, Depends(get_server_id_state)],
     ui_version: Annotated[str | None, Depends(get_ui_version_state)],
+    activity: Annotated[UserActivityService | None, Depends(get_user_activity_service)],
 ) -> ServerInfoResponse:
     """Report how this server identifies itself and authenticates its callers.
 
@@ -48,6 +51,7 @@ async def get_info(
         settings: Service settings governing auth behavior.
         server_id: Persisted server id.
         ui_version: UI version served by this process.
+        activity: User activity service, absent before startup.
 
     Returns:
         Server info.
@@ -65,4 +69,7 @@ async def get_info(
         control_plane_api_url=control_plane_api_url,
         analytics_enabled=settings.ANALYTICS_OPT_IN,
         max_blob_size_bytes=settings.MAX_BLOB_SIZE_BYTES,
+        last_user_activity=(
+            await activity.get_last_user_activity() if activity is not None else None
+        ),
     )

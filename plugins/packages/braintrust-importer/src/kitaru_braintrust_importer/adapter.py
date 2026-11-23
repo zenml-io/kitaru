@@ -14,7 +14,7 @@
 """Braintrust importer-backed adapter."""
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -59,7 +59,7 @@ class BraintrustAdapter(ImporterBackedAdapter):
         self._completed_rows: dict[str, list[dict[str, Any]]] = {}
 
     @contextmanager
-    def open_trace(self) -> Iterator[str]:
+    def open_trace(self) -> Generator[str, None, None]:
         """Activate a Braintrust span and yield its root span id.
 
         Raises:

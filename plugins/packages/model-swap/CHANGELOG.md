@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Average tokens per call only over replies and recordings that report usage, so failed requests no longer lower a candidate's tokens per call.
+- Count the whole recorded prompt as a replay's input: when a model's calls in a session report more cache reads or cache writes than input tokens, the source counts them beside the input, so they are added for the dry-run estimate, the spend-cap reservation and the recorded tokens per call. Candidate usage that reports more cached tokens than prompt tokens is priced the same way instead of dropping the cached tokens. Requires `kitaru>=0.27.7` for `TokenUsage.cache_write_input_tokens`.
+- Classify HTTP 400 content-policy rejections as `refusal` for both Chat Completions and Responses candidates, while preserving the provider's error detail and keeping unrelated request failures separate.
 - Keep decision-candidate questions independent of recorded answers by deriving the bounded question set from every offered tool schema, including for recorded text replies and omitted optional arguments.
 - Compare best-mix candidates with the reference on common answered calls within each step and session split, and retain today's model when reference hold-out evidence is missing instead of crashing the report.
 - Treat empty or incomplete provider usage as unknown, and retain spend reservations for decision requests sent without measurable usage, including read timeouts.

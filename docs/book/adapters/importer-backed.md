@@ -29,6 +29,8 @@ Install the provider's importer package with the extra:
 uv add "kitaru-langfuse-importer[adapter]"
 ```
 
+The Langfuse adapter uses Python SDK 5 and requires Langfuse Cloud or self-hosted Langfuse 4.59.0 or later.
+
 Configure the provider SDK as you already do, then wrap the entrypoint:
 
 ```python

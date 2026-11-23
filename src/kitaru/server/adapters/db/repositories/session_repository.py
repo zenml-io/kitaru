@@ -14,11 +14,11 @@
 """SQL session repository."""
 
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import UTC, datetime
-from decimal import Decimal
 
-from sqlalchemy import ColumnElement, CursorResult, func, select, update
+from sqlalchemy import ColumnElement, CursorResult, exists, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import defer
 
@@ -51,6 +51,11 @@ from kitaru.server.adapters.db.orm.session import (
     SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT,
     SessionORM,
 )
+from kitaru.server.adapters.db.orm.session_group import (
+    SESSION_GROUP_SESSION_SESSION_ID_FOREIGN_KEY,
+    SessionGroupORM,
+    SessionGroupSessionORM,
+)
 from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session import SessionFilter
@@ -63,6 +68,7 @@ from kitaru.server.domain.session import (
     SessionInUse,
     SessionNotFound,
     SessionRollups,
+    SessionUsage,
 )
 from kitaru.server.filtering import FilterCondition
 
@@ -137,6 +143,11 @@ SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "name": SessionORM.name,
     "tag": build_tag_condition_binding(TagResourceType.SESSION, SessionORM.id),
     "cohort_version_id": _compile_cohort_version_condition,
+    "session_group_id": build_scope_condition_binding(
+        local_column=SessionORM.id,
+        related_key=SessionGroupSessionORM.session_id,
+        scope_column=SessionGroupSessionORM.session_group_id,
+    ),
     "experiment_run_id": _scopes_to_experiment_run,
     "has_evaluation": _compile_has_evaluation_condition,
     "started_at": SessionORM.started_at,
@@ -323,6 +334,67 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         exclude = {column.key for column in deferred}
         return [row.to_domain(exclude=exclude) for row in rows], next_cursor
 
+    async def create_group(
+        self, job_id: uuid.UUID, session_ids: Sequence[uuid.UUID]
+    ) -> uuid.UUID:
+        """Store a fixed group of sessions for the tasks of a job to read.
+
+        Args:
+            job_id: Id of the job the group belongs to.
+            session_ids: Ids of the member sessions.
+
+        Raises:
+            SessionNotFound: No session has one of the member session ids.
+
+        Returns:
+            Id of the stored group.
+        """
+        group = SessionGroupORM(job_id=job_id)
+        await self._add(group)
+        links = [
+            SessionGroupSessionORM(session_group_id=group.id, session_id=session_id)
+            for session_id in session_ids
+        ]
+        # Add the links inside the savepoint: opening one flushes pending
+        # rows first, so links added before it would fail outside it and
+        # leave the surrounding transaction unusable.
+        try:
+            async with self._session.begin_nested():
+                self._session.add_all(links)
+                await self._session.flush()
+        except IntegrityError as exc:
+            # The caller reads the sessions before this insert, so a session
+            # foreign key violation means one was deleted concurrently.
+            self._raise_translated(
+                exc,
+                {
+                    SESSION_GROUP_SESSION_SESSION_ID_FOREIGN_KEY: (
+                        lambda: SessionNotFound()
+                    )
+                },
+            )
+        return group.id
+
+    async def is_in_group(
+        self, session_id: uuid.UUID, group_ids: Collection[uuid.UUID]
+    ) -> bool:
+        """Whether a session belongs to any of the given session groups.
+
+        Args:
+            session_id: Id of the session.
+            group_ids: Ids of the session groups.
+
+        Returns:
+            Whether the session is a member of at least one group.
+        """
+        membership = select(
+            exists().where(
+                SessionGroupSessionORM.session_id == session_id,
+                SessionGroupSessionORM.session_group_id.in_(group_ids),
+            )
+        )
+        return bool(await self._session.scalar(membership))
+
     async def get_many(
         self, session_ids: Sequence[uuid.UUID], include_payloads: bool
     ) -> dict[uuid.UUID, Session]:
@@ -423,9 +495,9 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         )
 
     async def apply_rollups(
-        self, session_id: uuid.UUID, deltas: SessionRollups, cost: Decimal | None
+        self, session_id: uuid.UUID, deltas: SessionRollups, usage: SessionUsage
     ) -> None:
-        """Set session cost and apply token and call-count deltas.
+        """Set measured session totals and apply call-count deltas.
 
         This is a Core-level bulk statement rather than an ORM attribute
         mutation, so the ``updated`` timestamp needs to be stamped here
@@ -434,7 +506,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         Args:
             session_id: Id of the session.
             deltas: Rollup deltas to add.
-            cost: Total cost, or ``None`` when pricing is incomplete.
+            usage: Measured totals, with incomplete fields left unknown.
 
         Raises:
             SessionNotFound: No session has this id.
@@ -443,15 +515,12 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             update(SessionORM)
             .where(SessionORM.id == session_id)
             .values(
-                cost=cost,
-                input_tokens=func.coalesce(SessionORM.input_tokens, 0)
-                + deltas.input_tokens,
-                output_tokens=func.coalesce(SessionORM.output_tokens, 0)
-                + deltas.output_tokens,
-                cached_input_tokens=func.coalesce(SessionORM.cached_input_tokens, 0)
-                + deltas.cached_input_tokens,
-                reasoning_tokens=func.coalesce(SessionORM.reasoning_tokens, 0)
-                + deltas.reasoning_tokens,
+                cost=usage.cost,
+                input_tokens=usage.tokens.input_tokens,
+                output_tokens=usage.tokens.output_tokens,
+                cached_input_tokens=usage.tokens.cached_input_tokens,
+                cache_write_input_tokens=usage.tokens.cache_write_input_tokens,
+                reasoning_tokens=usage.tokens.reasoning_tokens,
                 llm_call_count=SessionORM.llm_call_count + deltas.llm_call_count,
                 tool_call_count=SessionORM.tool_call_count + deltas.tool_call_count,
                 updated=datetime.now(UTC),

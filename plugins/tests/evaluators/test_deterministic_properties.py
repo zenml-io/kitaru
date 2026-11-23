@@ -23,6 +23,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from kitaru_evaluator import deterministic as evaluators
+from kitaru_evaluator.evidence import decode_pointer_parts, resolve_pointer
 
 _POINTER_TOKEN = st.text(max_size=20)
 _JSON_VALUE = st.recursive(
@@ -90,7 +91,7 @@ def _build_finite_decimal(draw: st.DrawFn) -> Decimal:
 @given(parts=st.lists(_POINTER_TOKEN, max_size=8))
 def test_pointer_tokens_round_trip(parts: list[str]) -> None:
     """Decode arbitrary escaped tokens, including root and empty keys."""
-    assert evaluators._decode_pointer_parts(_encode_pointer(parts)) == parts
+    assert decode_pointer_parts(_encode_pointer(parts)) == parts
 
 
 @given(case=_build_planted_pointer())
@@ -99,7 +100,7 @@ def test_pointer_resolves_generated_planted_value(
 ) -> None:
     """Resolve a generated path to the independently planted value."""
     document, pointer, leaf = case
-    found, value = evaluators._resolve_pointer(document, pointer)
+    found, value = resolve_pointer(document, pointer)
     assert found is True
     assert value == leaf
 
@@ -120,24 +121,24 @@ def test_pointer_reports_generated_missing_child(
         missing_part = "child"
 
     missing_pointer = f"{pointer}/{_encode_pointer_part(missing_part)}"
-    assert evaluators._resolve_pointer(document, missing_pointer) == (False, None)
+    assert resolve_pointer(document, missing_pointer) == (False, None)
 
 
 @pytest.mark.parametrize("pointer", ["answer", "/a~", "/a~2b", "/a~xb"])
 def test_pointer_rejects_invalid_syntax(pointer: str) -> None:
     """Reject malformed paths and escapes as configuration errors."""
     with pytest.raises(ValueError, match="JSON Pointer"):
-        evaluators._resolve_pointer({}, pointer)
+        resolve_pointer({}, pointer)
 
 
 @pytest.mark.parametrize("part", ["00", "01", "-1", "+1", "\u0661", "\uff11", "2"])
 def test_pointer_treats_invalid_or_missing_list_indexes_as_missing(part: str) -> None:
     """Keep valid pointer syntax distinct from list-index resolution."""
-    assert evaluators._resolve_pointer(["zero", "one"], f"/{part}") == (
+    assert resolve_pointer(["zero", "one"], f"/{part}") == (
         False,
         None,
     )
-    assert evaluators._resolve_pointer({part: "value"}, f"/{part}") == (
+    assert resolve_pointer({part: "value"}, f"/{part}") == (
         True,
         "value",
     )
@@ -145,7 +146,7 @@ def test_pointer_treats_invalid_or_missing_list_indexes_as_missing(part: str) ->
 
 def test_pointer_decodes_escape_sequences_once() -> None:
     """Do not decode a tilde produced by an earlier escape."""
-    assert evaluators._decode_pointer_parts("/~01") == ["~1"]
+    assert decode_pointer_parts("/~01") == ["~1"]
 
 
 @given(

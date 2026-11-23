@@ -76,8 +76,8 @@ def test_post_import_analyzer_is_registered_from_plugin_package() -> None:
         definition.entrypoint
         == "kitaru_post_import_insights.analyzer:analyze_post_import_sessions"
     )
-    assert definition.requirement == "kitaru-post-import-insights==0.1.2"
-    assert definition.display_version == "0.1.2"
+    assert definition.requirement == "kitaru-post-import-insights==0.4.0"
+    assert definition.display_version == "0.4.0"
     assert definition.provider is None
     assert definition.connection_schema is None
 
@@ -109,13 +109,29 @@ def test_openai_post_import_analyzer_has_separate_entrypoint_and_credentials() -
     assert definition.entrypoint == (
         "kitaru_post_import_insights.analyzer:analyze_openai_post_import_sessions"
     )
-    assert definition.requirement == "kitaru-post-import-insights[openai]==0.1.2"
-    assert definition.display_version == "0.1.2"
+    assert definition.requirement == "kitaru-post-import-insights[openai]==0.4.0"
+    assert definition.display_version == "0.4.0"
     assert definition.provider == "openai"
     assert definition.connection_schema is not None
     schema = definition.connection_schema.model_json_schema()
     assert schema["required"] == ["OPENAI_API_KEY"]
     assert schema["properties"]["OPENAI_API_KEY"]["writeOnly"] is True
+
+
+def test_session_findings_analyzer_shares_the_openai_distribution() -> None:
+    """Expose session findings from the same distribution and OpenAI credentials."""
+    definition = next(
+        item
+        for item in DEFAULT_PLUGIN_DEFINITIONS
+        if item.kind is PluginKind.ANALYZER
+        and item.name == "kitaru/openai-session-findings"
+    )
+    assert definition.entrypoint == (
+        "kitaru_post_import_insights.session_findings:analyze_session_findings"
+    )
+    assert definition.requirement == "kitaru-post-import-insights[openai]==0.4.0"
+    assert definition.provider == "openai"
+    assert definition.connection_schema is not None
 
 
 async def test_register_keeps_both_post_import_analyzers_independent(

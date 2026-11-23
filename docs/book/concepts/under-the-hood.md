@@ -33,7 +33,7 @@ The endpoints that honor a key are the ones whose OpenAPI operation declares an 
 2. A worker claims the task and starts your agent from the agent version's run spec command, with the baseline's inputs (rewritten by the override, if any) and `KITARU_REPLAY_ID` in the environment.
 3. Your agent runs for real. The adapter sees `KITARU_REPLAY_ID`, fetches the override and tool policy, applies model swaps at the model-call boundary, and answers tool calls per policy; a `history` policy looks up the recorded result by a hash of the tool name and arguments.
 4. The re-run records a fresh session, node by node, `origin: replay`.
-5. When the agent task completes, the server appends one evaluator task per configured evaluator; workers evaluate the result session and, with `evaluate_baselines`, the baseline.
+5. When the agent task completes, the server appends one evaluator task per configured evaluator for the result session. With the default `baseline_evaluation_mode="if_missing"`, the server reuses the latest baseline evaluation matching the evaluator version and parameters, or schedules one if no match exists. `"force"` always schedules fresh baseline evaluations; `"none"` skips them.
 6. The job settles, the replay settles, and, inside an experiment run, the run's progress advances. Results are stored rows: the result session, its nodes, its evaluations.
 
 An [experiment run](experiments.md) is this pipeline fanned out once per session in a cohort version. Nothing about scale changes the mechanics.

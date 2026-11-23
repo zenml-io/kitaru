@@ -50,6 +50,7 @@ def test_modal_backend_with_modal_settings() -> None:
     )
     assert settings.modal is not None
     assert settings.modal.token_id == "ak-test"
+    assert settings.modal.region is None
     assert settings.command == "python -m kitaru.worker"
     assert settings.timeout_seconds == 3600
 
@@ -80,11 +81,20 @@ def test_image_required_for_a_development_build(
         EphemeralWorkerSettings().get_image()
 
 
-def test_modal_settings_parsed_from_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("region", [None, "eu", "eu-west"])
+def test_modal_settings_parsed_from_env_vars(
+    monkeypatch: pytest.MonkeyPatch, region: str | None
+) -> None:
     """Parse the modal sub-model from its nested environment variables."""
     monkeypatch.setenv("KITARU_SERVER_EPHEMERAL_WORKER__BACKEND", "modal")
     monkeypatch.setenv("KITARU_SERVER_EPHEMERAL_WORKER__MODAL__TOKEN_ID", "ak-test")
     monkeypatch.setenv("KITARU_SERVER_EPHEMERAL_WORKER__MODAL__TOKEN_SECRET", "as-test")
+    if region is None:
+        monkeypatch.delenv(
+            "KITARU_SERVER_EPHEMERAL_WORKER__MODAL__REGION", raising=False
+        )
+    else:
+        monkeypatch.setenv("KITARU_SERVER_EPHEMERAL_WORKER__MODAL__REGION", region)
     monkeypatch.setenv(
         "KITARU_SERVER_EPHEMERAL_WORKER__IMAGE", "zenmldocker/kitaru-worker:1.0.0"
     )
@@ -106,6 +116,7 @@ def test_modal_settings_parsed_from_env_vars(monkeypatch: pytest.MonkeyPatch) ->
     assert settings.EPHEMERAL_WORKER.modal is not None
     assert settings.EPHEMERAL_WORKER.modal.token_id == "ak-test"
     assert settings.EPHEMERAL_WORKER.modal.token_secret.get_secret_value() == "as-test"
+    assert settings.EPHEMERAL_WORKER.modal.region == region
     assert settings.EPHEMERAL_WORKER.image == "zenmldocker/kitaru-worker:1.0.0"
     assert settings.EPHEMERAL_WORKER.command == "python -m kitaru.worker --debug"
     assert settings.EPHEMERAL_WORKER.timeout_seconds == 120

@@ -1,0 +1,23 @@
+---
+name: PR description
+on:
+  pull_request:
+    types: [opened, edited, reopened, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.event.pull_request.draft == false && github.event.pull_request.user.type
+      != 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/check_pr_description.py
+          sparse-checkout-cone-mode: false
+      - name: Check title and Reviewer Notes
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 scripts/check_pr_description.py

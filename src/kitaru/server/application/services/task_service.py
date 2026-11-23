@@ -20,8 +20,9 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any
 
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionStatus
-from kitaru.api_models.v1.task import TaskStatus
+from kitaru.api_models.v1.task import TaskStatus, TaskWaitReason
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.session_repository import SessionRepository
@@ -43,7 +44,7 @@ from kitaru.server.application.models.task import (
 from kitaru.server.application.services.resource_access import check_task_attempt
 from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
-from kitaru.server.domain.base import NotFoundError
+from kitaru.server.domain.base import NotFoundError, ValidationError
 from kitaru.server.domain.task import (
     AgentTask,
     IllegalTaskStatusTransition,
@@ -56,7 +57,13 @@ from kitaru.server.domain.task import (
     TaskUpdateRequiresStatus,
     stale_abandon_error,
 )
-from kitaru.server.domain.worker import WorkerAccessDenied, WorkerCredentialRequired
+from kitaru.server.domain.task_diagnostics import TaskDiagnostic, TaskDiagnostics
+from kitaru.server.domain.worker import (
+    WorkerAccessDenied,
+    WorkerCredentialRequired,
+    get_scope_mismatch,
+)
+from kitaru.server.filtering import FilterCondition
 
 
 class TaskService:
@@ -72,6 +79,7 @@ class TaskService:
         spec_builder: TaskSpecBuilder,
         transitions: TaskTransitions,
         policy: TaskPolicy,
+        liveness_timeout_seconds: int = 60,
     ) -> None:
         """Initialize the service.
 
@@ -84,6 +92,7 @@ class TaskService:
             spec_builder: Task execution spec builder.
             transitions: Task transition dispatch.
             policy: Task execution policy.
+            liveness_timeout_seconds: Worker heartbeat liveness window.
         """
         self._repository = repository
         self._workers = worker_repository
@@ -93,6 +102,108 @@ class TaskService:
         self._spec_builder = spec_builder
         self._transitions = transitions
         self._policy = policy
+        self._liveness_timeout_seconds = liveness_timeout_seconds
+
+    async def get_diagnostics(
+        self,
+        job_id: uuid.UUID | None,
+        experiment_run_id: uuid.UUID | None,
+        actor: AuthContext,
+    ) -> TaskDiagnostics:
+        """Summarize pending work and incompatible worker requirements.
+
+        Args:
+            job_id: Restrict to one job.
+            experiment_run_id: Restrict to a run's replay jobs.
+            actor: Caller context.
+
+        Raises:
+            ValidationError: Both scope filters were supplied.
+            JobNotFound: The requested job does not exist.
+
+        Returns:
+            Current coverage with bounded example ids and groups.
+        """
+        _ = actor
+        if job_id is not None and experiment_run_id is not None:
+            raise ValidationError("Specify job_id or experiment_run_id, not both")
+        if job_id is not None:
+            await self._jobs.get(job_id)
+        run_jobs = None
+        if experiment_run_id is not None:
+            run_jobs = {
+                replay.job_id
+                for replay in await self._replays.list_by_experiment_run(
+                    experiment_run_id
+                )
+                if replay.job_id is not None
+            }
+        cutoff = datetime.now(UTC) - timedelta(seconds=self._liveness_timeout_seconds)
+        workers = await self._workers.list_live(cutoff)
+        groups: dict[str, TaskDiagnostic] = {}
+        pending_count = 0
+        truncated = False
+        cursor = None
+        while True:
+            tasks, cursor = await self._repository.query(
+                TaskFilter(
+                    job_id=job_id,
+                    job_ids=sorted(run_jobs) if run_jobs is not None else None,
+                    size=1000,
+                    cursor=cursor,
+                    sort="created:asc",
+                    expression=FilterCondition(
+                        field="status", op=FilterOp.EQ, value=TaskStatus.PENDING
+                    ),
+                )
+            )
+            for task in tasks:
+                if task.cancel_requested_at is not None:
+                    continue
+                pending_count += 1
+                mismatches = {
+                    get_scope_mismatch(worker.scope, task) for worker in workers
+                }
+                reasons = (
+                    []
+                    if None in mismatches
+                    else sorted(reason for reason in mismatches if reason is not None)
+                    if workers
+                    else [TaskWaitReason.NO_LIVE_WORKERS]
+                )
+                version_id = (
+                    task.agent_version_id if isinstance(task, AgentTask) else None
+                )
+                key = json.dumps(
+                    [task.kind, str(version_id), task.labels, reasons], sort_keys=True
+                )
+                group = groups.get(key)
+                if group is None:
+                    if len(groups) >= 100:
+                        truncated = True
+                        continue
+                    group = TaskDiagnostic(
+                        kind=task.kind,
+                        agent_version_id=version_id,
+                        labels=task.labels,
+                        reasons=reasons,
+                        task_ids=[],
+                        job_ids=[],
+                    )
+                    groups[key] = group
+                group.task_count += 1
+                if len(group.task_ids) < 3:
+                    group.task_ids.append(task.id)
+                if len(group.job_ids) < 3 and task.job_id not in group.job_ids:
+                    group.job_ids.append(task.job_id)
+            if cursor is None:
+                break
+        return TaskDiagnostics(
+            live_worker_count=len(workers),
+            pending_task_count=pending_count,
+            groups=list(groups.values()),
+            truncated=truncated,
+        )
 
     async def claim_tasks(
         self, max_tasks: int, actor: WorkerAuthContext

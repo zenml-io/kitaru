@@ -142,7 +142,7 @@ Per node, the importer preserves:
 - **Inputs**, from the first present of `input`, `inputs`, `raw_input`, `pydantic_ai.all_messages`, `gen_ai.input.messages`, `gen_ai.prompt`, `tool.arguments`, `gen_ai.tool.call.arguments`.
 - **Outputs**, from the first present of `output`, `outputs`, `final_result`, `gen_ai.output.messages`, `gen_ai.completion`, `tool.result`, `gen_ai.tool.call.result`.
 - **Model identity**: requested model from `gen_ai.request.model`, resolved model from `gen_ai.response.model` (falling back to the requested model), provider from `gen_ai.provider.name` or `gen_ai.system`.
-- **Token usage**: input from `gen_ai.usage.input_tokens` or `gen_ai.usage.prompt_tokens`, output from `gen_ai.usage.output_tokens` or `gen_ai.usage.completion_tokens`, cached input from `gen_ai.usage.details.cache_read_tokens` or `gen_ai.usage.cached_input_tokens`, and reasoning tokens from `gen_ai.usage.details.reasoning_tokens`.
+- **Token usage**: input from `gen_ai.usage.input_tokens` or `gen_ai.usage.prompt_tokens`, output from `gen_ai.usage.output_tokens` or `gen_ai.usage.completion_tokens`, cached input from `gen_ai.usage.details.cache_read_tokens` or `gen_ai.usage.cached_input_tokens`, cache-write input from `gen_ai.usage.details.cache_write_tokens` or `gen_ai.usage.cache_creation.input_tokens`, and reasoning tokens from `gen_ai.usage.details.reasoning_tokens`.
 - **Cost** from `gen_ai.usage.cost`, `gen_ai.cost.total`, or `operation.cost`.
 - **Model parameters** from `gen_ai.request.parameters`, `model_parameters`, `model_request_parameters`, or `model_settings`.
 - **Timings** from `start_timestamp` and `end_timestamp`, parsed as ISO 8601.

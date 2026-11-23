@@ -396,7 +396,9 @@ def test_real_deep_agent_factory_runs_through_runner(
         node for node in nodes if node.name == "PatchToolCallsMiddleware.before_agent"
     ]
     assert middleware_spans
-    assert all(node.inputs == {} for node in middleware_spans)
+    # LangGraph 1.2.19 applies trace policies only to LangChain tracers, so
+    # Kitaru's callback receives the hook's real state.
+    assert all("messages" in node.inputs for node in middleware_spans)
     assert all(
         node.inputs not in (None, {})
         for node in nodes

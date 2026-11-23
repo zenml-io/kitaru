@@ -76,10 +76,12 @@ from kitaru.server.adapters.rest.dependencies.services import (
     get_payload_store,
     get_permission_service,
     get_secret_service,
+    get_session_ingestion_service,
     get_session_node_service,
     get_session_service,
     get_tag_service,
     get_task_policy,
+    get_user_activity_service,
     get_worker_service,
 )
 
@@ -132,12 +134,14 @@ __all__ = [
     "get_server_analytics",
     "get_server_id_state",
     "get_session",
+    "get_session_ingestion_service",
     "get_session_node_service",
     "get_session_service",
     "get_tag_service",
     "get_task_policy",
     "get_task_service",
     "get_ui_version_state",
+    "get_user_activity_service",
     "get_worker_service",
     "require_local_account_management",
 ]

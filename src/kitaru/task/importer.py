@@ -45,6 +45,7 @@ from kitaru.api_models.v1.session_node import (
     NodeLink,
     NodeStatus,
     NodeType,
+    SessionIngestRequest,
     SessionNodeBatchRequest,
     SessionNodeCreateRequest,
 )
@@ -517,7 +518,7 @@ async def ingest_session(
     provider: str | None,
     origin: SessionOrigin = SessionOrigin.IMPORTED,
 ) -> SessionResponse | None:
-    """Create a session for one parsed import item and ingest its nodes.
+    """Create a session and all its initial nodes atomically.
 
     Args:
         client: API client.
@@ -535,15 +536,16 @@ async def ingest_session(
         Created session, None when a session with the external id already
         exists.
     """
-    request = session_request(parsed, agent_id, provider, origin)
+    request = SessionIngestRequest(
+        session=session_request(parsed, agent_id, provider, origin),
+        nodes=flatten_nodes(parsed.nodes),
+    )
     try:
-        session = await client.sessions.create(request)
+        return await client.sessions.ingest(request)
     except APIError as exc:
         if exc.status_code == httpx.codes.CONFLICT:
             return None
         raise
-    await _ingest_nodes(client, session.id, parsed.nodes)
-    return session
 
 
 async def _ingest_nodes(

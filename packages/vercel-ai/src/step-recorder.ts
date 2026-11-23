@@ -13,6 +13,7 @@ import {
   recordedToolPayloadConversion,
   recordedToolPayloadJson,
   recordNormalizedStep,
+  replyTextSelector,
   resolveCost,
 } from "@zenml-io/kitaru/adapter";
 import type {
@@ -29,6 +30,7 @@ function usageTokens(
 ): SessionNodeCreateRequest["tokens"] {
   const fields = {
     cached_input_tokens: usage.inputTokenDetails.cacheReadTokens,
+    cache_write_input_tokens: usage.inputTokenDetails.cacheWriteTokens,
     input_tokens: usage.inputTokens,
     output_tokens: usage.outputTokens,
     reasoning_tokens: usage.outputTokenDetails.reasoningTokens,
@@ -162,6 +164,7 @@ export async function recordVercelStep(
     tokens,
   });
   const tools = normalizedTools(state, step);
+  const outputs = stepOutputs(step, tools);
   await recordNormalizedStep(state, {
     attributes: {
       cost: cost.attribute,
@@ -174,7 +177,9 @@ export async function recordVercelStep(
     inputs: null,
     model: servedModelId(step),
     modelSettings,
-    outputs: stepOutputs(step, tools),
+    outputs,
+    // The SDK joins every text part of the step into `text`.
+    outputTextSelector: replyTextSelector(outputs),
     provider: step.model.provider,
     reasoningSelectors: stepReasoningSelectors(step),
     tokens,

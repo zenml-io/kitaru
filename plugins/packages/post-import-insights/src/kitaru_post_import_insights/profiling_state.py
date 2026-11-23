@@ -16,8 +16,23 @@
 import sqlite3
 import uuid
 from bisect import bisect_right, insort
-from collections.abc import Iterator
+from collections import Counter, defaultdict
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
+from typing import Any
+
+# SQLite stores signed 64-bit integers.
+MAX_OBSERVATION_VALUE = 2**63 - 1
+
+
+def _open_spill_database() -> sqlite3.Connection:
+    """Open an unnamed temporary database with a bounded page cache."""
+    connection = sqlite3.connect("")
+    # SQLite deletes its unnamed temporary database on close. Bound its page
+    # cache and force large ORDER BY operations to spill to disk.
+    connection.execute("PRAGMA cache_size = -256")
+    connection.execute("PRAGMA temp_store = FILE")
+    return connection
 
 
 class CountsStore:
@@ -29,20 +44,18 @@ class CountsStore:
         self._counts: dict[tuple[str, str], int] = {}
         self._connection: sqlite3.Connection | None = None
 
-    def increment(self, namespace: str, label: str) -> int:
-        """Increment a count and return its new value."""
+    def increment(self, namespace: str, label: str, amount: int = 1) -> int:
+        """Add a positive amount to a count and return its new value."""
+        if amount < 1:
+            raise ValueError("count increments must be positive")
         key = (namespace, label)
         if self._connection is None:
             if key in self._counts or len(self._counts) < self.memory_limit:
-                value = self._counts.get(key, 0) + 1
+                value = self._counts.get(key, 0) + amount
                 self._counts[key] = value
                 return value
-            connection = sqlite3.connect("")
+            connection = _open_spill_database()
             self._connection = connection
-            # SQLite deletes its unnamed temporary database on close. Bound its
-            # page cache and force large ORDER BY operations to spill to disk.
-            connection.execute("PRAGMA cache_size = -256")
-            connection.execute("PRAGMA temp_store = FILE")
             connection.execute(
                 "CREATE TABLE counts (namespace TEXT, label TEXT, count INTEGER, "
                 "PRIMARY KEY (namespace, label)) WITHOUT ROWID"
@@ -53,10 +66,11 @@ class CountsStore:
             )
             self._counts.clear()
         row = self._connection.execute(
-            "INSERT INTO counts VALUES (?, ?, 1) "
-            "ON CONFLICT(namespace, label) DO UPDATE SET count = count + 1 "
+            "INSERT INTO counts VALUES (?, ?, ?) "
+            "ON CONFLICT(namespace, label) "
+            "DO UPDATE SET count = count + excluded.count "
             "RETURNING count",
-            (namespace, label),
+            (namespace, label, amount),
         ).fetchone()
         assert row is not None
         return int(row[0])
@@ -77,6 +91,16 @@ class CountsStore:
             "ORDER BY count DESC, label ASC LIMIT ?",
             (namespace, limit),
         ).fetchall()
+
+    def get(self, namespace: str, label: str) -> int:
+        """Return one exact count, or zero for a label never counted."""
+        if self._connection is None:
+            return self._counts.get((namespace, label), 0)
+        row = self._connection.execute(
+            "SELECT count FROM counts WHERE namespace = ? AND label = ?",
+            (namespace, label),
+        ).fetchone()
+        return 0 if row is None else int(row[0])
 
     def contains(self, namespace: str, label: str) -> bool:
         """Check exact membership without retaining all names in memory."""
@@ -107,11 +131,16 @@ class LabelCounts:
     distinct: int = 0
     total: int = 0
 
-    def add(self, label: str) -> None:
-        """Count one label occurrence."""
-        if self.store.increment(self.namespace, label) == 1:
+    def add(self, label: str, amount: int = 1) -> None:
+        """Add a positive amount, such as one occurrence, to a label's total."""
+        # Amounts are positive, so only a label's first amount equals its total.
+        if self.store.increment(self.namespace, label, amount) == amount:
             self.distinct += 1
-        self.total += 1
+        self.total += amount
+
+    def get(self, label: str) -> int:
+        """Return one label's exact total."""
+        return self.store.get(self.namespace, label)
 
     def __len__(self) -> int:
         """Return the exact number of distinct labels."""
@@ -212,3 +241,186 @@ class Histogram:
     def __len__(self) -> int:
         """Return the total number of observations."""
         return self.count
+
+
+@dataclass
+class HighestValueNodes:
+    """Retain bounded node values, descending by value then ascending by IDs."""
+
+    limit: int
+    retained: list[tuple[float, uuid.UUID, uuid.UUID]] = field(default_factory=list)
+
+    def add(self, session_id: uuid.UUID, node_id: uuid.UUID, value: float) -> None:
+        """Record one eligible node observation."""
+        insort(self.retained, (-value, session_id, node_id))
+        del self.retained[self.limit :]
+
+    def get_nodes(self) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """Return session and node IDs in retained rank order."""
+        return [(session_id, node_id) for _, session_id, node_id in self.retained]
+
+
+@dataclass(frozen=True)
+class Observation:
+    """One exact integer observation and the session, node, and key it describes."""
+
+    value: int
+    session: str
+    node: str = ""
+    key: str = ""
+
+
+class ObservationStore:
+    """Keep exact integer observations, spilling large imports to temporary SQLite.
+
+    Ranked reads order by value descending, then session and node ascending, so
+    results never depend on the order in which observations arrived.
+    """
+
+    def __init__(self, memory_limit: int = 20_000) -> None:
+        """Initialize an empty store that spills after ``memory_limit`` rows."""
+        self.memory_limit = memory_limit
+        self._rows: defaultdict[str, list[Observation]] = defaultdict(list)
+        self._size = 0
+        self._connection: sqlite3.Connection | None = None
+        self._indexed = False
+
+    def add(self, namespace: str, observation: Observation) -> None:
+        """Record one observation whose value fits the SQLite integer range."""
+        if not 0 <= observation.value <= MAX_OBSERVATION_VALUE:
+            raise ValueError("observation value is outside the supported range")
+        if self._connection is None and self._size < self.memory_limit:
+            self._rows[namespace].append(observation)
+            self._size += 1
+            return
+        self._get_connection().execute(
+            "INSERT INTO observations VALUES (?, ?, ?, ?, ?)",
+            (
+                namespace,
+                observation.value,
+                observation.session,
+                observation.node,
+                observation.key,
+            ),
+        )
+
+    def count(self, namespace: str, *, minimum: int = 0) -> int:
+        """Count observations whose value is at least ``minimum``."""
+        if self._connection is None:
+            return sum(row.value >= minimum for row in self._rows[namespace])
+        row = self._query(
+            "SELECT COUNT(*) FROM observations WHERE namespace = ? AND value >= ?",
+            (namespace, minimum),
+        ).fetchone()
+        return int(row[0])
+
+    def count_sessions(self, namespace: str, *, minimum: int = 0) -> int:
+        """Count distinct sessions with an observation of at least ``minimum``."""
+        if self._connection is None:
+            return len(
+                {row.session for row in self._rows[namespace] if row.value >= minimum}
+            )
+        row = self._query(
+            "SELECT COUNT(DISTINCT session) FROM observations "
+            "WHERE namespace = ? AND value >= ?",
+            (namespace, minimum),
+        ).fetchone()
+        return int(row[0])
+
+    def get_median(self, namespace: str) -> int:
+        """Return the lower median value, the lower middle one for an even count."""
+        index = (self.count(namespace) - 1) // 2
+        if self._connection is None:
+            return sorted(row.value for row in self._rows[namespace])[index]
+        row = self._query(
+            "SELECT value FROM observations WHERE namespace = ? "
+            "ORDER BY value LIMIT 1 OFFSET ?",
+            (namespace, index),
+        ).fetchone()
+        if row is None:
+            raise IndexError("no observations to take a median of")
+        return int(row[0])
+
+    def iter_highest(
+        self, namespace: str, *, key: str | None = None, minimum: int = 0
+    ) -> Iterator[Observation]:
+        """Yield matching observations, highest value first."""
+        if self._connection is None:
+            rows = [
+                row
+                for row in self._rows[namespace]
+                if row.value >= minimum and (key is None or row.key == key)
+            ]
+            rows.sort(key=lambda row: (-row.value, row.session, row.node))
+            yield from rows
+            return
+        cursor = self._query(
+            "SELECT value, session, node, key FROM observations "
+            "WHERE namespace = ? AND value >= ? AND (? IS NULL OR key = ?) "
+            "ORDER BY value DESC, session ASC, node ASC",
+            (namespace, minimum, key, key),
+        )
+        for value, session, node, row_key in cursor:
+            yield Observation(value=value, session=session, node=node, key=row_key)
+
+    def get_unique_key_sessions(
+        self, namespace: str, limit: int
+    ) -> tuple[int, list[str]]:
+        """Return how many keys occur once and the smallest of their sessions."""
+        if self._connection is None:
+            rows = self._rows[namespace]
+            counts = Counter(row.key for row in rows)
+            sessions = sorted(row.session for row in rows if counts[row.key] == 1)
+            return len(sessions), sessions[:limit]
+        unique = (
+            "SELECT MIN(session) AS session FROM observations WHERE namespace = ? "
+            "GROUP BY key HAVING COUNT(*) = 1"
+        )
+        total = self._query(f"SELECT COUNT(*) FROM ({unique})", (namespace,)).fetchone()
+        sessions = self._query(
+            f"SELECT session FROM ({unique}) ORDER BY session LIMIT ?",
+            (namespace, limit),
+        ).fetchall()
+        return int(total[0]), [str(row[0]) for row in sessions]
+
+    def close(self) -> None:
+        """Release temporary storage and the in-memory rows."""
+        if self._connection is not None:
+            self._connection.close()
+            self._connection = None
+        self._rows.clear()
+        self._size = 0
+        self._indexed = False
+
+    def _query(self, sql: str, parameters: Sequence[Any]) -> sqlite3.Cursor:
+        """Run a read against the spill database, indexing it before the first."""
+        connection = self._get_connection()
+        # Rows only arrive before reads, and indexing them all at once is far
+        # cheaper than keeping an index current through every insert.
+        if not self._indexed:
+            connection.execute(
+                "CREATE INDEX observations_by_value ON observations (namespace, value)"
+            )
+            self._indexed = True
+        return connection.execute(sql, parameters)
+
+    def _get_connection(self) -> sqlite3.Connection:
+        """Return the spill database, moving in-memory rows into it once."""
+        if self._connection is not None:
+            return self._connection
+        connection = _open_spill_database()
+        self._connection = connection
+        connection.execute(
+            "CREATE TABLE observations (namespace TEXT, value INTEGER, "
+            "session TEXT, node TEXT, key TEXT)"
+        )
+        connection.executemany(
+            "INSERT INTO observations VALUES (?, ?, ?, ?, ?)",
+            (
+                (namespace, row.value, row.session, row.node, row.key)
+                for namespace, rows in self._rows.items()
+                for row in rows
+            ),
+        )
+        self._rows.clear()
+        return connection

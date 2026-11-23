@@ -27,6 +27,8 @@ export function getModelTokens(
       tokenCount(usage.cachedInputTokens) ??
       tokenCount(inputDetails.cacheReadTokens) ??
       tokenCount(input.cacheRead),
+    cache_write_input_tokens:
+      tokenCount(inputDetails.cacheWriteTokens) ?? tokenCount(input.cacheWrite),
     reasoning_tokens:
       tokenCount(usage.reasoningTokens) ??
       tokenCount(outputDetails.reasoningTokens) ??

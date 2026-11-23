@@ -45,6 +45,10 @@ from kitaru.server.adapters.db.orm.replay_evaluation import ReplayEvaluationORM
 from kitaru.server.adapters.db.orm.secret import SecretORM
 from kitaru.server.adapters.db.orm.server_settings import ServerSettingsORM
 from kitaru.server.adapters.db.orm.session import SessionORM
+from kitaru.server.adapters.db.orm.session_group import (
+    SessionGroupORM,
+    SessionGroupSessionORM,
+)
 from kitaru.server.adapters.db.orm.session_node import SessionNodeORM
 from kitaru.server.adapters.db.orm.tag import TagLinkORM, TagORM
 from kitaru.server.adapters.db.orm.task import TaskORM
@@ -80,6 +84,8 @@ __all__ = [
     "ReplayORM",
     "SecretORM",
     "ServerSettingsORM",
+    "SessionGroupORM",
+    "SessionGroupSessionORM",
     "SessionNodeORM",
     "SessionORM",
     "TagLinkORM",

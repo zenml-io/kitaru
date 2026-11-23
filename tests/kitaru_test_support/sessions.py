@@ -14,13 +14,12 @@
 """In-memory fakes for tags and sessions."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
+from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.models.tag import TagFilter
@@ -31,6 +30,7 @@ from kitaru.server.domain.session import (
     SessionInUse,
     SessionNotFound,
     SessionRollups,
+    SessionUsage,
 )
 from kitaru.server.domain.tag import (
     DuplicateTagLink,
@@ -297,6 +297,7 @@ class FakeSessionRepository:
         self._replays: FakeReplayRepository | None = None
         self._tasks: FakeTaskRepository | None = None
         self._session_numbers: dict[uuid.UUID, int] = {}
+        self._groups: dict[uuid.UUID, set[uuid.UUID]] = {}
 
     def _mark_cohort_member(self, session_id: uuid.UUID) -> None:
         """Record that one more cohort version references this session.
@@ -503,6 +504,7 @@ class FakeSessionRepository:
             resolvers = {
                 "tag": self._evaluate_tag_condition,
                 "cohort_version_id": self._evaluate_cohort_version_condition,
+                "session_group_id": self._evaluate_session_group_condition,
                 "has_evaluation": self._evaluate_has_evaluation_condition,
             }
             sessions = [
@@ -527,6 +529,54 @@ class FakeSessionRepository:
         """
         names = condition.value if condition.op is FilterOp.IN else (condition.value,)
         return any(session.id in self._session_ids_tagged(name) for name in names)
+
+    def _evaluate_session_group_condition(
+        self, session: Session, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a session group condition against a session.
+
+        Args:
+            session: Session to evaluate.
+            condition: Validated session group condition.
+
+        Returns:
+            Whether the session belongs to one of the groups.
+        """
+        ids = condition.value if condition.op is FilterOp.IN else (condition.value,)
+        return any(session.id in self._groups.get(group_id, ()) for group_id in ids)
+
+    async def create_group(
+        self, job_id: uuid.UUID, session_ids: Sequence[uuid.UUID]
+    ) -> uuid.UUID:
+        """Store a fixed group of sessions for the tasks of a job to read.
+
+        Args:
+            job_id: Id of the job the group belongs to.
+            session_ids: Ids of the member sessions.
+
+        Returns:
+            Id of the stored group.
+        """
+        _ = job_id
+        group_id = uuid.uuid4()
+        self._groups[group_id] = set(session_ids)
+        return group_id
+
+    async def is_in_group(
+        self, session_id: uuid.UUID, group_ids: Collection[uuid.UUID]
+    ) -> bool:
+        """Whether a session belongs to any of the given session groups.
+
+        Args:
+            session_id: Id of the session.
+            group_ids: Ids of the session groups.
+
+        Returns:
+            Whether the session is a member of at least one group.
+        """
+        return any(
+            session_id in self._groups.get(group_id, ()) for group_id in group_ids
+        )
 
     def _evaluate_cohort_version_condition(
         self, session: Session, condition: FilterCondition
@@ -659,18 +709,20 @@ class FakeSessionRepository:
         ):
             raise SessionInUse(session_id)
         del self._sessions[session_id]
+        for members in self._groups.values():
+            members.discard(session_id)
         if self._tasks is not None:
             self._tasks._unlink_session(session_id)
 
     async def apply_rollups(
-        self, session_id: uuid.UUID, deltas: SessionRollups, cost: Decimal | None
+        self, session_id: uuid.UUID, deltas: SessionRollups, usage: SessionUsage
     ) -> None:
-        """Set session cost and apply token and call-count deltas.
+        """Set measured session totals and apply call-count deltas.
 
         Args:
             session_id: Id of the session.
             deltas: Rollup deltas to add.
-            cost: Total cost, or ``None`` when pricing is incomplete.
+            usage: Measured totals, with incomplete fields left unknown.
 
         Raises:
             SessionNotFound: No session has this id.
@@ -678,19 +730,16 @@ class FakeSessionRepository:
         stored = self._sessions.get(session_id)
         if stored is None:
             raise SessionNotFound(session_id)
-        tokens = stored.tokens if stored.tokens is not None else TokenUsage()
-        new_tokens = TokenUsage(
-            input_tokens=(tokens.input_tokens or 0) + deltas.input_tokens,
-            output_tokens=(tokens.output_tokens or 0) + deltas.output_tokens,
-            cached_input_tokens=(tokens.cached_input_tokens or 0)
-            + deltas.cached_input_tokens,
-            reasoning_tokens=(tokens.reasoning_tokens or 0) + deltas.reasoning_tokens,
+        tokens = (
+            usage.tokens
+            if any(value is not None for value in usage.tokens.model_dump().values())
+            else None
         )
         now = _renewed_timestamp(stored.updated)
         updated = stored.model_copy(
             update={
-                "cost": cost,
-                "tokens": new_tokens,
+                "cost": usage.cost,
+                "tokens": tokens,
                 "llm_call_count": stored.llm_call_count + deltas.llm_call_count,
                 "tool_call_count": stored.tool_call_count + deltas.tool_call_count,
                 "updated": now,

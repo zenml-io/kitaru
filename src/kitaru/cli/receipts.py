@@ -140,6 +140,7 @@ async def wait_for_terminal_tasks(
             job_id,
             last_status=details.get("last_status"),
             message=error.message,
+            details=details,
         ) from error
 
     remaining = timeout - (clock() - started_at)
@@ -158,12 +159,14 @@ def _get_wait_timeout(
     *,
     last_status: str | None,
     message: str | None = None,
+    details: dict[str, Any] | None = None,
 ) -> CLIError:
     """Build a recoverable timeout covering polling and task collection."""
     return CLIError(
         "timeout",
         message or f"Timed out waiting for job {job_id}; remote work continues.",
         details={
+            **(details or {}),
             "job_id": str(job_id),
             "last_status": last_status,
             "remote_continues": True,

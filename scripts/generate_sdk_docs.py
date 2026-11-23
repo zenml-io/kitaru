@@ -114,6 +114,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "EvaluatorsResource",
                 "AnalyzersResource",
                 "EvaluationsResource",
+                "AnalysesResource",
                 "CohortsResource",
                 "CohortVersionsResource",
                 "ExperimentsResource",
@@ -161,6 +162,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
             {
                 "SessionNodeCreateRequest",
                 "SessionNodeBatchRequest",
+                "SessionIngestRequest",
                 "SessionNodeListParams",
                 "SessionNodeResponse",
                 "SessionWithNodesResponse",

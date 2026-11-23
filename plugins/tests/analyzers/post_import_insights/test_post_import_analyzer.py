@@ -13,6 +13,7 @@
 #  limitations under the License.
 """Tests for the post-import analyzer entrypoint."""
 
+import asyncio
 import json
 import uuid
 import weakref
@@ -50,6 +51,7 @@ from kitaru.task import analyzer as task_analyzer
 from kitaru_post_import_insights import InsightGenerationResult
 from kitaru_post_import_insights import analyzer as analyzer_module
 from kitaru_post_import_insights.analyzer import (
+    SESSION_PREFETCH_WINDOW,
     analyze_openai_post_import_sessions,
     analyze_post_import_sessions,
 )
@@ -59,7 +61,7 @@ from kitaru_post_import_insights.generation import (
     EditorialCardCopy,
     EditorialPlan,
 )
-from kitaru_post_import_insights.models import GenerationMode
+from kitaru_post_import_insights.models import GenerationMode, SourceImportContext
 from kitaru_post_import_insights.openai_generator import MissingOpenAICredential
 from kitaru_post_import_insights.profiling import SessionProfiler
 
@@ -174,6 +176,22 @@ def client(monkeypatch: pytest.MonkeyPatch) -> StubClient:
     return client
 
 
+@pytest.fixture
+def consumed(monkeypatch: pytest.MonkeyPatch) -> list[uuid.UUID]:
+    """Record the id of every session the profiler consumes, in order."""
+    session_ids: list[uuid.UUID] = []
+    consume = SessionProfiler.consume
+
+    def record_consumption(
+        profiler: SessionProfiler, session: SessionWithNodesResponse
+    ) -> None:
+        consume(profiler, session)
+        session_ids.append(session.session.id)
+
+    monkeypatch.setattr(SessionProfiler, "consume", record_consumption)
+    return session_ids
+
+
 async def test_analyzer_returns_self_contained_insight_inputs(
     client: StubClient,
 ) -> None:
@@ -191,8 +209,9 @@ async def test_analyzer_returns_self_contained_insight_inputs(
         assert item.context.agent_id == AGENT_ID
         assert item.context.agent_name == "returns-agent"
         assert item.context.server_url == "https://stub-api.example.test"
-        assert item.context.source_import.import_id == IMPORT_ID
-        assert item.context.source_import.provider == "langfuse"
+        assert item.context.source_import == SourceImportContext(
+            import_id=IMPORT_ID, provider="langfuse"
+        )
         assert item.contributing_session_ids
         assert item.coverage.sessions_analyzed == 2
         assert str(IMPORT_ID) in item.investigation_prompt
@@ -324,7 +343,9 @@ async def test_analyzer_fetches_full_sessions_using_task_credentials(
             for item in metadata
         )
         assert all(
-            item.context.source_import.import_id == IMPORT_ID for item in metadata
+            item.context.source_import
+            == SourceImportContext(import_id=IMPORT_ID, provider="langfuse")
+            for item in metadata
         )
         assert any(
             evidence.node_id == views[0].nodes[0].id
@@ -598,7 +619,7 @@ async def test_empty_ids_return_without_client_or_model_initialization(
 
 @pytest.mark.parametrize(
     "invalid",
-    ["agent", "import", "origin", "duplicate", "node_session", "node_id"],
+    ["agent", "duplicate", "node_session", "node_id"],
 )
 async def test_late_invalid_session_prevents_model_initialization(
     client: StubClient, monkeypatch: pytest.MonkeyPatch, invalid: str
@@ -606,10 +627,6 @@ async def test_late_invalid_session_prevents_model_initialization(
     late = _view(302, failed_tool=True)
     if invalid == "agent":
         late.session.agent_id = uuid.uuid4()
-    elif invalid == "import":
-        late.session.import_id = uuid.uuid4()
-    elif invalid == "origin":
-        late.session.origin = SessionOrigin.RECORDED
     elif invalid == "duplicate":
         late = _view(1)
     elif invalid == "node_session":
@@ -667,8 +684,8 @@ async def test_provider_must_match_across_the_full_stream(
     cards = await analyze_post_import_sessions(client.add(views))
     assert cards
     assert all(
-        InsightGenerationResult.card_metadata(card).context.source_import.provider
-        is None
+        InsightGenerationResult.card_metadata(card).context.source_import
+        == SourceImportContext(import_id=IMPORT_ID)
         for card in cards
     )
 
@@ -685,7 +702,7 @@ async def test_analyzer_omits_invalid_optional_provider(
 
     assert insights
     metadata = InsightGenerationResult.card_metadata(insights[0])
-    assert metadata.context.source_import.provider is None
+    assert metadata.context.source_import == SourceImportContext(import_id=IMPORT_ID)
 
 
 async def test_analyzer_rejects_sessions_from_multiple_agents(
@@ -698,19 +715,102 @@ async def test_analyzer_rejects_sessions_from_multiple_agents(
         )
 
 
-async def test_analyzer_requires_an_import_identity(
+async def test_analyzer_fetches_ahead_but_profiles_in_input_order(
+    client: StubClient, consumed: list[uuid.UUID], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Overlap session reads up to the prefetch window without reordering."""
+    ids = client.add([_view(number) for number in range(1, 11)])
+    fetch = client.get_with_nodes
+    in_flight = 0
+    peak = 0
+
+    async def slow_fetch(session_id: uuid.UUID) -> SessionWithNodesResponse:
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0)
+        in_flight -= 1
+        return await fetch(session_id)
+
+    monkeypatch.setattr(client, "get_with_nodes", slow_fetch)
+
+    await analyze_post_import_sessions(ids)
+
+    assert peak == SESSION_PREFETCH_WINDOW
+    assert consumed == ids
+
+
+async def test_invalid_session_fails_before_a_later_prefetched_read(
     client: StubClient,
 ) -> None:
-    """Reject imported sessions that cannot be tied back to an import."""
-    view = _view(1)
-    view.session = view.session.model_copy(update={"import_id": None})
+    """Surface the first failure in input order, not the first one to happen."""
+    ids = client.add([_view(1), _view(2, agent_id=uuid.uuid4())])
+    missing_id = uuid.uuid4()
 
-    with pytest.raises(ValueError, match="import ID"):
-        await analyze_post_import_sessions(client.add([view]))
+    with pytest.raises(ValueError, match="context agent"):
+        await analyze_post_import_sessions([*ids, missing_id])
+
+    assert client.fetched == [*ids, missing_id]
+    assert client.closed
+
+
+def _record_live(view: SessionWithNodesResponse) -> None:
+    view.session = view.session.model_copy(
+        update={
+            "origin": SessionOrigin.RECORDED,
+            "import_id": None,
+            "imported_from": None,
+        }
+    )
+
+
+async def test_analyzer_accepts_live_recorded_sessions(
+    client: StubClient,
+) -> None:
+    """Analyze sessions recorded live, which have no source import."""
+    views = [_view(1, failed_tool=True), _view(2)]
+    for view in views:
+        _record_live(view)
+
+    insights = await analyze_post_import_sessions(client.add(views))
+
+    assert insights
+    for item in insights:
+        metadata = InsightGenerationResult.card_metadata(item)
+        assert metadata.context.source_import is None
+        assert metadata.coverage.sessions_analyzed == 2
+        assert "Import id: " not in metadata.investigation_prompt
+
+
+@pytest.mark.parametrize("mixed", ["second_import", "live_first", "live_last"])
+async def test_analyzer_omits_the_import_for_mixed_sources(
+    client: StubClient, mixed: str
+) -> None:
+    """Analyze one agent's sessions from several sources without naming an import."""
+    views = [_view(number, failed_tool=number == 1) for number in range(1, 4)]
+    if mixed == "second_import":
+        views[1].session = views[1].session.model_copy(
+            update={"import_id": uuid.uuid4()}
+        )
+    else:
+        _record_live(views[0] if mixed == "live_first" else views[-1])
+
+    insights = await analyze_post_import_sessions(client.add(views))
+
+    assert insights
+    for item in insights:
+        metadata = InsightGenerationResult.card_metadata(item)
+        assert metadata.context.source_import is None
+        assert metadata.coverage.sessions_analyzed == 3
+        assert "Import id: " not in metadata.investigation_prompt
+        assert str(IMPORT_ID) not in metadata.investigation_prompt
 
 
 async def test_task_runner_loads_analyzer_and_writes_cards(
-    client: StubClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    client: StubClient,
+    consumed: list[uuid.UUID],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Exercise plugin loading, async invocation, and the JSON task receipt."""
     views = [_view(number, failed_tool=number == 301) for number in range(301, 0, -1)]
@@ -735,17 +835,7 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
         import_id=IMPORT_ID,
     )
     fetched: list[uuid.UUID] = []
-    consumed: list[uuid.UUID] = []
-    previous_node: weakref.ReferenceType[SessionNodeResponse] | None = None
-    consume = SessionProfiler.consume
-
-    def record_consumption(
-        profiler: SessionProfiler, session: SessionWithNodesResponse
-    ) -> None:
-        consume(profiler, session)
-        consumed.append(session.session.id)
-
-    monkeypatch.setattr(SessionProfiler, "consume", record_consumption)
+    responses: list[weakref.ReferenceType[SessionWithNodesResponse]] = []
 
     class Tasks:
         async def get_spec(self, requested_id: uuid.UUID) -> Any:
@@ -768,15 +858,17 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
         async def get_with_nodes(
             self, requested_id: uuid.UUID
         ) -> SessionWithNodesResponse:
-            nonlocal previous_node
-            assert consumed == fetched
-            if previous_node is not None:
-                assert previous_node() is None
+            # Profiled sessions are released, so only the prefetch window of
+            # fetched sessions is ever alive at once.
+            assert sum(ref() is not None for ref in responses) < (
+                SESSION_PREFETCH_WINDOW
+            )
             fetched.append(requested_id)
             view = next(view for view in views if view.session.id == requested_id)
             nodes = [node.model_copy(deep=True) for node in view.nodes]
-            previous_node = weakref.ref(nodes[0]) if nodes else None
-            return SessionWithNodesResponse(session=view.session, nodes=nodes)
+            response = SessionWithNodesResponse(session=view.session, nodes=nodes)
+            responses.append(weakref.ref(response))
+            return response
 
     result_path = tmp_path / "result.json"
     monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
@@ -799,7 +891,11 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
     assert consumed == fetched
     assert cards
     metadata = [InsightGenerationResult.card_metadata(card) for card in cards]
-    assert all(item.context.source_import.import_id == IMPORT_ID for item in metadata)
+    assert all(
+        item.context.source_import
+        == SourceImportContext(import_id=IMPORT_ID, provider="langfuse")
+        for item in metadata
+    )
     assert all(item.context.agent_name == "returns-agent" for item in metadata)
     assert any(evidence.node_id for item in metadata for evidence in item.evidence)
     assert all(item.coverage.sessions_available == 301 for item in metadata)

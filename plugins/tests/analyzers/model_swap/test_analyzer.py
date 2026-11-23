@@ -359,7 +359,7 @@ async def test_core_report_command_renders_the_analyzer_output(
         for insight in insights.values()
     ]
 
-    document = render_insight_report(stored, import_id=uuid.uuid4())
+    document = render_insight_report(stored, source="Import x")
 
     assert "Which model is right for this agent" in document
     assert "cheap-open-model" in document

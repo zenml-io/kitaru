@@ -14,12 +14,11 @@
 """Session repository interface."""
 
 import uuid
-from collections.abc import Sequence
-from decimal import Decimal
+from collections.abc import Collection, Sequence
 from typing import Protocol
 
 from kitaru.server.application.models.session import SessionFilter
-from kitaru.server.domain.session import Session, SessionRollups
+from kitaru.server.domain.session import Session, SessionRollups, SessionUsage
 
 
 class SessionRepository(Protocol):
@@ -129,6 +128,40 @@ class SessionRepository(Protocol):
         """
         ...
 
+    async def create_group(
+        self, job_id: uuid.UUID, session_ids: Sequence[uuid.UUID]
+    ) -> uuid.UUID:
+        """Store a fixed group of sessions for the tasks of a job to read.
+
+        The group is deleted with its job, and a session deleted later
+        leaves the group.
+
+        Args:
+            job_id: Id of the job the group belongs to.
+            session_ids: Ids of the member sessions.
+
+        Raises:
+            SessionNotFound: No session has one of the member session ids.
+
+        Returns:
+            Id of the stored group.
+        """
+        ...
+
+    async def is_in_group(
+        self, session_id: uuid.UUID, group_ids: Collection[uuid.UUID]
+    ) -> bool:
+        """Whether a session belongs to any of the given session groups.
+
+        Args:
+            session_id: Id of the session.
+            group_ids: Ids of the session groups.
+
+        Returns:
+            Whether the session is a member of at least one group.
+        """
+        ...
+
     async def update(self, session: Session) -> Session:
         """Persist changes to an existing session.
 
@@ -177,17 +210,17 @@ class SessionRepository(Protocol):
         ...
 
     async def apply_rollups(
-        self, session_id: uuid.UUID, deltas: SessionRollups, cost: Decimal | None
+        self, session_id: uuid.UUID, deltas: SessionRollups, usage: SessionUsage
     ) -> None:
-        """Set session cost and apply token and call-count deltas.
+        """Set measured session totals and apply call-count deltas.
 
-        The update is one atomic statement. Cost is an absolute total;
-        token and call-count deltas make identical retries idempotent.
+        The update is one atomic statement. Usage contains absolute totals;
+        call-count deltas make identical retries idempotent.
 
         Args:
             session_id: Id of the session.
             deltas: Rollup deltas to add.
-            cost: Total cost, or ``None`` when pricing is incomplete.
+            usage: Measured totals, with incomplete fields left unknown.
 
         Raises:
             SessionNotFound: No session has this id.

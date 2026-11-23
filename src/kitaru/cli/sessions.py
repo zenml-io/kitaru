@@ -66,8 +66,9 @@ from kitaru.cli.registration import (
     resolve_asset,
     resolve_evaluator_configs,
 )
-from kitaru.cli.session_selection import get_cohort_version
+from kitaru.cli.session_selection import get_cohort_version, parse_session_ids
 from kitaru.client.exceptions import APIError
+from kitaru.session_transcript import format_transcripts, read_transcripts
 
 _MIB_BYTES = 1024 * 1024
 
@@ -776,3 +777,40 @@ async def list_session_nodes(
         }
     )
     return page_result(await client.sessions.list_nodes(session_id, params), size=size)
+
+
+async def read_sessions(
+    client: Any,
+    values: list[str],
+    *,
+    sessions_file: Path | None,
+    max_chars: int | None,
+    include_reasoning: bool,
+    node: int | None,
+) -> CommandResult:
+    """Render compact transcripts of explicitly selected sessions."""
+    if max_chars is not None and max_chars < 1:
+        raise CLIError("invalid_arguments", "--max-chars must be at least 1.")
+    try:
+        transcripts = await read_transcripts(
+            client.sessions,
+            parse_session_ids(values, sessions_file),
+            max_chars=max_chars,
+            include_reasoning=include_reasoning,
+            node_index=node,
+        )
+    except ValueError as error:
+        raise CLIError("invalid_arguments", str(error)) from None
+    next_actions = (
+        ["kitaru session read SESSION --node INDEX --full shows one node without cuts."]
+        if any(transcript.truncated for transcript in transcripts)
+        else []
+    )
+    return CommandResult(
+        items=[
+            transcript.model_dump(mode="json", exclude_none=True)
+            for transcript in transcripts
+        ],
+        next_actions=next_actions,
+        text=format_transcripts(transcripts),
+    )

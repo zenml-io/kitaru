@@ -2,7 +2,33 @@
 
 ## Unreleased
 
-- Point the model mix card at choosing the right model: its description, button label ("Investigate model choice") and briefing now lead to comparing candidate models on the import's recorded calls with the `kitaru-model-swap` skill instead of a single replay. The analysis version is bumped to `2026-10-23.1` because the briefing text is part of each candidate's content hash.
+- Accept any sessions that belong to one agent, including live-recorded sessions and sessions from several imports. When every session comes from the same import, the cards and copied investigation prompt still name that import and its provider; otherwise the prompt omits the import line.
+- Stop telling readers to compare against "the same import" when the analyzed sessions may share no import. The failure, marker, and language briefings now compare against the analyzed sessions, and the model-call card no longer calls them imported.
+- Add cost, time, token, and tool-path cards to both analyzers: the share of recorded cost carried by the costliest 10% of sessions; the tool or model covering most recorded time, measured as the union of its node intervals so parallel calls count once; sessions whose model input grows at least three times and model calls with oversized input; the share of input tokens read from a prompt cache, with system prompts that change between calls to the same model; and the most common and one-off tool-call paths. Each card appears only above its documented threshold, keeps exact aggregates in bounded memory that spills to temporary storage, and reports in its caveat the sessions or calls that lacked the field it needs.
+- Read a model call's input as input tokens plus cache reads when a call to the same model in that session reports more cache reads than input tokens, since that source counts them separately, and likewise add cache writes when a call reports more cache writes than input tokens. The two are settled independently because the Claude Agent SDK adapter counts cache writes inside input tokens but cache reads outside them; where no call settles the convention, state the cache-read share as a range between the two readings.
+- Let editor copy restate a number with a unit that the card's chart unit or fact names declare, such as tokens on a card with token facts.
+- Bump the analysis version to `2026-11-18.1` because the new candidates and the reworded briefings change each profile's content hash. The deterministic analyzer ranks the new cards after outcome and language cards and before the activity, duration, and model-mix distributions, so those can drop out of a full six-card page.
+- Point the model mix card at choosing the right model: its description, button label ("Investigate model choice") and briefing now lead to comparing candidate models on the analyzed sessions' recorded calls with the `kitaru-model-swap` skill instead of a single replay.
+
+### Release context
+
+- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
+
+## 0.4.0 - 2026-11-03
+
+- Add the `kitaru/openai-session-findings` analyzer, which reads imported sessions, writes each problem it notices as a yes/no check, verifies every check on every session with the OpenAI Decisions API, and stores one insight per verified finding with its session count, harm, example, and session IDs. It sends session content to OpenAI and accepts optional `context`, `model`, and `decisions_model` parameters.
+- Require `openai` 3.37 or later for the `openai` extra, the first release with the current Decisions API types.
+
+## 0.3.0 - 2026-11-02
+
+- Suppress uniform distribution and single-model inventory cards so analyses can return no findings instead of promoting an uninformative recommendation.
+- Exclude missing or unsupported assistant outputs from tool-request counts and retain incomplete tool-activity coverage even when no card is generated.
+- Fetch up to three sessions ahead while the current one is profiled, so post-import analysis waits on the server far less. Sessions are still profiled in import order and the first failure in that order is still the one reported, but up to four full sessions are now held in memory at once instead of one.
+- Measure the JSON size of payload strings with the standard library encoder instead of a per-character loop, roughly halving profiling CPU without changing any result.
+- Require Kitaru 0.27.0 or later, which provides the ordered bounded fetching the analyzer now uses.
+
+## 0.2.0 - 2026-10-30
+
 - Count explicit tool requests in LLM output messages when a session has no separate tool nodes, label the fallback as requests, and exclude incomplete request scans from the distribution.
 - Describe correction signals as literal text markers and call out that recorded user-role messages may contain agent policy or harness instructions.
 - Label the model-mix card as recorded model identifiers without normalizing aliases or changing counts.

@@ -828,7 +828,7 @@ def test_llm_signals_and_model_policy_use_recorded_metadata() -> None:
     assert policy["allowed_models"].max_score == 2
     assert policy["allowed_providers"].passed is False
     assert policy["allowed_providers"].score == 1
-    assert policy["requested_model_match"].passed is False
+    assert policy["requested_model_match"].passed is None
     assert policy["requested_model_match"].score == 1
 
 

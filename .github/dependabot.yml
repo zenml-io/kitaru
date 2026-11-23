@@ -508,6 +508,13 @@ updates:
           - version-update:semver-major
           - version-update:semver-minor
           - version-update:semver-patch
+      # TypeScript 7.0, the native Go compiler, ships without the JavaScript
+      # compiler API (`ts.factory`) that openapi-typescript uses to write
+      # packages/core/src/generated/openapi.ts, so `pnpm run generate` cannot
+      # run on it. Remove this entry once a 7.x release restores that API
+      # (planned for 7.1) and openapi-typescript supports it.
+      - dependency-name: typescript
+        versions: [">= 7"]
     # The patch cooldown matches the minor one for the pnpm reason given on the
     # /docs entry above.
     cooldown:

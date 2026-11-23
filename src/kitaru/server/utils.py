@@ -15,6 +15,7 @@
 
 import hashlib
 import json
+import math
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, tzinfo
 from typing import Any, TypeVar
@@ -85,3 +86,21 @@ def to_tz_aware(value: datetime, tz: tzinfo = UTC) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=tz)
     return value.astimezone(tz)
+
+
+def replace_non_finite_floats(value: Any) -> Any:
+    """Replace inf and nan floats anywhere in a nested value with their names.
+
+    Args:
+        value: Value made of dicts, lists, and scalars.
+
+    Returns:
+        Copy of the value whose non-finite floats are strings such as ``"inf"``.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: replace_non_finite_floats(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [replace_non_finite_floats(item) for item in value]
+    return value

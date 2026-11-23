@@ -25,6 +25,8 @@ Everything is deterministic. The same seed and flags produce the same sessions, 
 
 Requires `uv sync --extra server` and Docker for Postgres. Add `--extra cli` when you shell out to `kitaru`.
 
+The `.mjs` agent scripts are type-checked against the built packages by `devtools/tsconfig.json`, which `pnpm run typecheck` runs after it builds them. To check them alone, run `pnpm run build:packages`, then `pnpm exec tsc -p devtools/tsconfig.json`.
+
 ## Isolate your stack
 
 `devtools/.run/server.json` holds exactly one server record. A second `stack.py up` overwrites it, and `stack.py down` and `status` then target the wrong server. Another agent or a background session may already own it.

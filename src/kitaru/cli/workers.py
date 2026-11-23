@@ -19,7 +19,7 @@ import logging
 import os
 import signal
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -209,7 +209,7 @@ def _parse_metadata(values: list[str]) -> dict[str, str]:
 @contextmanager
 def worker_contract_environment(
     target: ResolvedTarget,
-) -> Iterator[None]:
+) -> Generator[None]:
     """Set the unchanged worker environment contract and restore it afterward."""
     original = {
         name: os.environ.get(name, _ENV_MISSING) for name in _WORKER_CONTRACT_ENV
@@ -283,17 +283,28 @@ class ForegroundWorkerProcess:
     def _request_stop(self, reason: _TerminationReason) -> None:
         """Record the first signal and request a best-effort graceful drain."""
         self._stop_reason = reason
-        self.stop.set()
-        if self._loop is not None:
-            self._loop.call_soon_threadsafe(self.stop.set)
-        self._emit_signal_event("draining", reason)
+        self._apply_signal(self.stop.set, "draining", reason)
 
     def _request_cancel(self, reason: _TerminationReason) -> None:
         """Record the second signal and cancel every task the worker holds."""
         self._cancel_requested = True
-        if self._loop is not None:
-            self._loop.call_soon_threadsafe(self._worker.cancel_inflight)
-        self._emit_signal_event("canceling", reason)
+        self._apply_signal(self._worker.cancel_inflight, "canceling", reason)
+
+    def _apply_signal(
+        self, action: Callable[[], None], event: str, reason: _TerminationReason
+    ) -> None:
+        """Run a signal's action, then emit its lifecycle event, on the event loop."""
+
+        def apply() -> None:
+            action()
+            self._emit_signal_event(event, reason)
+
+        # Defer to the loop because CPython can run this handler inside a stdout
+        # flush, and writing the event there raises "reentrant call".
+        if self._loop is None:
+            apply()
+        else:
+            self._loop.call_soon_threadsafe(apply)
 
     def _emit_signal_event(self, event: str, reason: _TerminationReason) -> None:
         """Emit a signal lifecycle event, tolerating a closed output stream."""
@@ -311,7 +322,7 @@ class ForegroundWorkerProcess:
                 reset_output_context(token)
 
     @contextmanager
-    def _installed_signal_handlers(self) -> Iterator[None]:
+    def _installed_signal_handlers(self) -> Generator[None]:
         """Install available process signals and restore the prior handlers."""
         from kitaru.worker.platforms import current_platform
 

@@ -421,6 +421,8 @@ class FakeTaskRepository:
             Page of matching tasks and the next cursor.
         """
         tasks = list(self._tasks.values())
+        if task_filter.job_ids is not None:
+            tasks = [task for task in tasks if task.job_id in task_filter.job_ids]
         if task_filter.job_id is not None:
             tasks = [task for task in tasks if task.job_id == task_filter.job_id]
         if task_filter.stale_before is not None:
@@ -565,6 +567,17 @@ class FakeTaskRepository:
             ),
         )
         return stale[:limit]
+
+    async def has_in_flight(self) -> bool:
+        """Report whether any task is claimed or running.
+
+        Returns:
+            Whether at least one task is in flight.
+        """
+        return any(
+            task.status in (TaskStatus.CLAIMED, TaskStatus.RUNNING)
+            for task in self._tasks.values()
+        )
 
     async def stamp_heartbeats(
         self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
