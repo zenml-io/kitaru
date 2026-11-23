@@ -106,4 +106,4 @@ Use a clear human-readable title without a `[Codex]` prefix. Include what change
 
 Add a `changelog.d/<pr-number>.<section>.md` fragment for user-facing changes instead of editing `CHANGELOG.md`. Any slug works in place of the number while the PR does not exist yet. See `changelog.d/README.md` for the format.
 
-Every PR description should include a `Reviewer Notes` H2 or H3 section that explains the story and risks of the change, plus a concrete `Reproduction` subsection. Keep local hygiene commands as a short note after reproduction rather than using them as a substitute for reviewer guidance.
+Every PR description should include a `Reviewer Notes` H2 or H3 section that explains the story and risks of the change, followed by collapsed `<details>` blocks for `Reproduction` and `Local checks run`. Keep local hygiene commands secondary to reproduction, and surface any failures, skipped checks, or caveats in the `<summary>` line or outside the disclosure block.

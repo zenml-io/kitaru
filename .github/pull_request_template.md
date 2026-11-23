@@ -16,13 +16,16 @@ Add links or notes for frontend, plugins, skills, ZenML docs, website, examples,
 Write this as a short guided walkthrough for the reviewer, not a file list. Explain where the important behavior lives, what is tricky or risky, and what would break if this change is wrong. Mention files only when you also explain why that file matters. -->
 
 
-## Reproduction
+<details>
+<summary>Reproduction</summary>
 
-<!--
-Give the reviewer a concrete way to see the feature or bug fix end to end. Prefer a runnable `examples/...` script, CLI flow, or UI path, then say exactly what they should observe: artifact/checkpoint names, UI state, CLI output, logs, etc. Do not replace this with only `just check` / `just test`. -->
+<!-- Give the reviewer a concrete way to see the feature or bug fix end to end. Prefer a runnable `examples/...` script, CLI flow, or UI path, then say exactly what they should observe: artifact/checkpoint names, UI state, CLI output, logs, etc. Do not replace this with only `just check` / `just test`. -->
 
+</details>
 
-## Local checks run
+<details>
+<summary>Local checks run</summary>
 
-<!-- Optional: list targeted tests/checks you actually ran. Keep this secondary
-to the reproduction path above. -->
+<!-- Optional: list targeted tests/checks you actually ran. Keep this secondary to the reproduction path above, and surface any failures, skipped checks, or caveats in the summary line or outside this block. -->
+
+</details>

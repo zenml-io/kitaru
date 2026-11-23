@@ -13,12 +13,13 @@ TITLE_PREFIX = re.compile(
     re.IGNORECASE,
 )
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+DETAILS_BLOCK = re.compile(r"<details\b[^>]*>.*?</details>", re.DOTALL | re.IGNORECASE)
 HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$", re.MULTILINE)
 
 
 def _get_reviewer_notes(body: str) -> str | None:
     """Return the text under a Reviewer Notes H2 or H3, or None without one."""
-    text = HTML_COMMENT.sub("", body)
+    text = DETAILS_BLOCK.sub("", HTML_COMMENT.sub("", body))
     headings = list(HEADING.finditer(text))
     for index, heading in enumerate(headings):
         level = len(heading.group(1))
