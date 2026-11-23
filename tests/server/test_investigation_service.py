@@ -346,6 +346,30 @@ async def test_list_investigations_filters_by_agent_id(
     assert [investigation.id for investigation in investigations] == [matching.id]
 
 
+async def test_list_investigations_filters_by_name(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """Filter investigations by exact name."""
+    target = await service.create_investigation(
+        InvestigationCreate(agent_id=agent_id, name="refund-audit", sessions=[]),
+        actor=ACTOR,
+    )
+    await service.create_investigation(
+        InvestigationCreate(agent_id=agent_id, name="other-audit", sessions=[]),
+        actor=ACTOR,
+    )
+
+    investigations, _ = await service.list_investigations(
+        InvestigationFilter(
+            expression=FilterCondition(
+                field="name", op=FilterOp.EQ, value="refund-audit"
+            )
+        ),
+        actor=ACTOR,
+    )
+    assert [investigation.id for investigation in investigations] == [target.id]
+
+
 async def test_update_investigation_name(
     service: InvestigationService, agent_id: uuid.UUID
 ) -> None:
