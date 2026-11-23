@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Support Logfire 6.
+
 ## 0.5.0 - 2026-11-25
 
 - Import prompt-cache writes from `gen_ai.usage.details.cache_write_tokens` or `gen_ai.usage.cache_creation.input_tokens` as `cache_write_input_tokens`.
