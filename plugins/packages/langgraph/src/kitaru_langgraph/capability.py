@@ -108,6 +108,32 @@ _DIRECT_OPERATIONS = frozenset(
     {CapabilityOperation.RECORD, CapabilityOperation.REPLACE_INPUT}
 )
 _FACTORY_OPERATIONS = frozenset(CapabilityOperation)
+_MODEL_OVERRIDE_OPERATIONS = frozenset(
+    {
+        CapabilityOperation.OVERRIDE_MODEL,
+        CapabilityOperation.OVERRIDE_PROMPT,
+        CapabilityOperation.OVERRIDE_SYSTEM_PROMPT,
+        CapabilityOperation.OVERRIDE_MODEL_PARAMS,
+    }
+)
+_LANGGRAPH_ADAPTER_DOCS_URL = "https://docs.zenml.io/kitaru/adapters/langgraph"
+
+
+def _get_direct_graph_hint(operation: CapabilityOperation) -> str | None:
+    """Return actionable guidance for a factory-only operation on a direct graph."""
+    if operation is CapabilityOperation.SUBSTITUTE_TOOL_RESULT:
+        return (
+            "Build the runner with "
+            "KitaruGraphRunner.from_agent_factory(create_agent, ...) to replay "
+            f"tool results; see {_LANGGRAPH_ADAPTER_DOCS_URL}."
+        )
+    if operation in _MODEL_OVERRIDE_OPERATIONS:
+        return (
+            "Build the runner with "
+            "KitaruGraphRunner.from_agent_factory(create_agent, ...) to apply "
+            f"model-request overrides; see {_LANGGRAPH_ADAPTER_DOCS_URL}."
+        )
+    return None
 
 
 def _make_capability_manifest(
@@ -168,9 +194,12 @@ def _require_operation(
     """Fail before delegation when an operation is not declared."""
     capability = view.get_target(target)
     if capability is None or not capability.supports(operation):
-        raise UnsupportedCapabilityError(
-            f"LangGraph target {target!r} does not support {operation.value!r}"
-        )
+        message = f"LangGraph target {target!r} does not support {operation.value!r}"
+        if capability is not None and capability.kind is CapabilityTargetKind.MAIN:
+            hint = _get_direct_graph_hint(operation)
+            if hint is not None:
+                message = f"{message}. {hint}"
+        raise UnsupportedCapabilityError(message)
 
 
 def _validate_manifest(

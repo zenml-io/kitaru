@@ -2,6 +2,7 @@
 
 import asyncio
 import sys
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from importlib.metadata import version
 from types import SimpleNamespace
@@ -297,7 +298,7 @@ def test_real_state_graph_uses_same_runner(fake_client: Any) -> None:
     builder.add_edge(START, "answer")
     builder.add_edge("answer", END)
 
-    result = KitaruGraphRunner(builder.compile()).invoke(
+    result = KitaruGraphRunner(builder.compile(), agent_id=uuid.uuid4()).invoke(
         cast(Any, {"question": "life"})
     )
 
@@ -312,7 +313,7 @@ def test_functional_api_runnable_uses_same_runner() -> None:
     def workflow(value: str) -> dict[str, str]:
         return {"value": value}
 
-    result = KitaruGraphRunner(workflow).invoke("functional")
+    result = KitaruGraphRunner(workflow, agent_id=uuid.uuid4()).invoke("functional")
 
     assert result == {"value": "functional"}
 
@@ -372,6 +373,7 @@ def test_real_deep_agent_factory_runs_through_runner(
                 factory_kwargs=agent_kwargs,
             ),
         ),
+        agent_id=uuid.uuid4(),
     )
 
     assert runner.capabilities.get_target("adder") is not None
@@ -413,7 +415,7 @@ async def test_concurrent_async_calls_are_isolated(fake_client: Any) -> None:
         await asyncio.sleep(0)
         return {"value": value}
 
-    runner = KitaruGraphRunner(RunnableLambda(run))
+    runner = KitaruGraphRunner(RunnableLambda(run), agent_id=uuid.uuid4())
 
     results = await asyncio.gather(runner.ainvoke("first"), runner.ainvoke("second"))
 
@@ -428,7 +430,9 @@ async def test_concurrent_async_calls_are_isolated(fake_client: Any) -> None:
 def test_concurrent_sync_calls_are_isolated(fake_client: Any) -> None:
     from kitaru_langgraph import KitaruGraphRunner
 
-    runner = KitaruGraphRunner(RunnableLambda(lambda value: {"value": value}))
+    runner = KitaruGraphRunner(
+        RunnableLambda(lambda value: {"value": value}), agent_id=uuid.uuid4()
+    )
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(runner.invoke, ["first", "second"]))
 
