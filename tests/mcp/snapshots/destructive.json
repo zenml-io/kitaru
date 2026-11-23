@@ -8606,7 +8606,7 @@
       "openWorldHint": true,
       "readOnlyHint": true
     },
-    "description": "Show where sessions first go wrong as an interactive transition matrix.\n\nRows are the last step that went right and columns the first step that went\nwrong, counted over the sessions `filter` selects (for example an agent_id or\ncohort_version_id). Pass `compare_filter`, such as a replay's\nexperiment_run_id, to compare two groups. A reviewer places a failure that\nraised no error by annotating the failing node with the value\n`{\"first_failure\": true, \"note\": \"...\"}`.",
+    "description": "Show where sessions first go wrong as an interactive transition matrix.\n\nRows are the last step that went right and columns the first step that went\nwrong, counted over the sessions `filter` selects (for example an agent_id or\ncohort_version_id). Pass `compare_filter`, such as a replay's\nexperiment_run_id, to compare two groups. A reviewer places a failure that\nraised no error by annotating the failing node with the value\n`{\"first_failure\": true, \"note\": \"...\"}`.\n\nThe result's snapshot_id lets a cell drill into exactly these sessions; it\nis null on a server that keeps no matrix in memory.",
     "inputSchema": {
       "$defs": {
         "AndFilter": {
@@ -8958,9 +8958,17 @@
               "type": "array"
             },
             "snapshot_id": {
-              "description": "Identifies the records behind this matrix.",
-              "title": "Snapshot Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Identifies the records behind this matrix. Null on a server that keeps no matrix in memory; a cell then reads the sessions again.",
+              "title": "Snapshot Id"
             },
             "state_by": {
               "enum": [
@@ -8973,7 +8981,6 @@
             }
           },
           "required": [
-            "snapshot_id",
             "state_by",
             "rows",
             "cols",
@@ -9233,7 +9240,7 @@
       "openWorldHint": true,
       "readOnlyHint": true
     },
-    "description": "List the sessions and repeated notes behind one transition matrix cell.",
+    "description": "List the sessions and repeated notes behind one transition matrix cell.\n\nOn a server that keeps no matrix in memory, the matrix has no snapshot_id\nand the cell reads the sessions again.",
     "inputSchema": {
       "$defs": {
         "AndFilter": {
@@ -9387,7 +9394,7 @@
                 }
               ],
               "default": null,
-              "description": "snapshot_id of the matrix being drilled into; without it the sessions are read again.",
+              "description": "snapshot_id of the matrix being drilled into. Without it, or on a server that keeps no matrix in memory, the sessions are read again and the counts can differ from the matrix if sessions changed since.",
               "title": "Snapshot Id"
             },
             "sources": {
@@ -16590,6 +16597,7 @@
               "additionalProperties": {
                 "type": "string"
               },
+              "description": "Plain settings, stored and returned as they are. Keys that look like credentials (API keys, tokens, passwords, secrets) are refused: put those in `secrets`.",
               "title": "Env",
               "type": "object"
             },
@@ -16688,6 +16696,7 @@
                   "additionalProperties": {
                     "type": "string"
                   },
+                  "description": "Plain settings, stored and returned as they are. Keys that look like credentials (API keys, tokens, passwords, secrets) are refused: put those in `secrets`.",
                   "type": "object"
                 },
                 {

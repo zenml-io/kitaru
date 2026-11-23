@@ -104,6 +104,8 @@ class ToolSpec:
         meta: MCP `_meta` for the tool, if any.
         run: The tool's work, taking server state and the request; `handler`
             runs it and wraps its data in the tool's result envelope.
+        needs_server: Whether `run` uses the state's Kitaru client. A tool
+            that does not runs without a server connection or sign-in.
     """
 
     name: str
@@ -113,6 +115,7 @@ class ToolSpec:
     handler: Callable[..., Awaitable[BaseModel]]
     meta: dict[str, Any] | None = None
     run: ToolHandler = field(kw_only=True)
+    needs_server: bool = field(default=True, kw_only=True)
 
 
 def _describe(tool: Callable[..., Awaitable[BaseModel]]) -> str:
@@ -231,6 +234,9 @@ async def failure_matrix_tool(
     experiment_run_id, to compare two groups. A reviewer places a failure that
     raised no error by annotating the failing node with the value
     `{"first_failure": true, "note": "..."}`.
+
+    The result's snapshot_id lets a cell drill into exactly these sessions; it
+    is null on a server that keeps no matrix in memory.
     """
     return cast(
         FailureMatrixResult,
@@ -241,7 +247,11 @@ async def failure_matrix_tool(
 async def failure_cell_tool(
     request: FailureCellRequest, context: Context
 ) -> FailureCellResult:
-    """List the sessions and repeated notes behind one transition matrix cell."""
+    """List the sessions and repeated notes behind one transition matrix cell.
+
+    On a server that keeps no matrix in memory, the matrix has no snapshot_id
+    and the cell reads the sessions again.
+    """
     return cast(
         FailureCellResult,
         await _invoke(context, request, FailureCellResult, handle_failure_cell),
@@ -439,6 +449,7 @@ TOOL_SPECS = (
         _annotations(read_only=True, destructive=False, idempotent=True),
         docs_search_tool,
         run=handle_docs_search,
+        needs_server=False,
     ),
     ToolSpec(
         "kitaru_feedback_draft",
@@ -447,6 +458,7 @@ TOOL_SPECS = (
         _annotations(read_only=True, destructive=False, idempotent=True),
         feedback_draft_tool,
         run=handle_feedback_draft,
+        needs_server=False,
     ),
     ToolSpec(
         "kitaru_failure_matrix",

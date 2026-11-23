@@ -62,8 +62,10 @@ async def handle_failure_matrix(
     """Build the transition failure matrix for one or two session groups."""
     # Read fresh: a reviewer who just marked a first failure expects to see it.
     records = await _fetch_groups(state, request)
-    snapshot_id = uuid.uuid4().hex
-    state.matrix_snapshots.put(snapshot_id, records)
+    snapshot_id = None
+    if not state.settings.stateless:
+        snapshot_id = uuid.uuid4().hex
+        state.matrix_snapshots.put(snapshot_id, records)
     groups = _analyze(request, records)
     base, compare = groups[0], groups[1] if len(groups) > 1 else None
     rows, cols, cells = build_cells(
@@ -99,7 +101,7 @@ async def handle_failure_cell(
     state: MCPServerState, request: FailureCellRequest
 ) -> FailureCellData:
     """List the sessions and repeated notes behind one matrix cell."""
-    if request.snapshot_id is None:
+    if request.snapshot_id is None or state.settings.stateless:
         records = await _fetch_groups(state, request)
     else:
         # Drill into exactly the records the visible matrix was built from;

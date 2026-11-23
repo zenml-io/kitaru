@@ -18,6 +18,7 @@ from kitaru.mcp.errors import (
     protocol_result,
     success_result,
 )
+from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.common import RegistryReadResult, ToolResult
 from kitaru.mcp.registry import TOOL_SPECS
 from kitaru.mcp.server import create_server
@@ -122,6 +123,31 @@ async def test_each_tool_runs_the_handler_its_spec_names(
         calls.clear()
         assert handler is spec.run, spec.name
         assert result_type is inspect.signature(spec.handler).return_annotation
+
+
+class _NoServer:
+    def __getattr__(self, name: str) -> object:
+        raise AssertionError(f"a tool marked as needing no server read client.{name}")
+
+
+SERVERLESS_REQUESTS = {
+    "kitaru_docs_search": {"query": "failure matrix"},
+    "kitaru_feedback_draft": {
+        "title": "Docs search misses",
+        "problem": "kitaru_docs_search returned nothing for a known guide.",
+    },
+}
+
+
+async def test_tools_marked_as_needing_no_server_run_without_a_client() -> None:
+    serverless = [spec for spec in TOOL_SPECS if not spec.needs_server]
+    state = MCPServerState(MCPSettings(), cast(Any, _NoServer()))
+
+    assert {spec.name for spec in serverless} == set(SERVERLESS_REQUESTS)
+    for spec in serverless:
+        request_type = inspect.signature(spec.handler).parameters["request"]
+        request = request_type.annotation.model_validate(SERVERLESS_REQUESTS[spec.name])
+        assert await spec.run(state, request) is not None
 
 
 async def test_actual_sdk_discovery_schemas_fit_budgets() -> None:

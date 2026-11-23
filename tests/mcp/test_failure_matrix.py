@@ -769,6 +769,24 @@ async def test_unknown_snapshot_asks_for_a_rebuild_instead_of_refetching() -> No
     assert client.sessions.list_calls == 0
 
 
+async def test_stateless_server_keeps_no_matrix_and_cells_read_again() -> None:
+    client = _FakeClient(_failing_group())
+    server, context = build_server_context(client, stateless=True)
+
+    matrix = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+    # Another copy of the server built this snapshot, so this one cannot know it.
+    request = {"snapshot_id": "elsewhere", "from_state": "lookup_order"}
+    cell = await server.call_tool(
+        "kitaru_failure_matrix_cell",
+        {"request": {**request, "to_state": "issue_refund"}},
+        context,
+    )
+
+    assert _structured(matrix)["data"]["snapshot_id"] is None
+    assert _structured(cell)["data"]["total"] == 3
+    assert client.sessions.list_calls == 2
+
+
 def test_long_names_get_bounded_distinct_labels() -> None:
     sessions = [_session("failed"), _session("failed")]
     long_names = ["x" * 200 + "_alpha", "x" * 200 + "_beta"]

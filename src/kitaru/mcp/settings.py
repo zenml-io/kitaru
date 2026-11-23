@@ -36,6 +36,11 @@ class MCPSettings(BaseModel):
     pool_size: int = Field(default=20, ge=1, le=1000)
     max_concurrency: int = Field(default=10, ge=1, le=1000)
     debug: bool = False
+    # Turn on for a server that runs as several copies behind one address: a
+    # follow-up call can reach another copy, so nothing is kept between calls.
+    # The failure matrix then returns no snapshot_id and each cell reads its
+    # sessions again.
+    stateless: bool = False
 
     @field_validator("server_url")
     @classmethod
