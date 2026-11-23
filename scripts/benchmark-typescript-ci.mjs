@@ -4,12 +4,25 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const [mode, outputPath, ...extraArguments] = process.argv.slice(2);
+let mastraCompat = "all";
+for (const argument of extraArguments) {
+  if (argument.startsWith("--mastra-compat=")) {
+    mastraCompat = argument.slice("--mastra-compat=".length);
+  } else {
+    console.error(
+      "Usage: benchmark-typescript-ci.mjs repeated|coverage-once OUTPUT_DIR [--mastra-compat=all|boundary]",
+    );
+    process.exit(1);
+  }
+}
 if (
   !["repeated", "coverage-once"].includes(mode) ||
   !outputPath ||
-  extraArguments.length
+  !["all", "boundary"].includes(mastraCompat)
 ) {
-  console.error("Usage: benchmark-typescript-ci.mjs repeated|coverage-once OUTPUT_DIR");
+  console.error(
+    "Usage: benchmark-typescript-ci.mjs repeated|coverage-once OUTPUT_DIR [--mastra-compat=all|boundary]",
+  );
   process.exit(1);
 }
 if (!process.env.KITARU_TEST_MASTRA_POSTGRES_URL) {
@@ -24,9 +37,7 @@ const examples = [
   "kitaru-example-mastra-support-triage",
   "kitaru-example-mastra-adaptive-conversation",
 ];
-const canonicalPackages = [
-  "kitaru",
-  "kitaru-mastra",
+const compatPackages = [
   "kitaru-mastra-compat-1.68",
   "kitaru-mastra-compat-1.69",
   "kitaru-mastra-compat-1.70",
@@ -39,6 +50,13 @@ const canonicalPackages = [
   "kitaru-mastra-compat-1.77",
   "kitaru-mastra-compat-1.78",
   "kitaru-mastra-compat-1.79",
+];
+const selectedCompatPackages =
+  mastraCompat === "boundary" ? [compatPackages.at(-1)] : compatPackages;
+const canonicalPackages = [
+  "kitaru",
+  "kitaru-mastra",
+  ...selectedCompatPackages,
   "kitaru-vercel-ai",
   ...examples,
 ];
@@ -90,7 +108,7 @@ function runSuite(packageName, { coverage, canonical, postgres }) {
   });
   writeFileSync(
     resolve(outputDirectory, "runs.json"),
-    `${JSON.stringify({ mode, sha: process.env.GITHUB_SHA ?? null, runs }, null, 2)}\n`,
+    `${JSON.stringify({ mode, mastraCompat, sha: process.env.GITHUB_SHA ?? null, runs }, null, 2)}\n`,
   );
   if (result.error || result.status !== 0) {
     console.error(result.error ?? `${packageName} failed with exit code ${result.status}`);

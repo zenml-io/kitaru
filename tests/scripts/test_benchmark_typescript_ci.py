@@ -76,13 +76,16 @@ def fake_pnpm(tmp_path: Path) -> dict[str, str]:
 
 
 def _run_trial(
-    tmp_path: Path, environment: dict[str, str], mode: str
+    tmp_path: Path,
+    environment: dict[str, str],
+    mode: str,
+    *extra_args: str,
 ) -> subprocess.CompletedProcess[str]:
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js is unavailable")
     return subprocess.run(
-        [node, str(SCRIPT), mode, str(tmp_path / "evidence")],
+        [node, str(SCRIPT), mode, str(tmp_path / "evidence"), *extra_args],
         env=environment,
         text=True,
         capture_output=True,
@@ -215,3 +218,43 @@ def test_trial_fails_when_coverage_summary_omits_a_metric(
     assert result.returncode == 1
     assert "omitted an expected coverage summary metric" in result.stderr
     assert len(Path(fake_pnpm["PNPM_CALLS"]).read_text().splitlines()) == 1
+
+
+def test_trial_boundary_compat_scope_runs_oldest_and_newest_mastra(
+    tmp_path: Path, fake_pnpm: dict[str, str]
+) -> None:
+    result = _run_trial(
+        tmp_path, fake_pnpm, "coverage-once", "--mastra-compat=boundary"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = [
+        json.loads(line)
+        for line in Path(fake_pnpm["PNPM_CALLS"]).read_text().splitlines()
+    ]
+    newest_compat = [p for p in CANONICAL if p.startswith("kitaru-mastra-compat-")][-1]
+    expected_packages = [
+        "kitaru",
+        "kitaru-mastra",
+        newest_compat,
+        "kitaru-vercel-ai",
+        *EXAMPLES,
+    ]
+    assert [call["args"][1] for call in calls] == [
+        f"@zenml-io/{package}" for package in expected_packages
+    ]
+    assert all(
+        call["postgres"] == fake_pnpm["KITARU_TEST_MASTRA_POSTGRES_URL"]
+        for call in calls
+    )
+    metadata = json.loads((tmp_path / "evidence/runs.json").read_text())
+    assert metadata["mastraCompat"] == "boundary"
+
+
+def test_trial_rejects_unsupported_mastra_compat_scope(
+    tmp_path: Path, fake_pnpm: dict[str, str]
+) -> None:
+    result = _run_trial(tmp_path, fake_pnpm, "coverage-once", "--mastra-compat=invalid")
+
+    assert result.returncode == 1
+    assert "Usage:" in result.stderr
+    assert not Path(fake_pnpm["PNPM_CALLS"]).exists()
