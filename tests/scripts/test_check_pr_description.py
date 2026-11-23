@@ -71,6 +71,11 @@ def test_body_needs_reviewer_notes_heading(body: str) -> None:
             "<details>\n<summary>Local checks run (all passed)</summary>\n\n"
             "- `just check`\n\n</details>\n"
         ),
+        (
+            "## What changed?\n\nWrap sections in `<details>` blocks.\n\n"
+            "## Reviewer Notes\n\nStrips `<details>...</details>` blocks.\n\n"
+            "<details>\n<summary>Reproduction</summary>\n\nSteps.\n\n</details>\n"
+        ),
     ],
 )
 def test_filled_reviewer_notes_pass(body: str) -> None:
