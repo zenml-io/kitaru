@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Support OpenAI Agents SDK 0.25.
+
 ## 0.5.0 - 2026-11-25
 
 - Record `input_tokens_details.cache_write_tokens` as `cache_write_input_tokens` and include cache writes in genai-prices cost estimates.
