@@ -1,5 +1,5 @@
 ---
-description: Run Kitaru's offline deterministic evaluators over recorded and imported sessions
+description: Run Kitaru's deterministic evaluators without a model provider over recorded and imported sessions
 icon: gauge-high
 ---
 
@@ -8,6 +8,8 @@ icon: gauge-high
 Kitaru includes ten deterministic evaluator plugins for recorded and imported sessions. They read stored session evidence and return repeatable diagnostics or policy results. They do not run the agent, call a model provider, replay a session, invoke a live tool, or read an external service.
 
 The default Kitaru server installation includes the `kitaru-evaluator` package. At startup, Kitaru registers its three basic evaluators and the ten deterministic evaluators below. A fresh workspace creates version 1 for each evaluator.
+
+Although these evaluators never call a model provider, workers resolve the pinned `kitaru-evaluator` package with `uv` on first run, which requires PyPI access by default. For restricted or air-gapped environments, pre-download the plugin wheels as described in [Workers in production](../deploy/workers.md).
 
 You start each evaluation explicitly. Importing, recording, or seeding a session does not start an evaluation Job automatically.
 
