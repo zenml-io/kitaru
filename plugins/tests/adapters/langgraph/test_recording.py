@@ -39,6 +39,7 @@ def _make_agent_runner() -> KitaruGraphRunner[Any, Any]:
             "tools": [],
             "middleware": [ModelCallLimitMiddleware(run_limit=10)],
         },
+        agent_id=uuid.uuid4(),
     )
 
 
@@ -88,7 +89,9 @@ async def test_key_loss_in_recorded_copy_preserves_native_tool_result(
         native_results.append(result)
         return result
 
-    returned = await KitaruGraphRunner(RunnableLambda(run)).ainvoke("hello")
+    returned = await KitaruGraphRunner(
+        RunnableLambda(run), agent_id=uuid.uuid4()
+    ).ainvoke("hello")
 
     assert returned is native_results[0]
     assert returned.artifact == {1: "first", "1": "second"}
@@ -237,7 +240,9 @@ def test_agent_factory_model_calls_record_model_usage_and_cost(
         responses=[_openai_message("", tool_calls=[call]), _openai_message("Shipped.")]
     )
     runner = KitaruGraphRunner.from_agent_factory(
-        factory, factory_kwargs={"model": model, "tools": [lookup_order]}
+        factory,
+        factory_kwargs={"model": model, "tools": [lookup_order]},
+        agent_id=uuid.uuid4(),
     )
 
     result = runner.invoke({"messages": [{"role": "user", "content": "ORD-1007?"}]})
@@ -293,7 +298,9 @@ def test_model_call_records_and_prices_cache_writes(
     )
     model = OpenAIStyleFakeModel(responses=[message])
     runner = KitaruGraphRunner.from_agent_factory(
-        create_agent, factory_kwargs={"model": model, "tools": []}
+        create_agent,
+        factory_kwargs={"model": model, "tools": []},
+        agent_id=uuid.uuid4(),
     )
 
     runner.invoke({"messages": [{"role": "user", "content": "hi"}]})
@@ -315,7 +322,9 @@ def test_model_call_without_usage_records_identity_but_no_cost(
 ) -> None:
     model = OpenAIStyleFakeModel(responses=[AIMessage(content="done")])
     runner = KitaruGraphRunner.from_agent_factory(
-        create_agent, factory_kwargs={"model": model, "tools": []}
+        create_agent,
+        factory_kwargs={"model": model, "tools": []},
+        agent_id=uuid.uuid4(),
     )
 
     runner.invoke({"messages": [{"role": "user", "content": "hi"}]})
@@ -352,7 +361,9 @@ def test_model_calls_point_at_their_joined_reply_text(fake_client: Any) -> None:
         ]
     )
     runner = KitaruGraphRunner.from_agent_factory(
-        create_agent, factory_kwargs={"model": model, "tools": [lookup_order]}
+        create_agent,
+        factory_kwargs={"model": model, "tools": [lookup_order]},
+        agent_id=uuid.uuid4(),
     )
 
     runner.invoke({"messages": [{"role": "user", "content": "ORD-1?"}]})
