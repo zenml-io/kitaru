@@ -8966,7 +8966,6 @@
                   "type": "null"
                 }
               ],
-              "default": null,
               "description": "Identifies the records behind this matrix. Null on a server that keeps no matrix in memory; a cell then reads the sessions again.",
               "title": "Snapshot Id"
             },
@@ -8981,6 +8980,7 @@
             }
           },
           "required": [
+            "snapshot_id",
             "state_by",
             "rows",
             "cols",

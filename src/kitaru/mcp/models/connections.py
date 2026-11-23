@@ -41,8 +41,8 @@ def _refuse_credential_like(name: str) -> str:
 PlainEnv = Annotated[
     dict[Annotated[str, AfterValidator(_refuse_credential_like)], str],
     Field(
-        description="Plain settings, stored and returned as they are. Keys that "
-        "look like credentials (API keys, tokens, passwords, secrets) are "
+        description="Plain settings, stored unencrypted and readable by anyone "
+        "who can read the connection. Keys that look like credentials are "
         "refused: put those in `secrets`."
     ),
 ]

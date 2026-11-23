@@ -102,8 +102,10 @@ class ToolSpec:
         annotations: MCP tool annotations.
         handler: MCP tool function taking the request and the MCP context.
         meta: MCP `_meta` for the tool, if any.
-        run: The tool's work, taking server state and the request; `handler`
-            runs it and wraps its data in the tool's result envelope.
+        run: The tool's work, taking server state and the request. It returns
+            the tool's data, or a `ToolSuccessPayload`, unredacted and without
+            a result envelope, timeout, or concurrency bound, and raises on
+            failure.
         needs_server: Whether `run` uses the state's Kitaru client. A tool
             that does not runs without a server connection or sign-in.
     """

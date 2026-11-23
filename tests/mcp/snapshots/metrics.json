@@ -6,7 +6,7 @@
   },
   "modes": {
     "destructive": {
-      "discovery_response_bytes": 247496,
+      "discovery_response_bytes": 247493,
       "tool_count": 19,
       "tools": {
         "kitaru_activity_read": {
@@ -39,8 +39,8 @@
         },
         "kitaru_connections_manage": {
           "$defs_count": 5,
-          "combined_bytes": 5263,
-          "input_bytes": 2895,
+          "combined_bytes": 5261,
+          "input_bytes": 2893,
           "maximum_nesting_depth": 8,
           "output_bytes": 2368
         },
@@ -74,10 +74,10 @@
         },
         "kitaru_failure_matrix": {
           "$defs_count": 11,
-          "combined_bytes": 8578,
+          "combined_bytes": 8577,
           "input_bytes": 4192,
           "maximum_nesting_depth": 8,
-          "output_bytes": 4386
+          "output_bytes": 4385
         },
         "kitaru_failure_matrix_cell": {
           "$defs_count": 10,
@@ -145,7 +145,7 @@
       }
     },
     "read-only": {
-      "discovery_response_bytes": 134099,
+      "discovery_response_bytes": 134098,
       "tool_count": 9,
       "tools": {
         "kitaru_activity_read": {
@@ -171,10 +171,10 @@
         },
         "kitaru_failure_matrix": {
           "$defs_count": 11,
-          "combined_bytes": 8578,
+          "combined_bytes": 8577,
           "input_bytes": 4192,
           "maximum_nesting_depth": 8,
-          "output_bytes": 4386
+          "output_bytes": 4385
         },
         "kitaru_failure_matrix_cell": {
           "$defs_count": 10,
@@ -214,7 +214,7 @@
       }
     },
     "standard": {
-      "discovery_response_bytes": 235663,
+      "discovery_response_bytes": 235660,
       "tool_count": 17,
       "tools": {
         "kitaru_activity_read": {
@@ -247,8 +247,8 @@
         },
         "kitaru_connections_manage": {
           "$defs_count": 5,
-          "combined_bytes": 5263,
-          "input_bytes": 2895,
+          "combined_bytes": 5261,
+          "input_bytes": 2893,
           "maximum_nesting_depth": 8,
           "output_bytes": 2368
         },
@@ -275,10 +275,10 @@
         },
         "kitaru_failure_matrix": {
           "$defs_count": 11,
-          "combined_bytes": 8578,
+          "combined_bytes": 8577,
           "input_bytes": 4192,
           "maximum_nesting_depth": 8,
-          "output_bytes": 4386
+          "output_bytes": 4385
         },
         "kitaru_failure_matrix_cell": {
           "$defs_count": 10,

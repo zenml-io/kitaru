@@ -140,7 +140,6 @@ class FailureMatrixData(MCPModel):
     """Transition failure matrix over one group, optionally compared to a second."""
 
     snapshot_id: str | None = Field(
-        default=None,
         description="Identifies the records behind this matrix. Null on a server "
         "that keeps no matrix in memory; a cell then reads the sessions again.",
     )

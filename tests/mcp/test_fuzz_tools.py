@@ -350,8 +350,6 @@ def _session_import_strategy(
     return imports()
 
 
-# Other model-only constraints, such as unique memberships and pinned plugin
-# requirements, still use the validation filter. Keep the health check scoped.
 def _draw_plain_env_keys(defs: dict[str, Any]) -> None:
     """Draw connection `env` keys that cannot spell a credential-like name.
 
@@ -367,6 +365,8 @@ def _draw_plain_env_keys(defs: dict[str, Any]) -> None:
                 node["propertyNames"] = {"pattern": r"^[xyz0-9_]*$"}
 
 
+# Other model-only constraints, such as unique memberships and pinned plugin
+# requirements, still use the validation filter. Keep the health check scoped.
 _SCHEMA_SETTINGS = settings(
     deadline=None, suppress_health_check=[HealthCheck.filter_too_much]
 )

@@ -266,6 +266,7 @@ async def test_credential_like_env_keys_are_refused_without_echoing_values(
     env = {
         "OPENAI_API_KEY": "sk-planted-value",
         "awsSecretAccessKey": "planted-camel-value",
+        "HFToken": "planted-acronym-value",
         "MAX_TOKENS": "4096",
     }
 
@@ -277,7 +278,8 @@ async def test_credential_like_env_keys_are_refused_without_echoing_values(
         )
 
     message = str(refused.value)
-    assert "OPENAI_API_KEY" in message and "awsSecretAccessKey" in message
+    for name in ("OPENAI_API_KEY", "awsSecretAccessKey", "HFToken"):
+        assert name in message
     assert "MAX_TOKENS" not in message
     assert "secrets" in message
     assert "planted" not in message
@@ -285,7 +287,12 @@ async def test_credential_like_env_keys_are_refused_without_echoing_values(
 
 async def test_plain_env_keys_that_only_resemble_credentials_are_kept() -> None:
     """Settings such as token limits are not credentials."""
-    env = {"MAX_TOKENS": "4096", "TOKENIZER_NAME": "cl100k", "LANGFUSE_BASE_URL": "x"}
+    env = {
+        "MAX_TOKENS": "4096",
+        "HTTPMaxTokens": "4096",
+        "TOKENIZER_NAME": "cl100k",
+        "LANGFUSE_BASE_URL": "x",
+    }
 
     created = ConnectionCreate(operation="create", name="n", provider="p", env=env)
 
