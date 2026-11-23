@@ -138,11 +138,17 @@ class InvocationRecorder:
         policy: CapturePolicy,
     ) -> "InvocationRecorder":
         """Resolve execution context and persist the root before delegation."""
+        task_value = (os.environ.get("KITARU_TASK_ID") or "").strip()
+        task_id = uuid.UUID(task_value) if task_value else None
+        if agent_id is None and agent_version_id is None and task_id is None:
+            raise ValueError(
+                "This run is not inside a Kitaru worker task, so it needs an agent: "
+                "pass agent_id=<agent UUID> (or agent_version_id=<version UUID>; "
+                "see `kitaru agent get <name>`)."
+            )
         client = KitaruAPIClient()
         session_id: uuid.UUID | None = None
         try:
-            task_value = os.environ.get("KITARU_TASK_ID")
-            task_id = uuid.UUID(task_value) if task_value else None
             replay_value = os.environ.get("KITARU_REPLAY_ID")
             replay_id = uuid.UUID(replay_value) if replay_value else None
             replay = await client.replays.get(replay_id) if replay_id else None
