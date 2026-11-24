@@ -176,6 +176,24 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
             raise CohortVersionNotFound(cohort_id, version)
         return row.to_domain()
 
+    async def find_latest(self, cohort_id: uuid.UUID) -> CohortVersion | None:
+        """Find the highest-numbered surviving version of a cohort.
+
+        Args:
+            cohort_id: Id of the cohort.
+
+        Returns:
+            Highest-numbered stored version, or None when none remain.
+        """
+        statement = (
+            select(CohortVersionORM)
+            .where(CohortVersionORM.cohort_id == cohort_id)
+            .order_by(CohortVersionORM.version.desc())
+            .limit(1)
+        )
+        row = (await self._session.scalars(statement)).one_or_none()
+        return row.to_domain() if row is not None else None
+
     async def query(
         self, version_filter: CohortVersionFilter
     ) -> tuple[list[CohortVersion], str | None]:

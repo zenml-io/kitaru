@@ -79,11 +79,9 @@ class CohortVersionService:
             version yet.
         """
         if baseline_id is None:
-            if cohort.latest_version == 0:
+            baseline = await self._repository.find_latest(cohort.id)
+            if baseline is None:
                 return []
-            baseline = await self._repository.get_by_number(
-                cohort.id, cohort.latest_version
-            )
         else:
             baseline = await self._repository.get(baseline_id)
             if baseline.cohort_id != cohort.id:
@@ -254,4 +252,8 @@ class CohortVersionService:
             CohortVersionInUse: An experiment run references this version.
         """
         _ = actor
+        version = await self._repository.get(cohort_version_id)
+        # Creation holds this same parent lock while reading its baseline.
+        # Acquire it before deleting so a selected baseline stays available.
+        await self._cohorts.get(version.cohort_id, exclusive=True)
         await self._repository.delete(cohort_version_id)

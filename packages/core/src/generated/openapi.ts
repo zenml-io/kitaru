@@ -8947,6 +8947,11 @@ export interface components {
             started_at?: string | null;
             status: components["schemas"]["SessionStatus"];
             /**
+             * Tags
+             * @description Linked tags.
+             */
+            tags?: components["schemas"]["TagResponse"][];
+            /**
              * Task Id
              * @description Task the session was produced by.
              */
@@ -9402,6 +9407,11 @@ export interface components {
              */
             started_at?: string | null;
             status: components["schemas"]["SessionStatus"];
+            /**
+             * Tags
+             * @description Linked tags.
+             */
+            tags?: components["schemas"]["TagResponse"][];
             /**
              * Task Id
              * @description Task the session was produced by.
