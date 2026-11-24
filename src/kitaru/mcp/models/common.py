@@ -107,6 +107,11 @@ class ToolSuccessPayload(MCPModel):
         description="Plain-language summary sent as the text result instead of "
         "the JSON envelope; the structured result keeps the full data.",
     )
+    redact: bool = Field(
+        default=True,
+        description="Mask credential-shaped strings in the result. Off only for "
+        "data that comes from the user's own files rather than from Kitaru.",
+    )
 
 
 RegistryItem = (
