@@ -8629,6 +8629,14 @@
           "status": {
             "$ref": "#/components/schemas/SessionStatus"
           },
+          "tags": {
+            "description": "Linked tags.",
+            "items": {
+              "$ref": "#/components/schemas/TagResponse"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
           "task_id": {
             "anyOf": [
               {
@@ -9519,6 +9527,14 @@
           },
           "status": {
             "$ref": "#/components/schemas/SessionStatus"
+          },
+          "tags": {
+            "description": "Linked tags.",
+            "items": {
+              "$ref": "#/components/schemas/TagResponse"
+            },
+            "title": "Tags",
+            "type": "array"
           },
           "task_id": {
             "anyOf": [

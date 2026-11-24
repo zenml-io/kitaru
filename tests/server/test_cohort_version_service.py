@@ -771,3 +771,65 @@ async def test_create_version_without_analytics_tracker(
         cohort_id, CohortVersionCreate(), actor=ACTOR
     )
     assert version.owner_id == ACTOR.account.id
+
+
+@pytest.mark.parametrize("delete_all", [False, True])
+async def test_create_after_deleting_newest_uses_surviving_members(
+    service: CohortVersionService,
+    repository: FakeCohortVersionRepository,
+    cohort_repository: FakeCohortRepository,
+    session_repository: FakeSessionRepository,
+    agent_id: uuid.UUID,
+    cohort_id: uuid.UUID,
+    delete_all: bool,
+) -> None:
+    """Deleted numbers stay spent while default membership follows live versions."""
+    members = [await _make_session_id(session_repository, agent_id) for _ in range(3)]
+    first = await service.create_version(
+        cohort_id, CohortVersionCreate(add_session_ids=members[:2]), actor=ACTOR
+    )
+    newest = await service.create_version(
+        cohort_id, CohortVersionCreate(add_session_ids=members[2:]), actor=ACTOR
+    )
+    await service.delete_version(newest.id, actor=ACTOR)
+    if delete_all:
+        await service.delete_version(first.id, actor=ACTOR)
+    copied = await service.create_version(cohort_id, CohortVersionCreate(), actor=ACTOR)
+    assert copied.version == 3
+    assert await repository.list_session_ids(copied.id) == (
+        [] if delete_all else members[:2]
+    )
+    assert (await cohort_repository.get(cohort_id)).latest_version == 3
+    following = await service.create_version(
+        cohort_id, CohortVersionCreate(), actor=ACTOR
+    )
+    assert following.version == 4
+
+
+async def test_deleting_nonlatest_preserves_default_and_explicit_baseline(
+    service: CohortVersionService,
+    repository: FakeCohortVersionRepository,
+    session_repository: FakeSessionRepository,
+    agent_id: uuid.UUID,
+    cohort_id: uuid.UUID,
+) -> None:
+    """A hole in version history affects neither the latest nor explicit restore."""
+    members = [await _make_session_id(session_repository, agent_id) for _ in range(3)]
+    first = await service.create_version(
+        cohort_id, CohortVersionCreate(add_session_ids=members[:2]), actor=ACTOR
+    )
+    middle = await service.create_version(
+        cohort_id, CohortVersionCreate(remove_session_ids=[members[0]]), actor=ACTOR
+    )
+    await service.create_version(
+        cohort_id, CohortVersionCreate(add_session_ids=members[2:]), actor=ACTOR
+    )
+    await service.delete_version(middle.id, actor=ACTOR)
+    copied = await service.create_version(cohort_id, CohortVersionCreate(), actor=ACTOR)
+    assert copied.version == 4
+    assert await repository.list_session_ids(copied.id) == members[1:]
+    restored = await service.create_version(
+        cohort_id, CohortVersionCreate(baseline_id=first.id), actor=ACTOR
+    )
+    assert restored.version == 5
+    assert await repository.list_session_ids(restored.id) == members[:2]

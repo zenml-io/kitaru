@@ -18,7 +18,7 @@ from typing import Any, Literal, TypeVar
 
 import yaml
 from packaging.requirements import InvalidRequirement, Requirement
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 
 from kitaru.api_models.v1.agent import AgentCreateRequest, AgentListParams
 from kitaru.api_models.v1.agent_version import (
@@ -70,6 +70,8 @@ from kitaru.cli.references import (
     resolve_parent_resource,
 )
 from kitaru.cli.registration_receipts import build_registration_result
+from kitaru.cli.registration_spec import AgentParentSpec as AgentParentSpec
+from kitaru.cli.registration_spec import AgentRegistrationSpec as AgentRegistrationSpec
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.credential_store import CredentialStore
 
@@ -78,25 +80,6 @@ _MODULE_RE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$")
 _ATTRIBUTE_RE = re.compile(r"^[A-Za-z_]\w*$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ListParamsT = TypeVar("ListParamsT", bound=ListParams)
-
-
-class _SpecModel(BaseModel):
-    """Strict base for CLI-only spec documents."""
-
-    model_config = ConfigDict(extra="forbid")
-
-
-class AgentParentSpec(_SpecModel):
-    """Parent fields accepted in an agent registration spec."""
-
-    description: str | None = None
-
-
-class AgentRegistrationSpec(_SpecModel):
-    """Agent parent and initial-version spec document."""
-
-    parent: AgentParentSpec = Field(default_factory=AgentParentSpec)
-    version: AgentVersionCreateRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,7 +212,7 @@ def load_agent_register_spec(
     spec = AgentRegistrationSpec.model_validate(data)
     _validate_agent_version(spec.version)
     return (
-        AgentCreateRequest(name=name, description=spec.parent.description),
+        AgentCreateRequest(name=name, description=spec.get_agent_description()),
         spec.version,
     )
 
@@ -912,7 +895,13 @@ def _list_validation_error(error: ValidationError) -> CLIError:
         message = "--sort must be created:asc or created:desc."
     else:
         message = f"Invalid --{field.replace('_', '-')}: {issue['msg']}."
-    return CLIError("invalid_arguments", message)
+    return CLIError(
+        "invalid_arguments",
+        message,
+        hint="--limit is an alias for --size; supply only one."
+        if field == "size"
+        else None,
+    )
 
 
 def _load_document(path: Path, label: str = "Spec") -> dict[str, Any]:
