@@ -237,6 +237,13 @@ class AgentTaskDetails(ResponseModel):
     )
 
 
+class EvaluationBaselineContext(ResponseModel):
+    """Baseline identity and case metadata for evaluating a replay result."""
+
+    session_id: uuid.UUID = Field(description="Baseline session.")
+    metadata: dict[str, JsonValue] = Field(description="Baseline session metadata.")
+
+
 class EvaluationTaskDetails(ResponseModel):
     """Evaluation task details."""
 
@@ -247,6 +254,10 @@ class EvaluationTaskDetails(ResponseModel):
     )
     plugin: PluginSpec = Field(description="Evaluator plugin to load.")
     input_session_id: uuid.UUID = Field(description="Session being scored.")
+    baseline: EvaluationBaselineContext | None = Field(
+        default=None,
+        description="Baseline metadata when the scored session is a replay result.",
+    )
 
 
 class ImportTaskDetails(ResponseModel):

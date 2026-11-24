@@ -36,6 +36,59 @@ describe("evaluator protocol", () => {
   });
 
   it.each([
+    undefined,
+    null,
+    {
+      session_id: "12345678-1234-4234-8234-123456789abc",
+      metadata: { labels: { answer: ["approved", null, 3, true] } },
+    },
+  ])(
+    "passes optional baseline metadata separately from result metadata",
+    async (baseline) => {
+      const view = {
+        ...session,
+        baseline,
+        session: { ...session.session, metadata: { locale: "en" } },
+      };
+      await evaluateRequest(
+        { schema_version: 1, session: view, params: {} },
+        (received) => {
+          expect(received.baseline).toEqual(baseline);
+          expect(received.session.metadata).toEqual({ locale: "en" });
+          return [{ name: "quality", score: 1 }];
+        },
+      );
+    },
+  );
+
+  it.each([
+    [],
+    {},
+    { session_id: "invalid", metadata: {} },
+    { session_id: "12345678-1234-4234-8234-123456789abc", metadata: [] },
+    { session_id: "12345678-1234-4234-8234-123456789abc", metadata: null },
+    {
+      session_id: "12345678-1234-4234-8234-123456789abc",
+      metadata: { label: Infinity },
+    },
+  ])(
+    "rejects malformed baseline context before calling the evaluator: %j",
+    async (baseline) => {
+      let called = false;
+      await expect(
+        evaluateRequest(
+          { schema_version: 1, session: { ...session, baseline }, params: {} },
+          () => {
+            called = true;
+            return [{ name: "quality", score: 1 }];
+          },
+        ),
+      ).rejects.toThrow("baseline");
+      expect(called).toBe(false);
+    },
+  );
+
+  it.each([
     { schema_version: 2, session, params: {} },
     { schema_version: 1, session, params: [] },
     { schema_version: 1, session: { session: {}, nodes: {} }, params: {} },

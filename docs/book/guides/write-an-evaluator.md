@@ -49,6 +49,47 @@ def evaluate(session: SessionView, **params) -> list[EvaluationResult]:
 
 `SessionView` is the whole recording: `session.session` is the [session](../concepts/agents-and-sessions.md) with its inputs, outputs, and rollups; `session.nodes` is every model call and tool call with payloads. Return one result or a list; each becomes one stored evaluation. `evaluate` can also be `async def`, for example to call a model client asynchronously, and the task process awaits it. Pick the type by how you will read a thousand of them: **numbers average, booleans count, labels diff as transitions, free text gets read.** Use `passed` for the verdict and `explanation` for the sentence you will want when a gate goes red.
 
+## Keep expected answers in session metadata
+
+Store a reviewed expected answer, or gold label, in the original session's metadata, for example `{"expected_action": "refund"}`. Keep it out of the agent's inputs so the agent cannot use the answer to choose its action.
+
+When evaluating a replay result, `SessionView.baseline` provides an `EvaluationBaselineContext` with the original session's `session_id` and `metadata`. This also applies when you evaluate that result session again later with `kitaru session evaluate`. The evaluated recording remains in `session.session` and `session.nodes`; its own metadata belongs to the new run and may differ from the original metadata.
+
+Choose the expected answer from `session.baseline.metadata` when that context exists, otherwise from `session.session.metadata`. For an ordinary session, including a baseline evaluation, `session.baseline` is `None` unless that session was itself produced by an earlier replay.
+
+The context follows one replay relationship. If A produced B and B produced C, evaluating B exposes A's metadata, while evaluating C exposes B's metadata. Labels are not inherited, and `FORCE` does not change that relationship. Keep the original labeled session as the baseline for comparisons, or explicitly maintain the same reviewed labels on each intermediate baseline.
+
+For an agent whose structured output contains an `action` field:
+
+```python
+from kitaru.task.evaluator import EvaluationResult, SessionView
+
+
+def evaluate(session: SessionView, **params) -> EvaluationResult:
+    metadata = (
+        session.baseline.metadata
+        if session.baseline is not None
+        else session.session.metadata
+    )
+    expected = metadata.get("expected_action")
+    outputs = session.session.outputs
+    actual = outputs.get("action") if isinstance(outputs, dict) else None
+    if not isinstance(expected, str) or not isinstance(actual, str):
+        return EvaluationResult(
+            name="expected_action",
+            value="unknown",
+            explanation="Missing expected action or structured action output",
+        )
+    ok = actual == expected
+    return EvaluationResult(name="expected_action", score=ok, passed=ok)
+```
+
+The baseline context contains metadata, not the baseline's full trace or outputs. It is available to the evaluator; the replayed agent receives the baseline inputs and replay ID, without baseline metadata or permission to read the baseline session.
+
+{% hint style="warning" %}
+Baseline metadata is read when the server supplies the evaluation task specification, not saved as a permanent label snapshot. Avoid editing gold labels while comparing a baseline and replay result. After changing a label, use `baseline_evaluation_mode=BaselineEvaluationMode.FORCE` (CLI: `--baseline-evaluation-mode force`) for the next replay: `IF_MISSING` can reuse an older baseline evaluation with the same evaluator version and parameters even though the metadata changed. See [Replay and overrides](replay-and-overrides.md).
+{% endhint %}
+
 ## An LLM judge is an evaluator
 
 For criteria that need judgment, such as tone, helpfulness, or whether the reply answered the question, call a model inside `evaluate`. Declare the dependency inline (PEP 723) and the worker builds the environment:
