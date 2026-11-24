@@ -61,6 +61,8 @@ class PushReport:
     unmapped_references: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     details_truncated: bool = False
+    permanent_failures: int = 0
+    """Failed records that a rerun alone would fail again."""
 
     def count(self, kind: str, outcome: str, amount: int = 1) -> None:
         """Add records of one kind to an outcome."""
@@ -73,10 +75,22 @@ class PushReport:
             self.skipped, {"kind": kind, "record": record, "reason": reason}
         )
 
-    def fail(self, kind: str, record: str, error: str) -> None:
-        """Count one failed record and keep the failure."""
+    def fail(self, kind: str, record: str, error: str, *, retryable: bool) -> None:
+        """Count one failed record and keep the failure.
+
+        Args:
+            kind: Kind of the record.
+            record: Name or id of the record.
+            error: Why the copy failed.
+            retryable: Whether rerunning the push alone can copy it.
+        """
         self.count(kind, "failed")
-        self._add_detail(self.failed, {"kind": kind, "record": record, "error": error})
+        if not retryable:
+            self.permanent_failures += 1
+        self._add_detail(
+            self.failed,
+            {"kind": kind, "record": record, "error": error, "retryable": retryable},
+        )
 
     def add_unmapped(
         self, insight: InsightResponse, references: list[dict[str, str]]
@@ -92,7 +106,12 @@ class PushReport:
         )
 
     def add_incomplete_connection(
-        self, name: str, missing_keys: set[str], stored_keys: set[str]
+        self,
+        name: str,
+        missing_keys: set[str],
+        stored_keys: set[str],
+        *,
+        make_default: bool,
     ) -> None:
         """Keep the secret keys a destination connection still needs.
 
@@ -104,11 +123,15 @@ class PushReport:
             missing_keys: Secret keys the source has and the destination
                 lacks.
             stored_keys: Secret keys the destination already holds.
+            make_default: Whether the command also makes the connection its
+                provider's default.
         """
         options = " ".join(
             f"--set-secret {shlex.quote(key)}=<value>"
             for key in sorted(missing_keys | stored_keys)
         )
+        if make_default:
+            options = f"{options} --default"
         self._add_detail(
             self.incomplete_connections,
             {
@@ -123,6 +146,11 @@ class PushReport:
     def failures(self) -> int:
         """Return the number of records that failed to copy."""
         return sum(counts["failed"] for counts in self.counts.values())
+
+    @property
+    def retryable(self) -> bool:
+        """Whether rerunning the push alone can copy every failed record."""
+        return self.permanent_failures == 0
 
     def to_item(self) -> dict[str, Any]:
         """Return the JSON document describing the push."""
@@ -163,16 +191,29 @@ def build_push_result(report: PushReport) -> CommandResult:
     warnings = _build_warnings(report)
     next_actions = _build_next_actions(report)
     if report.failures:
+        hint = "Rerun the same command. Records already copied are not copied again."
+        if not report.retryable:
+            hint = (
+                "Fix the failures that a rerun cannot, then rerun the same "
+                "command. Records already copied are not copied again."
+            )
         raise CLIError(
             "partial_failure",
             f"{report.failures} record(s) failed to copy to {report.destination}.",
-            retryable=True,
+            retryable=report.retryable,
             details={
                 **report.to_item(),
                 "warnings": warnings,
                 "next_actions": next_actions,
             },
-            hint="Rerun the same command. Records already copied are not copied again.",
+            hint=hint,
+            text="\n".join(
+                [
+                    _render_text(report),
+                    *(f"Warning: {warning}" for warning in warnings),
+                    *(f"Next: {action}" for action in next_actions),
+                ]
+            ),
         )
     return CommandResult(
         item=report.to_item(),
@@ -251,6 +292,10 @@ def _render_text(report: PushReport) -> str:
         for row in rows
     )
     lines.extend(
+        f"Failed {detail['kind']} {detail['record']}: {detail['error']}"
+        for detail in report.failed[:_MAX_TEXT_DETAILS]
+    )
+    lines.extend(
         f"Skipped {detail['kind']} {detail['record']}: {detail['reason']}"
         for detail in report.skipped[:_MAX_TEXT_DETAILS]
     )
@@ -258,9 +303,13 @@ def _render_text(report: PushReport) -> str:
         f"Connection {detail['connection']} needs: {', '.join(detail['missing_keys'])}"
         for detail in report.incomplete_connections[:_MAX_TEXT_DETAILS]
     )
-    if len(report.skipped) > _MAX_TEXT_DETAILS or report.details_truncated:
+    if (
+        len(report.failed) > _MAX_TEXT_DETAILS
+        or len(report.skipped) > _MAX_TEXT_DETAILS
+        or report.details_truncated
+    ):
         lines.append(
-            "More records were skipped than are listed here. The counts above "
-            "are complete."
+            "More records failed or were skipped than are listed here. The "
+            "counts above are complete."
         )
     return "\n".join(line.rstrip() for line in lines)

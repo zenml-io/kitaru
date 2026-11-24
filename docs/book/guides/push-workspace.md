@@ -12,9 +12,9 @@ icon: cloud-arrow-up
 | Record | How it is matched on the destination | Notes |
 |---|---|---|
 | Agents | By name | A destination agent with the same name is reused, and the pushed sessions and insights merge under it. |
-| Agent versions | By version number | A version is skipped when the destination agent's version numbers differ from the source. Secrets named in a run spec are dropped from the copy. |
-| Provider connections | By name | Copied without their secret values. |
-| Sessions with their nodes | By `imported_from` and `external_id` within the agent | Sessions still `in_progress` and replay result sessions are skipped. |
+| Agent versions | By content: display version, description, capabilities, and run spec | A destination version is reused only when its content matches, and a new version is created otherwise. Secrets named in a run spec are dropped from the copy and ignored when matching. |
+| Provider connections | By name and provider | Copied without their secret values. A destination connection of the same name for another provider fails that connection. |
+| Sessions with their nodes | By `imported_from` and `external_id` within the agent, or by the source session id | Sessions still `in_progress` and replay result sessions are skipped. |
 | Insights | By the source insight id recorded in the copy's metadata | References to sessions, nodes, and agents are rewritten. |
 
 Cohorts, evaluators, evaluations, investigations, annotations, experiments, replays, tags, importers, and analyzers are not copied. Recreate the ones you need on the destination.
@@ -38,7 +38,9 @@ kitaru --server http://localhost:8000 workspace push \
   --to https://acme.cloud.example.com
 ```
 
-Without `--server`, the source is the selected server shown by `kitaru status`. The destination always authenticates with the credential stored by `kitaru login`. `KITARU_API_KEY` applies to the source only.
+Without `--server`, the source is the selected server shown by `kitaru status`. A destination that requires authentication uses the credential stored by `kitaru login`, and one that runs without authentication, such as a second local server, needs no login. `KITARU_API_KEY` applies to the source only.
+
+Before it writes anything, the push asks both servers for their server id and refuses to run when they match, so two URLs of one server, such as `localhost` and `127.0.0.1`, cannot push a server into itself.
 
 Limit the push to some agents by repeating `--agent`. Their sessions and insights follow them, and connections are copied regardless because they belong to the workspace:
 
@@ -108,13 +110,19 @@ kitaru --server http://localhost:8000 workspace push \
 
 `skipped`, `failed`, `incomplete_connections`, and `unmapped_references` each list at most 200 records, and `details_truncated` says when one was cut short. The counts are always complete.
 
-With `--dry-run`, `copied` counts what a push would copy. When any record fails, the command exits with the `partial_failure` error, whose `details` carry the same report together with the `warnings` and `next_actions`.
+With `--dry-run`, `copied` counts what a push would copy. When any record fails, the command exits with the `partial_failure` error, whose `details` carry the same report together with the `warnings` and `next_actions`. In text mode the error prints the counts, the failures, the warnings, and the follow-up commands.
+
+Each entry under `failed` says whether a rerun alone can copy it in `retryable`. A dropped connection, a server error, or a conflict with a concurrent writer is retryable. A record the destination rejects as invalid, or a connection whose name the destination uses for another provider, is not, and the error's own `retryable` is false as long as any such failure remains.
 
 ## Run it again
 
 A push is safe to repeat. Every record is matched on the destination before it is written, so a second run reports the earlier copies as `already_present` and adds only what is new on the source. Rerun the same command after a partial failure, or later to bring over sessions recorded since the first push.
 
-Sessions get new ids and new session numbers on the destination. A session keeps the `imported_from` and `external_id` it had on the source, which is also what makes a later import of the same provider traces skip it. A session without that identity, such as one recorded live, gets `imported_from` set to `kitaru-workspace-push` and its source session id as `external_id`. It stays a recorded session, and it also matches a session filter on `imported_from`.
+An insight that references a session or another record whose copy failed in the same run is not written. It is reported as failed and copied by the rerun that copies the record, so its references are rewritten once instead of being left pointing at the source.
+
+A destination numbers agent versions itself and never reuses the number of a deleted version, so a copy can carry another number than its source. The result warns when it does, and sessions and insights point at the matching copy either way. A source version edited after a push no longer matches its earlier copy, and the next push copies it again.
+
+Sessions get new ids and new session numbers on the destination. A session that has both `imported_from` and `external_id` on the source keeps them, which is also what makes a later import of the same provider traces skip it. A session that lacks either one, such as one recorded live, gets `imported_from` set to `kitaru-workspace-push` and its source session id as `external_id`, because several source sessions can share the half they have. It stays a recorded session, and it also matches a session filter on `imported_from`.
 
 ## Insights and their references
 
@@ -136,4 +144,6 @@ kitaru --server https://acme.cloud.example.com connection update langfuse-prod \
   --set-secret LANGFUSE_SECRET_KEY=sk-...
 ```
 
-A copied connection becomes its provider's default only when the destination has no default for that provider yet. See [Provider connections](provider-connections.md) for managing them.
+A default connection without its secret values would be selected for jobs on the destination and leave them without those keys, so a copied connection that still lacks secret values is never made the default. When its source was the default and the destination has no default for that provider yet, its command ends with `--default`, which makes it the default once the secrets are set. A complete connection becomes its provider's default right away under the same condition.
+
+A destination connection of the same name is reused only when it addresses the same provider. When its non-secret values differ from the source, the result warns and leaves them unchanged. See [Provider connections](provider-connections.md) for managing them.

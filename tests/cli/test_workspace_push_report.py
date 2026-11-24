@@ -26,6 +26,7 @@ from tests.cli.workspace_push_fakes import (
     build_counts,
 )
 
+from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
     SessionDetailResponse,
@@ -37,6 +38,8 @@ from kitaru.api_models.v1.session_node import (
     SessionWithNodesResponse,
 )
 from kitaru.cli import app as app_module
+from kitaru.cli import workspace_push, workspace_push_destination
+from kitaru.cli.config import ResolvedCredential
 from kitaru.cli.output import CLIError
 from kitaru.cli.schema import describe_schema
 from kitaru.cli.workspace_push import (
@@ -53,7 +56,7 @@ from kitaru.cli.workspace_push_report import (
 
 
 def test_session_identity_keeps_source_identity_and_fills_gaps() -> None:
-    """The copy keeps a source identity and derives a stable one otherwise."""
+    """The copy keeps a complete source identity and derives one otherwise."""
     session_id = uuid.uuid4()
 
     def build(**fields: Any) -> SessionResponse:
@@ -68,10 +71,10 @@ def test_session_identity_keeps_source_identity_and_fills_gaps() -> None:
     )
     assert get_session_identity(build(imported_from=None, external_id="run-7")) == (
         PUSH_IMPORTED_FROM,
-        "run-7",
+        str(session_id),
     )
     assert get_session_identity(build(imported_from="langfuse", external_id=None)) == (
-        "langfuse",
+        PUSH_IMPORTED_FROM,
         str(session_id),
     )
 
@@ -80,9 +83,11 @@ def test_push_result_fails_when_a_record_failed() -> None:
     """A failed record turns the report into a retryable partial failure."""
     report = PushReport(SOURCE_URL, DESTINATION_URL, dry_run=False)
     report.count("sessions", "copied", 3)
-    report.fail("sessions", "abc", "HTTP 500: boom")
+    report.fail("sessions", "abc", "HTTP 500: boom", retryable=True)
     report.warnings.append("A warning raised while copying.")
-    report.add_incomplete_connection("langfuse-prod", {"SECRET_KEY"}, set())
+    report.add_incomplete_connection(
+        "langfuse-prod", {"SECRET_KEY"}, set(), make_default=False
+    )
 
     with pytest.raises(CLIError) as raised:
         build_push_result(report)
@@ -92,12 +97,63 @@ def test_push_result_fails_when_a_record_failed() -> None:
     assert raised.value.retryable is True
     assert details["counts"]["sessions"] == build_counts(copied=3, failed=1)
     assert details["failed"] == [
-        {"kind": "sessions", "record": "abc", "error": "HTTP 500: boom"}
+        {
+            "kind": "sessions",
+            "record": "abc",
+            "error": "HTTP 500: boom",
+            "retryable": True,
+        }
     ]
     assert details["warnings"][0] == "A warning raised while copying."
     assert any("incomplete_connections" in warning for warning in details["warnings"])
     assert any("--set-secret SECRET_KEY=<value>" in a for a in details["next_actions"])
     assert describe_not_copied() in details["next_actions"][-1]
+
+
+def test_push_result_is_not_retryable_after_a_permanent_failure() -> None:
+    """A failure a rerun cannot fix makes the whole partial failure permanent."""
+    report = PushReport(SOURCE_URL, DESTINATION_URL, dry_run=False)
+    report.fail("sessions", "abc", "HTTP 503: busy", retryable=True)
+    report.fail("connections", "langfuse-prod", "Provider differs.", retryable=False)
+
+    with pytest.raises(CLIError) as raised:
+        build_push_result(report)
+
+    assert raised.value.retryable is False
+    assert raised.value.hint is not None
+    assert raised.value.hint.startswith("Fix the failures")
+
+
+def test_push_command_prints_the_report_of_a_partial_failure_as_text(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Text mode shows the counts, failures, and follow-up commands of a failure."""
+    serve_info(
+        monkeypatch,
+        {SOURCE_URL: None, DESTINATION_URL: None},
+        destination_scheme=AuthScheme.NONE,
+    )
+    report = PushReport(SOURCE_URL, DESTINATION_URL, dry_run=False)
+    report.count("sessions", "copied", 3)
+    report.fail("sessions", "abc", "HTTP 500: boom", retryable=True)
+    report.add_incomplete_connection(
+        "langfuse-prod", {"SECRET_KEY"}, set(), make_default=True
+    )
+
+    async def return_report(*_args: Any, **_kwargs: Any) -> PushReport:
+        return report
+
+    monkeypatch.setattr(workspace_push, "push_workspace", return_report)
+
+    code = run_push("text")
+
+    err = capsys.readouterr().err
+    assert code == 8
+    assert "1 record(s) failed to copy" in err
+    assert "Failed sessions abc: HTTP 500: boom" in err
+    assert "sessions" in err and "3" in err
+    assert "--set-secret SECRET_KEY=<value> --default" in err
+    assert "Rerun the same command" in err
 
 
 def test_not_copied_list_is_the_same_everywhere() -> None:
@@ -224,16 +280,30 @@ def test_report_bounds_its_detail_lists() -> None:
     assert report.details_truncated is True
 
 
-def test_push_command_requires_a_stored_destination_credential(
-    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+def serve_info(
+    monkeypatch: pytest.MonkeyPatch,
+    ids: dict[str, uuid.UUID | None],
+    destination_scheme: AuthScheme = AuthScheme.LOCAL,
 ) -> None:
-    """The source's environment key is never used for the destination."""
-    monkeypatch.setenv("KITARU_API_KEY", "KITKEY_source")
+    """Answer the info endpoint of the source and destination without a server."""
 
-    code = app_module.main(
+    async def get_info(_client: Any, server_url: str) -> ServerInfoResponse:
+        scheme = AuthScheme.LOCAL
+        if server_url == DESTINATION_URL:
+            scheme = destination_scheme
+        return ServerInfoResponse(
+            id=ids[server_url], version="1.0.0", auth_scheme=scheme
+        )
+
+    monkeypatch.setattr(workspace_push_destination, "get_server_info", get_info)
+
+
+def run_push(output: str = "json") -> int:
+    """Run the push command from the source to the destination."""
+    return app_module.main(
         [
             "--output",
-            "json",
+            output,
             "--server",
             SOURCE_URL,
             "workspace",
@@ -243,11 +313,67 @@ def test_push_command_requires_a_stored_destination_credential(
         ]
     )
 
+
+def test_push_command_requires_a_stored_destination_credential(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The source's environment key is never used for the destination."""
+    monkeypatch.setenv("KITARU_API_KEY", "KITKEY_source")
+    serve_info(monkeypatch, {SOURCE_URL: uuid.uuid4(), DESTINATION_URL: uuid.uuid4()})
+
+    code = run_push()
+
     error = json.loads(capsys.readouterr().err)["error"]
     assert code == 3
     assert error["kind"] == "authentication_failed"
     assert DESTINATION_URL in error["message"]
     assert f"kitaru login {DESTINATION_URL}" in error["hint"]
+
+
+def test_push_command_needs_no_credential_for_an_open_destination(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A destination without authentication is pushed to without a login."""
+    monkeypatch.setenv("KITARU_API_KEY", "KITKEY_source")
+    serve_info(
+        monkeypatch,
+        {SOURCE_URL: uuid.uuid4(), DESTINATION_URL: uuid.uuid4()},
+        destination_scheme=AuthScheme.NONE,
+    )
+    build_client = workspace_push_destination.build_api_client
+    credentials: list[str] = []
+
+    def record_client(
+        server_url: str, credential: ResolvedCredential, *args: Any
+    ) -> Any:
+        credentials.append(credential.source)
+        return build_client(server_url, credential, *args)
+
+    async def push_nothing(*_args: Any, **_kwargs: Any) -> PushReport:
+        return PushReport(SOURCE_URL, DESTINATION_URL, dry_run=False)
+
+    monkeypatch.setattr(workspace_push_destination, "build_api_client", record_client)
+    monkeypatch.setattr(workspace_push, "push_workspace", push_nothing)
+
+    code = run_push()
+
+    assert code == 0, capsys.readouterr().err
+    assert credentials == ["none", "none"]
+
+
+def test_push_command_rejects_another_url_of_the_source_server(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two URLs reporting one server id are the same server."""
+    server_id = uuid.uuid4()
+    serve_info(monkeypatch, {SOURCE_URL: server_id, DESTINATION_URL: server_id})
+
+    code = run_push()
+
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert code == 2
+    assert error["kind"] == "invalid_arguments"
+    assert str(server_id) in error["message"]
 
 
 def test_push_command_rejects_the_source_as_destination(

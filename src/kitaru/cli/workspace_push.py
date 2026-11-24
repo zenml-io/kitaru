@@ -14,7 +14,9 @@
 """Copying of workspace content from one Kitaru server to another."""
 
 import asyncio
+import json
 import uuid
+from collections import defaultdict
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -56,12 +58,8 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeListParams,
     SessionWithNodesResponse,
 )
-from kitaru.cli.config import (
-    ResolvedCredential,
-    build_api_client,
-    validate_server_url,
-)
 from kitaru.cli.output import CLIError, describe_validation_error
+from kitaru.cli.workspace_push_destination import build_login_hint
 from kitaru.cli.workspace_push_references import (
     ReferenceMap,
     build_pushed_insight,
@@ -70,8 +68,7 @@ from kitaru.cli.workspace_push_references import (
 )
 from kitaru.cli.workspace_push_report import PushReport
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.credential_store import CredentialStore
-from kitaru.client.exceptions import APIError
+from kitaru.client.exceptions import APIError, InvalidServerResponseError
 
 PUSH_IMPORTED_FROM = "kitaru-workspace-push"
 _PAGE_SIZE = 200
@@ -82,6 +79,16 @@ _CONCURRENCY = 8
 
 class _SessionCopyError(Exception):
     """Raised when a session copy fails for a reason the API did not state."""
+
+
+_RECORD_ERRORS = (
+    APIError,
+    httpx.TransportError,
+    InvalidServerResponseError,
+    ValidationError,
+    _SessionCopyError,
+)
+"""Failures that end the copy of one record and leave the others running."""
 
 
 @dataclass(slots=True)
@@ -110,57 +117,40 @@ class _Push:
     report: PushReport
     sessions: dict[uuid.UUID, uuid.UUID] = field(default_factory=dict)
     """Source session id to destination session id."""
+    unsettled: dict[str, tuple[str, bool]] = field(default_factory=dict)
+    """Source id that failed in this run to why, and whether a rerun can fix it."""
 
+    def fail(
+        self,
+        kind: str,
+        record: str,
+        error: Exception,
+        source_id: uuid.UUID | None = None,
+    ) -> None:
+        """Report one record that failed to copy.
 
-@asynccontextmanager
-async def open_destination_client(
-    destination: str, credential_store: CredentialStore, timeout: float
-) -> AsyncGenerator[KitaruAPIClient]:
-    """Open an SDK client for the destination with its stored credential.
+        Args:
+            kind: Kind of the record.
+            record: Name or id of the record.
+            error: Failure that ended its copy.
+            source_id: Source id of the record, kept so that insights
+                referencing it wait for a run that copies it.
 
-    ``KITARU_API_KEY`` is ignored here because it authenticates the source
-    server of the same invocation.
-
-    Args:
-        destination: Destination server URL.
-        credential_store: Store holding the destination's credential.
-        timeout: HTTP timeout in seconds.
-
-    Raises:
-        CLIError: No credential is stored for the destination.
-
-    Yields:
-        Client authenticated against the destination.
-    """
-    stored = credential_store.get(destination)
-    if stored is None:
-        raise CLIError(
-            "authentication_failed",
-            f"No stored credential for the destination {destination}.",
-            hint=_build_login_hint(destination),
-        )
-    client = build_api_client(
-        destination,
-        ResolvedCredential("stored", stored=stored),
-        credential_store,
-        timeout,
-    )
-    try:
-        yield client
-    finally:
-        await client.close()
-
-
-def validate_destination(destination: str, source_url: str) -> str:
-    """Normalize the destination URL and require it to differ from the source."""
-    destination_url = validate_server_url(destination)
-    if destination_url == source_url:
-        raise CLIError(
-            "invalid_arguments",
-            f"The destination {destination_url} is the source server.",
-            hint="Select the source with --server and name another server in --to.",
-        )
-    return destination_url
+        Raises:
+            APIError: The destination rejected the credential, which would
+                fail every remaining record too.
+        """
+        if isinstance(error, APIError) and _is_auth_failure(error):
+            raise error
+        message, retryable = _describe_failure(error)
+        self.report.fail(kind, record, message, retryable=retryable)
+        if source_id is not None:
+            self.references.add_unmapped(source_id, kind.removesuffix("s"))
+            self.unsettled[str(source_id)] = (
+                f"{kind.removesuffix('s').replace('_', ' ')} {record}, which "
+                "failed to copy",
+                retryable,
+            )
 
 
 async def push_workspace(
@@ -176,8 +166,8 @@ async def push_workspace(
 
     Records are matched before they are written, so a repeated push creates
     nothing twice. Agents and connections match by name, agent versions by
-    version number, sessions by ``imported_from`` and ``external_id`` within
-    their agent, and insights by the source id recorded in their metadata.
+    content, sessions by ``imported_from`` and ``external_id`` within their
+    agent, and insights by the source id recorded in their metadata.
 
     Args:
         source: Client for the server to copy from.
@@ -215,10 +205,10 @@ async def push_workspace(
 def get_session_identity(session: SessionResponse) -> tuple[str, str]:
     """Return the ``imported_from`` and ``external_id`` of a session's copy.
 
-    A source identity is kept, so the copy also deduplicates against a later
-    import of the same trace. A missing half is filled from the push itself
-    and the source session id, which makes the pair unique and stable across
-    reruns.
+    A complete source identity is kept, so the copy also deduplicates
+    against a later import of the same trace. A partial one is replaced by
+    the push itself and the source session id: the database treats a NULL
+    as distinct, so several source sessions can share the other half.
 
     Args:
         session: Source session.
@@ -226,10 +216,39 @@ def get_session_identity(session: SessionResponse) -> tuple[str, str]:
     Returns:
         ``imported_from`` and ``external_id`` the destination session carries.
     """
-    return (
-        session.imported_from or PUSH_IMPORTED_FROM,
-        session.external_id or str(session.id),
+    if session.imported_from is not None and session.external_id is not None:
+        return session.imported_from, session.external_id
+    return PUSH_IMPORTED_FROM, str(session.id)
+
+
+def build_version_request(version: AgentVersionResponse) -> AgentVersionCreateRequest:
+    """Build the destination copy of a source agent version.
+
+    Secret ids are dropped from the run spec, because they name source
+    records the destination rejects.
+
+    Args:
+        version: Source agent version.
+
+    Returns:
+        Request creating the copy.
+    """
+    run_spec = version.run_spec
+    if run_spec is not None and run_spec.secret_ids:
+        run_spec = run_spec.model_copy(update={"secret_ids": []})
+    return AgentVersionCreateRequest(
+        display_version=version.display_version,
+        description=version.description,
+        run_spec=run_spec,
+        capabilities=version.capabilities,
     )
+
+
+def get_version_content(version: AgentVersionResponse) -> str:
+    """Return the content a version copy repeats, as a comparable key."""
+    request = build_version_request(version)
+    # Sort keys because a server may store JSON maps in another key order.
+    return json.dumps(request.model_dump(mode="json"), sort_keys=True)
 
 
 def build_ingest_request(
@@ -270,14 +289,6 @@ def build_ingest_request(
     )
 
 
-def _build_login_hint(destination: str) -> str:
-    """Build the hint for a destination that needs a fresh credential."""
-    return (
-        f"Run `kitaru login {destination}`, then rerun the push with `--server` "
-        "naming the source."
-    )
-
-
 def _filter_by_agent(agent_id: uuid.UUID) -> FilterCondition:
     """Build the list filter selecting one agent's records."""
     return FilterCondition(field="agent_id", op=FilterOp.EQ, value=str(agent_id))
@@ -294,10 +305,25 @@ def _is_auth_failure(error: APIError) -> bool:
     return error.status_code in {httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN}
 
 
-def _reraise_fatal(error: APIError) -> None:
-    """Raise failures that would repeat for every remaining record."""
-    if _is_auth_failure(error):
-        raise error
+def _describe_failure(error: Exception) -> tuple[str, bool]:
+    """Describe a record failure in bounded text and whether a rerun can fix it."""
+    if isinstance(error, APIError):
+        retryable = (
+            error.status_code in {httpx.codes.CONFLICT, httpx.codes.TOO_MANY_REQUESTS}
+            or error.status_code >= httpx.codes.INTERNAL_SERVER_ERROR
+        )
+        return _describe_error(error), retryable
+    if isinstance(error, ValidationError):
+        location, problem = describe_validation_error(error)
+        return f"The source record has invalid {location}: {problem}.", False
+    if isinstance(error, _SessionCopyError):
+        return str(error), True
+    name = type(error).__name__
+    detail = str(error).strip()[:_MAX_ERROR_LENGTH]
+    message = f"{name}: {detail}" if detail else name
+    # A dropped connection can succeed on a rerun, while a response the
+    # client cannot read would fail the same way again.
+    return message, isinstance(error, httpx.TransportError)
 
 
 @asynccontextmanager
@@ -359,7 +385,7 @@ async def _list_destination_agents(push: _Push) -> dict[str, AgentResponse]:
             "authentication_failed",
             f"The destination {destination} rejected its stored credential.",
             details={"status_code": error.status_code},
-            hint=_build_login_hint(destination),
+            hint=build_login_hint(destination),
         ) from error
 
 
@@ -379,10 +405,8 @@ async def _push_agent(
         created = await push.destination.agents.create(
             AgentCreateRequest(name=agent.name, description=agent.description)
         )
-    except APIError as error:
-        _reraise_fatal(error)
-        push.references.add_unmapped(agent.id, "agent")
-        push.report.fail("agents", agent.name, _describe_error(error))
+    except _RECORD_ERRORS as error:
+        push.fail("agents", agent.name, error, agent.id)
         return _AgentPair(agent, None, failed=True)
     push.references.add(agent.id, created.id)
     push.report.count("agents", "copied")
@@ -390,10 +414,12 @@ async def _push_agent(
 
 
 async def _push_agent_versions(push: _Push, pair: _AgentPair) -> None:
-    """Copy the versions of one agent, matching them by version number.
+    """Copy the versions of one agent, matching them by content.
 
-    A version is created only while it would receive its source number,
-    which keeps the number-based match valid for the next run.
+    A server numbers versions itself and never reuses a deleted number, so
+    numbers cannot match a copy to its source. Each destination version
+    stands in for at most one source version, in number order, which keeps
+    two versions of the same content apart.
     """
     versions = sorted(
         [
@@ -416,60 +442,49 @@ async def _push_agent_versions(push: _Push, pair: _AgentPair) -> None:
                 "Its agent was not copied.",
             )
         return
-    existing: dict[int, AgentVersionResponse] = {}
-    next_number = 1
-    if pair.destination is not None:
-        next_number = pair.destination.latest_version + 1
-        if pair.has_earlier_records:
-            existing = {
-                version.version: version
-                async for version in push.destination.agents.iter_versions(
-                    pair.destination.id, AgentVersionListParams(size=_PAGE_SIZE)
-                )
-            }
+    available: defaultdict[str, list[AgentVersionResponse]] = defaultdict(list)
+    if pair.destination is not None and pair.has_earlier_records:
+        existing = [
+            version
+            async for version in push.destination.agents.iter_versions(
+                pair.destination.id, AgentVersionListParams(size=_PAGE_SIZE)
+            )
+        ]
+        for version in sorted(existing, key=lambda version: version.version):
+            available[get_version_content(version)].append(version)
     dropped_secrets = False
+    renumbered = False
     for version in versions:
         record = f"{agent_name}@{version.version}"
-        match = existing.get(version.version)
-        if match is not None:
+        candidates = available.get(get_version_content(version))
+        if candidates:
+            match = candidates.pop(0)
             push.references.add(version.id, match.id)
             push.report.count("agent_versions", "already_present")
-            continue
-        if version.version != next_number:
-            push.references.add_unmapped(version.id, "agent_version")
-            push.report.skip(
-                "agent_versions",
-                record,
-                "The destination agent's version numbers differ from the source.",
-            )
+            renumbered |= match.version != version.version
             continue
         if pair.destination is None or push.report.dry_run:
             push.report.count("agent_versions", "copied")
-            next_number += 1
             continue
-        run_spec = version.run_spec
-        if run_spec is not None and run_spec.secret_ids:
-            # Secret ids name source records, which the destination rejects.
-            run_spec = run_spec.model_copy(update={"secret_ids": []})
-            dropped_secrets = True
+        request = build_version_request(version)
         try:
             created = await push.destination.agents.create_version(
-                pair.destination.id,
-                AgentVersionCreateRequest(
-                    display_version=version.display_version,
-                    description=version.description,
-                    run_spec=run_spec,
-                    capabilities=version.capabilities,
-                ),
+                pair.destination.id, request
             )
-        except APIError as error:
-            _reraise_fatal(error)
-            push.references.add_unmapped(version.id, "agent_version")
-            push.report.fail("agent_versions", record, _describe_error(error))
+        except _RECORD_ERRORS as error:
+            push.fail("agent_versions", record, error, version.id)
             continue
         push.references.add(version.id, created.id)
         push.report.count("agent_versions", "copied")
-        next_number = created.version + 1
+        renumbered |= created.version != version.version
+        dropped_secrets |= request.run_spec != version.run_spec
+    if renumbered:
+        push.report.warnings.append(
+            f"Some versions of agent {agent_name!r} carry other numbers on "
+            f"{push.references.destination_url} than on the source, because "
+            "a server numbers versions itself. Copied sessions and insights "
+            "point at the matching copies."
+        )
     if dropped_secrets:
         push.report.warnings.append(
             f"Agent {agent_name!r} has versions whose run spec names secrets. "
@@ -497,37 +512,56 @@ async def _push_connections(push: _Push) -> None:
         ConnectionListParams(sort="created:asc", size=_PAGE_SIZE)
     ):
         match = existing.get(connection.name)
+        if match is not None and match.provider != connection.provider:
+            push.report.fail(
+                "connections",
+                connection.name,
+                f"The destination connection of this name addresses provider "
+                f"{match.provider!r}, not {connection.provider!r}. Rename one "
+                "of them, then rerun.",
+                retryable=False,
+            )
+            continue
         stored_keys = set(match.secret_keys) if match is not None else set()
+        missing_keys = set(connection.secret_keys) - stored_keys
+        # A default without its secret values would be selected for jobs on
+        # the destination and unset the missing keys from their environment,
+        # so it becomes the default only once it is complete.
+        wants_default = (
+            connection.default and connection.provider not in default_providers
+        )
         if match is not None:
             push.report.count("connections", "already_present")
+            if match.env != connection.env:
+                push.report.warnings.append(
+                    f"Connection {connection.name!r} on "
+                    f"{push.references.destination_url} has other non-secret "
+                    "values than on the source. The push left them unchanged."
+                )
         elif push.report.dry_run:
             push.report.count("connections", "copied")
         else:
-            # Keep the default the destination already has, because a
-            # provider allows one and a second is rejected.
-            default = (
-                connection.default and connection.provider not in default_providers
-            )
             try:
                 await push.destination.connections.create(
                     ConnectionCreateRequest(
                         name=connection.name,
                         provider=connection.provider,
                         env=connection.env,
-                        default=default,
+                        default=wants_default and not missing_keys,
                     )
                 )
-            except APIError as error:
-                _reraise_fatal(error)
-                push.report.fail("connections", connection.name, _describe_error(error))
+            except _RECORD_ERRORS as error:
+                push.fail("connections", connection.name, error)
                 continue
-            if default:
-                default_providers.add(connection.provider)
             push.report.count("connections", "copied")
-        missing_keys = set(connection.secret_keys) - stored_keys
+        if wants_default:
+            default_providers.add(connection.provider)
         if missing_keys:
             push.report.add_incomplete_connection(
-                connection.name, missing_keys, stored_keys
+                connection.name,
+                missing_keys,
+                stored_keys,
+                make_default=wants_default,
             )
 
 
@@ -570,6 +604,11 @@ async def _push_sessions(push: _Push, pair: _AgentPair) -> None:
             if reason is not None:
                 push.references.add_unmapped(session.id, "session")
                 push.report.skip("sessions", str(session.id), reason)
+                if pair.failed:
+                    push.unsettled[str(session.id)] = (
+                        f"session {session.id}, whose agent failed to copy",
+                        True,
+                    )
                 continue
             match = existing.get(get_session_identity(session))
             if match is not None:
@@ -621,17 +660,8 @@ async def _copy_session(
         destination_id, copied = await _ingest_session(
             push, session, agent_id, agent_version_id
         )
-    except (APIError, ValidationError, _SessionCopyError) as error:
-        if isinstance(error, APIError):
-            _reraise_fatal(error)
-            message = _describe_error(error)
-        elif isinstance(error, ValidationError):
-            location, problem = describe_validation_error(error)
-            message = f"The source session has invalid {location}: {problem}."
-        else:
-            message = str(error)
-        push.references.add_unmapped(session.id, "session")
-        push.report.fail("sessions", str(session.id), message)
+    except _RECORD_ERRORS as error:
+        push.fail("sessions", str(session.id), error, session.id)
         return
     _record_session(push, session.id, destination_id)
     push.report.count("sessions", "copied" if copied else "already_present")
@@ -691,22 +721,50 @@ async def _ingest_session(
 
 
 async def _push_insights(push: _Push, pairs: list[_AgentPair]) -> None:
-    """Copy the insights of every agent with their references rewritten."""
+    """Copy the insights of every agent with their references rewritten.
+
+    An insight that references a record which failed to copy in this run is
+    not written, because a written copy is never rewritten again and would
+    keep pointing at the source.
+    """
     pending = [(pair, await _list_pending_insights(push, pair)) for pair in pairs]
+    references = {
+        insight.id: find_uuids(insight.model_dump_json())
+        for _, insights in pending
+        for insight in insights
+    }
     if not push.report.dry_run:
-        await _map_referenced_nodes(
-            push, [insight for _, insights in pending for insight in insights]
-        )
+        await _map_referenced_nodes(push, set().union(*references.values()))
     for pair, insights in pending:
         if pair.destination is None or push.report.dry_run:
             push.report.count("insights", "copied", len(insights))
             continue
-        for start in range(0, len(insights), MAX_INSIGHT_BATCH_SIZE):
+        ready = [
+            insight
+            for insight in insights
+            if not _defer_insight(push, insight, references[insight.id])
+        ]
+        for start in range(0, len(ready), MAX_INSIGHT_BATCH_SIZE):
             await _create_insights(
                 push,
                 pair.destination.id,
-                insights[start : start + MAX_INSIGHT_BATCH_SIZE],
+                ready[start : start + MAX_INSIGHT_BATCH_SIZE],
             )
+
+
+def _defer_insight(push: _Push, insight: InsightResponse, references: set[str]) -> bool:
+    """Fail an insight that references a record this run failed to copy."""
+    unsettled = sorted(references & push.unsettled.keys())
+    if not unsettled:
+        return False
+    reason, retryable = push.unsettled[unsettled[0]]
+    push.report.fail(
+        "insights",
+        str(insight.id),
+        f"Not copied, because it references {reason}.",
+        retryable=retryable,
+    )
+    return True
 
 
 async def _list_pending_insights(
@@ -756,10 +814,9 @@ async def _create_insights(
         await push.destination.insights.create(
             agent_id, [pushed for pushed, _ in built]
         )
-    except APIError as error:
-        _reraise_fatal(error)
+    except _RECORD_ERRORS as error:
         for insight in insights:
-            push.report.fail("insights", str(insight.id), _describe_error(error))
+            push.fail("insights", str(insight.id), error)
         return
     push.report.count("insights", "copied", len(insights))
     for insight, (_, unmapped) in zip(insights, built, strict=True):
@@ -767,16 +824,14 @@ async def _create_insights(
             push.report.add_unmapped(insight, unmapped)
 
 
-async def _map_referenced_nodes(push: _Push, insights: list[InsightResponse]) -> None:
+async def _map_referenced_nodes(push: _Push, referenced: set[str]) -> None:
     """Map the nodes of every copied session the insights reference.
 
     Nodes get new ids on the destination and match their source by
     ``external_id``. Only referenced sessions are read, because most sessions
-    are never cited by an insight.
+    are never cited by an insight. A session whose nodes cannot be listed
+    holds back the insights that reference it.
     """
-    referenced: set[str] = set()
-    for insight in insights:
-        referenced |= find_uuids(insight.model_dump_json())
     slots = asyncio.Semaphore(_CONCURRENCY)
 
     async def list_nodes(
@@ -790,11 +845,21 @@ async def _map_referenced_nodes(push: _Push, insights: list[InsightResponse]) ->
         }
 
     async def map_nodes(source_id: uuid.UUID, destination_id: uuid.UUID) -> None:
-        async with slots:
-            source_nodes, destination_nodes = await asyncio.gather(
-                list_nodes(push.source, source_id),
-                list_nodes(push.destination, destination_id),
+        try:
+            async with slots:
+                source_nodes, destination_nodes = await asyncio.gather(
+                    list_nodes(push.source, source_id),
+                    list_nodes(push.destination, destination_id),
+                )
+        except _RECORD_ERRORS as error:
+            if isinstance(error, APIError) and _is_auth_failure(error):
+                raise
+            message, retryable = _describe_failure(error)
+            push.unsettled[str(source_id)] = (
+                f"session {source_id}, whose nodes could not be listed: {message}",
+                retryable,
             )
+            return
         for external_id, node_id in source_nodes.items():
             match = destination_nodes.get(external_id)
             if match is None:

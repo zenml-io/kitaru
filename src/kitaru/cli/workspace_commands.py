@@ -13,7 +13,7 @@
 #  permissions and limitations under the License.
 """Workspace commands."""
 
-from kitaru.cli import invocation_context, workspace_push
+from kitaru.cli import invocation_context, workspace_push, workspace_push_destination
 from kitaru.cli.command_registry import (
     ASSET_WRITE_ERRORS,
     build_spec,
@@ -39,7 +39,8 @@ from kitaru.cli.workspace_push_report import build_push_result, describe_not_cop
                 "option",
                 True,
                 "Destination server URL. Uses the credential stored by "
-                "`kitaru login URL`.",
+                "`kitaru login URL` when the destination requires "
+                "authentication.",
             ),
             ParameterSpec(
                 "--agent",
@@ -73,11 +74,15 @@ async def workspace_push_command(
     """Copy workspace content from the selected server to another server."""
     invocation = get_invocation()
     source_url = invocation.resolve_target().server_url
-    destination_url = workspace_push.validate_destination(to, source_url)
+    destination_url = workspace_push_destination.validate_destination(to, source_url)
     async with (
         invocation_context.open_asset_client() as source,
-        workspace_push.open_destination_client(
-            destination_url, invocation.credential_store, invocation.request_timeout
+        workspace_push_destination.open_destination_client(
+            destination_url,
+            source,
+            source_url=source_url,
+            credential_store=invocation.credential_store,
+            timeout=invocation.request_timeout,
         ) as destination,
     ):
         report = await workspace_push.push_workspace(

@@ -33,7 +33,7 @@ from tests.cli.workspace_push_fakes import (
 )
 
 from kitaru.api_models.v1.agent import AgentCreateRequest, AgentListParams
-from kitaru.api_models.v1.agent_version import AgentVersionCreateRequest
+from kitaru.api_models.v1.agent_version import AgentVersionCreateRequest, RunSpec
 from kitaru.api_models.v1.connection import (
     ConnectionCreateRequest,
     ConnectionListParams,
@@ -252,7 +252,11 @@ async def test_push_again_copies_only_new_records_and_maps_old_sessions(
 async def test_push_copies_connections_without_their_secret_values(
     source: KitaruAPIClient, destination: KitaruAPIClient
 ) -> None:
-    """A connection arrives with its non-secret values and names what it lacks."""
+    """A connection arrives with its non-secret values and names what it lacks.
+
+    The source default stays a plain connection until its secret values are
+    set, because a default without them would break destination jobs.
+    """
     await seed_workspace(source)
 
     report = await push(source, destination)
@@ -260,7 +264,7 @@ async def test_push_copies_connections_without_their_secret_values(
     command = (
         f"kitaru --server {DESTINATION_URL} connection update langfuse-prod "
         "--set-secret LANGFUSE_PUBLIC_KEY=<value> "
-        "--set-secret LANGFUSE_SECRET_KEY=<value>"
+        "--set-secret LANGFUSE_SECRET_KEY=<value> --default"
     )
     assert report.counts["connections"] == build_counts(copied=2)
     assert report.incomplete_connections == [
@@ -278,7 +282,7 @@ async def test_push_copies_connections_without_their_secret_values(
         "LANGFUSE_BASE_URL": "https://cloud.langfuse.com"
     }
     assert connections["langfuse-prod"].secret_keys == []
-    assert connections["langfuse-prod"].default is True
+    assert connections["langfuse-prod"].default is False
     assert connections["internal-tracing"].provider == "internal"
     result = build_push_result(report)
     assert any("incomplete_connections" in warning for warning in result.warnings)
@@ -312,7 +316,7 @@ async def test_push_reports_missing_secret_keys_until_they_are_set(
             "missing_keys": ["LANGFUSE_SECRET_KEY"],
             "command": f"kitaru --server {DESTINATION_URL} connection update "
             "langfuse-prod --set-secret LANGFUSE_PUBLIC_KEY=<value> "
-            "--set-secret LANGFUSE_SECRET_KEY=<value>",
+            "--set-secret LANGFUSE_SECRET_KEY=<value> --default",
         }
     ]
 
@@ -348,6 +352,8 @@ async def test_push_keeps_the_default_connection_of_the_destination(
     report = await push(source, destination)
 
     assert report.failures == 0
+    [incomplete] = report.incomplete_connections
+    assert not incomplete["command"].endswith("--default")
     defaults = {
         connection.name: connection.default
         async for connection in destination.connections.iter()
@@ -357,6 +363,60 @@ async def test_push_keeps_the_default_connection_of_the_destination(
         "langfuse-prod": False,
         "internal-tracing": False,
     }
+
+
+async def test_push_makes_a_complete_source_default_the_destination_default(
+    source: KitaruAPIClient, destination: KitaruAPIClient
+) -> None:
+    """A default that needs no secret values stays the default on the copy."""
+    await source.connections.create(
+        ConnectionCreateRequest(
+            name="internal-tracing",
+            provider="internal",
+            env={"BASE_URL": "https://tracing.example.com"},
+            default=True,
+        )
+    )
+
+    report = await push(source, destination)
+
+    assert report.incomplete_connections == []
+    [copy] = [connection async for connection in destination.connections.iter()]
+    assert copy.default is True
+
+
+async def test_push_refuses_a_same_named_connection_of_another_provider(
+    source: KitaruAPIClient, destination: KitaruAPIClient
+) -> None:
+    """A name match is a conflict when the providers differ, never a secret prompt."""
+    await seed_workspace(source)
+    await destination.connections.create(
+        ConnectionCreateRequest(name="langfuse-prod", provider="braintrust")
+    )
+    await destination.connections.create(
+        ConnectionCreateRequest(
+            name="internal-tracing",
+            provider="internal",
+            env={"BASE_URL": "https://other.example.com"},
+        )
+    )
+
+    report = await push(source, destination)
+
+    assert report.counts["connections"] == build_counts(already_present=1, failed=1)
+    [failure] = report.failed
+    assert failure["kind"] == "connections"
+    assert failure["record"] == "langfuse-prod"
+    assert "'braintrust'" in failure["error"]
+    assert failure["retryable"] is False
+    assert report.incomplete_connections == []
+    assert any(
+        "'internal-tracing'" in warning and "non-secret values" in warning
+        for warning in report.warnings
+    )
+    with pytest.raises(CLIError) as raised:
+        build_push_result(report)
+    assert raised.value.retryable is False
 
 
 async def test_push_dry_run_writes_nothing(
@@ -473,29 +533,92 @@ async def test_push_resolves_a_session_created_after_the_destination_listing(
     assert insight.description == f"Seen in {present.id}."
 
 
-async def test_push_matches_versions_by_number_and_appends_the_rest(
+async def test_push_matches_versions_by_content_and_appends_the_rest(
     source: KitaruAPIClient, destination: KitaruAPIClient
 ) -> None:
-    """A version is created only under the number its source carries."""
+    """A destination version stands in for a source version only when they match."""
     seed = await seed_workspace(source)
-    for number in range(2, 6):
+    for number in range(2, 4):
         await source.agents.create_version(
             seed.agent_id, AgentVersionCreateRequest(display_version=f"v{number}")
         )
     existing = await destination.agents.create(AgentCreateRequest(name="support"))
-    for _ in range(3):
-        await destination.agents.create_version(
-            existing.id, AgentVersionCreateRequest()
-        )
+    await destination.agents.create_version(
+        existing.id,
+        AgentVersionCreateRequest(
+            display_version="v1", run_spec=RunSpec(command="python other.py")
+        ),
+    )
+    await destination.agents.create_version(
+        existing.id, AgentVersionCreateRequest(display_version="v2")
+    )
 
     report = await push(source, destination)
 
-    assert report.counts["agent_versions"] == build_counts(copied=2, already_present=3)
+    assert report.counts["agent_versions"] == build_counts(copied=2, already_present=1)
     versions = {
-        version.version: version.display_version
+        version.version: (
+            version.display_version,
+            None if version.run_spec is None else version.run_spec.command,
+        )
         async for version in destination.agents.iter_versions(existing.id)
     }
-    assert versions == {1: None, 2: None, 3: None, 4: "v4", 5: "v5"}
+    assert versions == {
+        1: ("v1", "python other.py"),
+        2: ("v2", None),
+        3: ("v1", "python agent.py"),
+        4: ("v3", None),
+    }
+    [imported] = [
+        session
+        async for session in destination.sessions.iter()
+        if session.external_id == "trace-42"
+    ]
+    [copy] = [
+        version
+        async for version in destination.agents.iter_versions(existing.id)
+        if version.version == 3
+    ]
+    assert imported.agent_version_id == copy.id
+    assert any("other numbers" in warning for warning in report.warnings)
+    rerun = await push(source, destination)
+    assert rerun.counts["agent_versions"] == build_counts(already_present=3)
+
+
+async def test_push_copies_versions_after_a_deleted_source_version(
+    source: KitaruAPIClient, destination: KitaruAPIClient
+) -> None:
+    """A gap in the source numbers neither skips later versions nor their sessions."""
+    agent = await source.agents.create(AgentCreateRequest(name="gappy"))
+    first = await source.agents.create_version(
+        agent.id, AgentVersionCreateRequest(display_version="one")
+    )
+    deleted = await source.agents.create_version(
+        agent.id, AgentVersionCreateRequest(display_version="two")
+    )
+    third = await source.agents.create_version(
+        agent.id, AgentVersionCreateRequest(display_version="three")
+    )
+    await source.request("DELETE", f"/api/v1/agent-versions/{deleted.id}")
+    await ingest_session(
+        source, agent.id, third.id, imported_from="langfuse", external_id="t3"
+    )
+
+    report = await push(source, destination)
+
+    assert first.version == 1
+    assert third.version == 3
+    assert report.counts["agent_versions"] == build_counts(copied=2)
+    assert report.failures == 0
+    [copy] = [agent async for agent in destination.agents.iter()]
+    versions = {
+        version.display_version: version
+        async for version in destination.agents.iter_versions(copy.id)
+    }
+    assert set(versions) == {"one", "three"}
+    [session] = [session async for session in destination.sessions.iter()]
+    assert session.agent_version_id == versions["three"].id
+    assert not any("without an agent version" in w for w in report.warnings)
 
 
 async def test_push_copies_the_nodes_of_a_recorded_session(
@@ -555,6 +678,7 @@ async def test_push_copies_many_sessions_and_isolates_one_failure(
 
     assert report.counts["sessions"] == build_counts(copied=29, failed=1)
     assert [item["error"] for item in report.failed] == ["HTTP 500: boom"]
+    assert report.retryable is True
     assert 1 < peak <= 8
     monkeypatch.undo()
     retried = await push(source, destination)
