@@ -525,7 +525,8 @@ async def ingest_session(
         parsed: Imported session.
         agent_id: Agent the session is created under, None resolves it from
             the task.
-        provider: Source system named on the import.
+        provider: Source system named on the import. Required when initial
+            nodes accompany a terminal session whose origin is not IMPORTED.
         origin: Session origin.
 
     Raises:
@@ -533,8 +534,8 @@ async def ingest_session(
         SessionImportError: The imported node tree is invalid.
 
     Returns:
-        Created session, None when a session with the external id already
-        exists.
+        Created session, None only when the same agent already has a session
+        with the requested source provider and external id.
     """
     request = SessionIngestRequest(
         session=session_request(parsed, agent_id, provider, origin),
@@ -544,7 +545,15 @@ async def ingest_session(
         return await client.sessions.ingest(request)
     except APIError as exc:
         if exc.status_code == httpx.codes.CONFLICT:
-            return None
+            legacy_detail = (
+                f"Session with imported_from '{request.session.imported_from}' "
+                f"and external_id '{request.session.external_id}' "
+                "is already registered"
+            )
+            if exc.code == "duplicate_session_external_id" or (
+                exc.code is None and exc.detail == legacy_detail
+            ):
+                return None
         raise
 
 
