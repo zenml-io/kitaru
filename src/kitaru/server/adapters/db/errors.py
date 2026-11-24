@@ -107,5 +107,5 @@ def violated_constraint(exc: IntegrityError) -> str | None:
     cause = exc.orig.__cause__ if exc.orig is not None else None
     if isinstance(cause, asyncpg.exceptions.IntegrityConstraintViolationError):
         # The driver generates this attribute dynamically, invisible to ty.
-        return cause.constraint_name  # ty: ignore[unresolved-attribute]
+        return cause.constraint_name  # ty: ignore[missing-attribute]
     return None
