@@ -2627,6 +2627,18 @@
       "ErrorBody": {
         "description": "Error body.",
         "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Machine-readable error code.",
+            "title": "Code"
+          },
           "detail": {
             "description": "Error message.",
             "title": "Detail",
@@ -2713,6 +2725,29 @@
           "replays"
         ],
         "title": "EvaluationAggregateResponse",
+        "type": "object"
+      },
+      "EvaluationBaselineContext": {
+        "description": "Baseline identity and case metadata for evaluating a replay result.",
+        "properties": {
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Baseline session metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "session_id": {
+            "description": "Baseline session.",
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "metadata"
+        ],
+        "title": "EvaluationBaselineContext",
         "type": "object"
       },
       "EvaluationBatchCreateRequest": {
@@ -3182,6 +3217,17 @@
       "EvaluationTaskDetails": {
         "description": "Evaluation task details.",
         "properties": {
+          "baseline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvaluationBaselineContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Baseline metadata when the scored session is a replay result."
+          },
           "evaluator_name": {
             "description": "Name the evaluator emits results under.",
             "title": "Evaluator Name",

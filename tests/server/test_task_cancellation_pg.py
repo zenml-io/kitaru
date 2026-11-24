@@ -90,6 +90,7 @@ def _build_task_service(
 ) -> TaskService:
     """Build a task service on the SQL repositories of one session."""
     policy = TaskPolicy()
+    sessions = SQLSessionRepository(session, engine)
     spec_builder = TaskSpecBuilder(
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
@@ -100,6 +101,7 @@ def _build_task_service(
         replay_repository=SQLReplayRepository(session),
         import_repository=SQLImportRepository(session),
         connection_repository=SQLConnectionRepository(session),
+        session_repository=sessions,
         policy=policy,
     )
     transitions = TaskTransitions(
@@ -110,7 +112,7 @@ def _build_task_service(
     return TaskService(
         repository=SQLTaskRepository(session),
         worker_repository=SQLWorkerRepository(session),
-        session_repository=SQLSessionRepository(session, engine),
+        session_repository=sessions,
         job_repository=SQLJobRepository(session),
         replay_repository=SQLReplayRepository(session),
         spec_builder=spec_builder,

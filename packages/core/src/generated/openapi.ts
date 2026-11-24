@@ -5767,6 +5767,11 @@ export interface components {
          */
         ErrorBody: {
             /**
+             * Code
+             * @description Machine-readable error code.
+             */
+            code?: string | null;
+            /**
              * Detail
              * @description Error message.
              */
@@ -5808,6 +5813,25 @@ export interface components {
             replays: components["schemas"]["ReplayEvaluationValues"][];
             /** @description Stats over the result sessions. */
             result: components["schemas"]["EvaluationStats"];
+        };
+        /**
+         * EvaluationBaselineContext
+         * @description Baseline identity and case metadata for evaluating a replay result.
+         */
+        EvaluationBaselineContext: {
+            /**
+             * Metadata
+             * @description Baseline session metadata.
+             */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /**
+             * Session Id
+             * Format: uuid
+             * @description Baseline session.
+             */
+            session_id: string;
         };
         /**
          * EvaluationBatchCreateRequest
@@ -6040,6 +6064,8 @@ export interface components {
          * @description Evaluation task details.
          */
         EvaluationTaskDetails: {
+            /** @description Baseline metadata when the scored session is a replay result. */
+            baseline?: components["schemas"]["EvaluationBaselineContext"] | null;
             /**
              * Evaluator Name
              * @description Name the evaluator emits results under.

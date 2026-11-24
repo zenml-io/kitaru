@@ -56,16 +56,20 @@ class AgentRegistrationError(KitaruClientError):
 class APIError(KitaruClientError):
     """API error."""
 
-    def __init__(self, status_code: int, detail: str) -> None:
+    def __init__(
+        self, status_code: int, detail: str, *, code: str | None = None
+    ) -> None:
         """Initialize the error.
 
         Args:
             status_code: HTTP status code.
             detail: Error detail.
+            code: Optional machine-readable error code.
         """
         super().__init__(f"{status_code}: {detail}")
         self.status_code = status_code
         self.detail = detail
+        self.code = code
 
 
 _MASTRA_REPLAY_REFUSAL = re.compile(
@@ -113,15 +117,23 @@ class ServerError(APIError):
 class TokenGrantError(APIError):
     """Token grant error."""
 
-    def __init__(self, status_code: int, detail: str, error: str) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        detail: str,
+        error: str,
+        *,
+        code: str | None = None,
+    ) -> None:
         """Initialize the error.
 
         Args:
             status_code: HTTP status code.
             detail: Error detail.
             error: OAuth 2.0 error code.
+            code: Optional machine-readable API error code.
         """
-        super().__init__(status_code, detail)
+        super().__init__(status_code, detail, code=code)
         self.error = error
 
 
@@ -145,6 +157,7 @@ def raise_for_response(response: httpx.Response) -> None:
 
     Raises:
         APIError: The response has an error status code.
+        InvalidServerResponseError: The response has a malformed error code.
     """
     if response.is_success:
         return
@@ -154,8 +167,15 @@ def raise_for_response(response: httpx.Response) -> None:
         payload = response.json()
     except ValueError:
         payload = None
-    if isinstance(payload, dict) and isinstance(payload.get("detail"), str):
-        detail = payload["detail"]
+    code = None
+    if isinstance(payload, dict):
+        code = payload.get("code")
+        if code is not None and not isinstance(code, str):
+            raise InvalidServerResponseError(
+                "Error response code must be a string or null"
+            )
+        if isinstance(payload.get("detail"), str):
+            detail = payload["detail"]
     if response.status_code == httpx.codes.BAD_REQUEST and isinstance(payload, dict):
         error = payload.get("error")
         if isinstance(error, str):
@@ -164,9 +184,9 @@ def raise_for_response(response: httpx.Response) -> None:
             description = payload.get("error_description")
             if isinstance(description, str):
                 detail = description
-            raise TokenGrantError(response.status_code, detail, error)
+            raise TokenGrantError(response.status_code, detail, error, code=code)
 
     error_class = _STATUS_ERRORS.get(response.status_code)
     if error_class is None:
         error_class = ServerError if response.status_code >= 500 else APIError
-    raise error_class(response.status_code, detail)
+    raise error_class(response.status_code, detail, code=code)
