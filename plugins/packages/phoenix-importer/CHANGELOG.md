@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Normalize OpenInference messages and tool calls, preserve message text, and populate prompt, reply, system prompt, and visible reasoning selectors for readable imported model calls.
 - Import prompt-cache writes from `gen_ai.usage.details.cache_write_tokens` or `llm.token_count.prompt_details.cache_write` as `cache_write_input_tokens`.
 
 ### Release context
