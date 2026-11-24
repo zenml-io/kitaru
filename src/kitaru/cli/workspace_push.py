@@ -72,6 +72,7 @@ from kitaru.client.exceptions import APIError, InvalidServerResponseError
 
 PUSH_IMPORTED_FROM = "kitaru-workspace-push"
 _PAGE_SIZE = 200
+_DUPLICATE_SESSION_CODE = "duplicate_session_external_id"
 _ID_PAGE_SIZE = 1000
 _MAX_ERROR_LENGTH = 300
 _CONCURRENCY = 8
@@ -305,11 +306,22 @@ def _is_auth_failure(error: APIError) -> bool:
     return error.status_code in {httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN}
 
 
+def _is_identity_conflict(error: APIError) -> bool:
+    """Return whether a conflict reports a record identity that already exists."""
+    # Servers before the conflict code send none, so an uncoded conflict is
+    # still treated as an identity conflict and settled by listing.
+    return error.status_code == httpx.codes.CONFLICT and error.code in (
+        None,
+        _DUPLICATE_SESSION_CODE,
+    )
+
+
 def _describe_failure(error: Exception) -> tuple[str, bool]:
     """Describe a record failure in bounded text and whether a rerun can fix it."""
     if isinstance(error, APIError):
         retryable = (
-            error.status_code in {httpx.codes.CONFLICT, httpx.codes.TOO_MANY_REQUESTS}
+            _is_identity_conflict(error)
+            or error.status_code == httpx.codes.TOO_MANY_REQUESTS
             or error.status_code >= httpx.codes.INTERNAL_SERVER_ERROR
         )
         return _describe_error(error), retryable
@@ -689,7 +701,7 @@ async def _ingest_session(
     try:
         created = await push.destination.sessions.ingest(request)
     except APIError as error:
-        if error.status_code != httpx.codes.CONFLICT:
+        if not _is_identity_conflict(error):
             raise
     else:
         return created.id, True

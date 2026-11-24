@@ -113,6 +113,34 @@ async def test_push_records_transport_failures_per_session(
     assert report.retryable is False
 
 
+async def test_push_fails_a_session_on_a_conflict_other_than_its_identity(
+    source: KitaruAPIClient,
+    destination: KitaruAPIClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a duplicate-identity conflict means the session is already there."""
+    agent = await source.agents.create(AgentCreateRequest(name="bulk"))
+    for index in range(2):
+        await ingest_session(
+            source, agent.id, imported_from="langfuse", external_id=f"trace-{index}"
+        )
+    ingest = destination.sessions.ingest
+
+    async def ingest_conflicting(request: SessionIngestRequest) -> SessionResponse:
+        if request.session.external_id == "trace-1":
+            raise APIError(409, "Node links conflict", code="node_link_conflict")
+        return await ingest(request)
+
+    monkeypatch.setattr(destination.sessions, "ingest", ingest_conflicting)
+
+    report = await push(source, destination)
+
+    assert report.counts["sessions"] == build_counts(copied=1, failed=1)
+    [failure] = report.failed
+    assert failure["error"] == "HTTP 409: Node links conflict"
+    assert failure["retryable"] is False
+
+
 async def test_push_holds_back_insights_of_a_failed_session(
     source: KitaruAPIClient,
     destination: KitaruAPIClient,
