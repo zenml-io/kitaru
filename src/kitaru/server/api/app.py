@@ -114,6 +114,7 @@ from kitaru.server.domain.base import (
     UpgradeRequiredError,
     ValidationError,
 )
+from kitaru.server.domain.session import DuplicateSessionExternalId
 from kitaru.server.ephemeral_worker_settings import EphemeralWorkerBackend
 from kitaru.server.utils import replace_non_finite_floats
 
@@ -129,7 +130,8 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
     409 for ``ConflictError``, 413 for ``PayloadTooLargeError``, 422 for
     ``ValidationError``, 426 for ``UpgradeRequiredError``, 503 for
     ``QueryTimeoutError``, and 500 for other ``DomainError`` subclasses. Each
-    body is ``{"detail": "<message>"}``.
+    body contains ``detail``. Duplicate session external IDs also include the
+    ``duplicate_session_external_id`` error code.
 
     Args:
         app: FastAPI application that will serve the v1 API.
@@ -148,7 +150,10 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(ConflictError)
     async def conflict(request: Request, exc: ConflictError) -> JSONResponse:
         _ = request
-        return JSONResponse(status_code=409, content={"detail": str(exc)})
+        content = {"detail": str(exc)}
+        if isinstance(exc, DuplicateSessionExternalId):
+            content["code"] = "duplicate_session_external_id"
+        return JSONResponse(status_code=409, content=content)
 
     @app.exception_handler(UpgradeRequiredError)
     async def upgrade_required(
