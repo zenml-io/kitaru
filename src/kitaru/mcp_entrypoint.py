@@ -33,6 +33,8 @@ options:
   --handler-timeout SECONDS  total handler timeout (default: 120)
   --pool-size COUNT          HTTP connection pool size (default: 20)
   --max-concurrency COUNT    concurrent handler limit (default: 10)
+  --viewers-dir PATH         folder of custom trace viewers
+                             (default: ~/.config/kitaru/viewers)
   --debug                    enable redacted stderr diagnostics
 
 Install the optional server dependency with pip install 'kitaru[mcp]'.
