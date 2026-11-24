@@ -161,6 +161,7 @@ class ErrorBody(ResponseModel):
     """Error body."""
 
     detail: str = Field(description="Error message.")
+    code: str | None = Field(default=None, description="Machine-readable error code.")
 
 
 class ValidationErrorItem(ResponseModel):
