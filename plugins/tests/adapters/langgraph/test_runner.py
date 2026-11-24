@@ -16,6 +16,8 @@ from langgraph.types import Command, GraphOutput, Interrupt
 
 import kitaru_langgraph.agent as agent_module
 from kitaru.api_models.v1.replay_config import (
+    HistoryConfig,
+    HistoryScope,
     PassthroughConfig,
     ReplayOverride,
     StaticCase,
@@ -66,7 +68,7 @@ def test_sync_result_identity_and_config_are_preserved(fake_client: Any) -> None
         "configurable": {"thread_id": "thread-1"},
     }
     before = copy.deepcopy(original_config)
-    runner = KitaruGraphRunner(RunnableLambda(run))
+    runner = KitaruGraphRunner(RunnableLambda(run), agent_id=uuid.uuid4())
 
     returned = runner.invoke({"question": "hello"}, original_config)
 
@@ -90,7 +92,9 @@ async def test_async_result_identity_is_preserved(fake_client: Any) -> None:
         await asyncio.sleep(0)
         return result
 
-    returned = await KitaruGraphRunner(RunnableLambda(run)).ainvoke("hello")
+    returned = await KitaruGraphRunner(
+        RunnableLambda(run), agent_id=uuid.uuid4()
+    ).ainvoke("hello")
 
     assert returned is result
     assert get_active_invocation() is None
@@ -111,7 +115,9 @@ async def test_async_recording_failure_preserves_result_and_warns_safely(
         fake_client.instances[0].sessions.ingest_nodes = fail_ingest
         return result
 
-    returned = await KitaruGraphRunner(RunnableLambda(run)).ainvoke("hello")
+    returned = await KitaruGraphRunner(
+        RunnableLambda(run), agent_id=uuid.uuid4()
+    ).ainvoke("hello")
 
     assert returned is result
     assert get_active_invocation() is None
@@ -140,7 +146,9 @@ async def test_async_graph_error_remains_primary_when_recording_fails(
         raise graph_error
 
     with pytest.raises(ValueError) as raised:
-        await KitaruGraphRunner(RunnableLambda(run)).ainvoke("hello")
+        await KitaruGraphRunner(RunnableLambda(run), agent_id=uuid.uuid4()).ainvoke(
+            "hello"
+        )
 
     assert raised.value is graph_error
     assert raised.value.__cause__ is None
@@ -160,7 +168,7 @@ def test_graph_exception_identity_and_cause_are_preserved() -> None:
     graph = _RaisingRunnable(error)
 
     with pytest.raises(ValueError) as raised:
-        KitaruGraphRunner(graph).invoke("hello")
+        KitaruGraphRunner(graph, agent_id=uuid.uuid4()).invoke("hello")
 
     assert raised.value is error
     assert raised.value.__cause__ is None
@@ -176,7 +184,7 @@ def test_setup_failure_prevents_graph_execution(fake_client: Any) -> None:
         called = True
 
     with pytest.raises(RuntimeError, match="sentinel recording failure"):
-        KitaruGraphRunner(RunnableLambda(run)).invoke("hello")
+        KitaruGraphRunner(RunnableLambda(run), agent_id=uuid.uuid4()).invoke("hello")
 
     assert not called
 
@@ -187,7 +195,9 @@ def test_post_delegation_recording_failure_preserves_success(
     fake_client.next_ingest_error_at = 2
     result = {"answer": "done", "password": "sentinel"}
 
-    returned = KitaruGraphRunner(RunnableLambda(lambda _: result)).invoke("hello")
+    returned = KitaruGraphRunner(
+        RunnableLambda(lambda _: result), agent_id=uuid.uuid4()
+    ).invoke("hello")
 
     assert returned is result
     assert len(caplog.records) == 1
@@ -220,7 +230,9 @@ def test_sync_blocked_finalization_times_out_and_preserves_result(
         fake_client.instances[0].sessions.ingest_nodes = block_ingest
         return result
 
-    returned = KitaruGraphRunner(RunnableLambda(run)).invoke("hello")
+    returned = KitaruGraphRunner(RunnableLambda(run), agent_id=uuid.uuid4()).invoke(
+        "hello"
+    )
 
     assert returned is result
     assert blocked.is_set()
@@ -265,7 +277,9 @@ async def test_async_cancellation_bounds_blocked_finalization_and_preserves_erro
             fake_client.instances[0].sessions.ingest_nodes = block_ingest
             raise
 
-    task = asyncio.create_task(KitaruGraphRunner(RunnableLambda(run)).ainvoke("hello"))
+    task = asyncio.create_task(
+        KitaruGraphRunner(RunnableLambda(run), agent_id=uuid.uuid4()).ainvoke("hello")
+    )
     await graph_started.wait()
     task.cancel("caller cancellation")
 
@@ -292,6 +306,7 @@ def test_task_input_replaces_whole_input_but_command_wins(
     seen: list[Any] = []
     graph = RunnableLambda(lambda value: seen.append(value) or value)
     runner = KitaruGraphRunner(graph)
+    monkeypatch.setenv("KITARU_TASK_ID", str(uuid.uuid4()))
     monkeypatch.setenv("KITARU_TASK_INPUTS", json.dumps({"replacement": True}))
 
     replaced = runner.invoke({"caller": True})
@@ -305,9 +320,9 @@ def test_task_input_replaces_whole_input_but_command_wins(
 
 def test_sync_invocation_works_inside_a_running_event_loop() -> None:
     async def call_sync() -> Any:
-        return KitaruGraphRunner(RunnableLambda(lambda value: value)).invoke(
-            {"ok": True}
-        )
+        return KitaruGraphRunner(
+            RunnableLambda(lambda value: value), agent_id=uuid.uuid4()
+        ).invoke({"ok": True})
 
     assert asyncio.run(call_sync()) == {"ok": True}
 
@@ -339,7 +354,9 @@ def test_direct_interrupt_is_returned_unchanged_and_recorded(
 ) -> None:
     result = GraphOutput(value={"partial": True}, interrupts=(Interrupt("pause"),))
 
-    returned = KitaruGraphRunner(RunnableLambda(lambda _: result)).invoke("hello")
+    returned = KitaruGraphRunner(
+        RunnableLambda(lambda _: result), agent_id=uuid.uuid4()
+    ).invoke("hello")
 
     assert returned is result
     update = fake_client.instances[0].sessions.updated[-1][1]
@@ -377,7 +394,7 @@ def test_direct_replay_override_without_factory_capability_fails_before_graph(
         called = True
 
     with pytest.raises(UnsupportedCapabilityError, match="override_system_prompt"):
-        KitaruGraphRunner(RunnableLambda(run)).invoke("hello")
+        KitaruGraphRunner(RunnableLambda(run), agent_id=uuid.uuid4()).invoke("hello")
 
     assert not called
     client = fake_client.instances[0]
@@ -410,16 +427,17 @@ def test_tool_substitution_preflight_rejects_opaque_target_before_graph(
         nonlocal called
         called = True
 
-    runner = KitaruGraphRunner(RunnableLambda(run))
+    runner = KitaruGraphRunner(RunnableLambda(run), agent_id=uuid.uuid4())
     middleware = object()
     runner._middleware = middleware
     runner._manifest = _make_capability_manifest(
         middleware, opaque_targets=("opaque_subagents",)
     )
 
-    with pytest.raises(UnsupportedCapabilityError, match="opaque_subagents"):
+    with pytest.raises(UnsupportedCapabilityError, match="opaque_subagents") as exc:
         runner.invoke("hello")
 
+    assert "from_agent_factory" not in str(exc.value)
     assert not called
     client = fake_client.instances[0]
     assert client.closed
@@ -442,7 +460,7 @@ def test_real_interrupt_and_resume_preserve_langgraph_checkpointer() -> None:
     builder.add_edge(START, "pause")
     builder.add_edge("pause", END)
     graph = builder.compile(checkpointer=InMemorySaver())
-    runner = KitaruGraphRunner(graph)
+    runner = KitaruGraphRunner(graph, agent_id=uuid.uuid4())
     config: RunnableConfig = {"configurable": {"thread_id": "thread-1"}}
 
     first = runner.invoke(cast(Any, {"question": "ready"}), config, version="v2")
@@ -452,3 +470,167 @@ def test_real_interrupt_and_resume_preserve_langgraph_checkpointer() -> None:
     assert first.interrupts
     assert isinstance(second, GraphOutput)
     assert second.value == {"question": "ready", "answer": "yes"}
+
+
+def test_standalone_invoke_without_agent_fails_before_client_or_graph(
+    fake_client: Any,
+) -> None:
+    called = False
+
+    def run(_: Any) -> Any:
+        nonlocal called
+        called = True
+        return "unreachable"
+
+    with pytest.raises(ValueError, match="not inside a Kitaru worker task") as exc:
+        KitaruGraphRunner(RunnableLambda(run)).invoke("hello")
+
+    message = str(exc.value)
+    assert "agent_id=<agent UUID>" in message
+    assert "kitaru agent get <name>" in message
+    assert not called
+    assert fake_client.instances == []
+
+
+async def test_standalone_ainvoke_without_agent_fails_before_client_or_graph(
+    fake_client: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KITARU_AGENT_ID", str(uuid.uuid4()))
+    called = False
+
+    async def run(_: Any) -> Any:
+        nonlocal called
+        called = True
+        return "unreachable"
+
+    with pytest.raises(ValueError, match="agent_id=<agent UUID>"):
+        await KitaruGraphRunner(RunnableLambda(run)).ainvoke("hello")
+
+    assert not called
+    assert fake_client.instances == []
+
+
+def test_whitespace_task_id_does_not_bypass_agent_validation(
+    fake_client: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KITARU_TASK_ID", "   ")
+
+    with pytest.raises(ValueError, match="not inside a Kitaru worker task"):
+        KitaruGraphRunner(RunnableLambda(lambda value: value)).invoke("hello")
+
+    assert fake_client.instances == []
+
+
+def test_standalone_invoke_accepts_agent_version_id_without_agent_id(
+    fake_client: Any,
+) -> None:
+    version_id = uuid.uuid4()
+
+    result = KitaruGraphRunner(
+        RunnableLambda(lambda value: value), agent_version_id=version_id
+    ).invoke("hello")
+
+    assert result == "hello"
+    request = fake_client.instances[0].sessions.created[0]
+    assert request.agent_id is None
+    assert request.agent_version_id == version_id
+
+
+@pytest.mark.parametrize("async_run", [False, True], ids=["sync", "async"])
+async def test_worker_replay_without_agent_id_succeeds(
+    fake_client: Any, monkeypatch: pytest.MonkeyPatch, async_run: bool
+) -> None:
+    fake_client.next_replay = SimpleNamespace(
+        override=None,
+        tool_policy=ToolPolicy(default=PassthroughConfig()),
+    )
+    monkeypatch.setenv("KITARU_TASK_ID", str(uuid.uuid4()))
+    monkeypatch.setenv("KITARU_TASK_INPUTS", json.dumps("replayed input"))
+    monkeypatch.setenv("KITARU_REPLAY_ID", str(uuid.uuid4()))
+    runner = KitaruGraphRunner(RunnableLambda(lambda value: f"handled:{value}"))
+
+    result = await runner.ainvoke("caller") if async_run else runner.invoke("caller")
+
+    assert result == "handled:replayed input"
+    request = fake_client.instances[0].sessions.created[0]
+    assert request.agent_id is None
+    assert request.agent_version_id is None
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [
+        HistoryConfig(scope=HistoryScope.BASELINE, on_miss=ToolPolicyOnMiss.FAIL),
+        StaticConfig(cases=[], on_miss=ToolPolicyOnMiss.FAIL),
+    ],
+    ids=["history", "static"],
+)
+def test_direct_graph_tool_policy_error_points_to_agent_factory(
+    fake_client: Any, monkeypatch: pytest.MonkeyPatch, policy: Any
+) -> None:
+    fake_client.next_replay = SimpleNamespace(
+        override=None,
+        tool_policy=ToolPolicy(default=policy),
+    )
+    monkeypatch.setenv("KITARU_TASK_ID", str(uuid.uuid4()))
+    monkeypatch.setenv("KITARU_TASK_INPUTS", json.dumps("replayed"))
+    monkeypatch.setenv("KITARU_REPLAY_ID", str(uuid.uuid4()))
+    called = False
+
+    def run(_: Any) -> Any:
+        nonlocal called
+        called = True
+
+    with pytest.raises(UnsupportedCapabilityError) as exc:
+        KitaruGraphRunner(RunnableLambda(run)).invoke("hello")
+
+    message = str(exc.value)
+    assert (
+        "LangGraph target 'main' does not support 'substitute_tool_result'" in message
+    )
+    assert "KitaruGraphRunner.from_agent_factory(create_agent, ...)" in message
+    assert "https://docs.zenml.io/kitaru/adapters/langgraph" in message
+    assert not called
+
+
+@pytest.mark.parametrize(
+    ("override", "expected_operation"),
+    [
+        (ReplayOverride(model="openai:gpt-5-mini"), "override_model"),
+        (
+            ReplayOverride(model={"openai:gpt-4o": "openai:gpt-5-mini"}),
+            "override_model",
+        ),
+        (ReplayOverride(prompt="replacement"), "override_prompt"),
+        (ReplayOverride(system_prompt="replacement"), "override_system_prompt"),
+        (ReplayOverride(model_params={"temperature": 0.1}), "override_model_params"),
+    ],
+    ids=["model", "mapped_model", "prompt", "system_prompt", "model_params"],
+)
+def test_direct_graph_override_error_points_to_agent_factory(
+    fake_client: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    override: ReplayOverride,
+    expected_operation: str,
+) -> None:
+    fake_client.next_replay = SimpleNamespace(
+        override=override,
+        tool_policy=ToolPolicy(default=PassthroughConfig()),
+    )
+    monkeypatch.setenv("KITARU_TASK_ID", str(uuid.uuid4()))
+    monkeypatch.setenv("KITARU_TASK_INPUTS", json.dumps("replayed"))
+    monkeypatch.setenv("KITARU_REPLAY_ID", str(uuid.uuid4()))
+    called = False
+
+    def run(_: Any) -> Any:
+        nonlocal called
+        called = True
+
+    with pytest.raises(UnsupportedCapabilityError) as exc:
+        KitaruGraphRunner(RunnableLambda(run)).invoke("hello")
+
+    message = str(exc.value)
+    assert f"LangGraph target 'main' does not support {expected_operation!r}" in message
+    assert "KitaruGraphRunner.from_agent_factory(create_agent, ...)" in message
+    assert "https://docs.zenml.io/kitaru/adapters/langgraph" in message
+    assert not called
