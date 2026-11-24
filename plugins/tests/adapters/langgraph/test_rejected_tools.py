@@ -122,6 +122,7 @@ async def test_middleware_rejection_records_only_current_attempts(
             "tools": [lookup],
             "middleware": [RejectSecondCall()],
         },
+        agent_id=uuid.uuid4(),
     )
     historical_call = {
         "name": "lookup",
@@ -172,7 +173,7 @@ async def test_deep_agent_records_repeated_file_write_attempts(
         ]
     )
     runner = KitaruGraphRunner.from_agent_factory(
-        create_deep_agent, factory_kwargs={"model": model}
+        create_deep_agent, factory_kwargs={"model": model}, agent_id=uuid.uuid4()
     )
     inputs = {"messages": [HumanMessage(content="Write the files")]}
     result = runner.invoke(inputs) if sync else await runner.ainvoke(inputs)
@@ -223,7 +224,9 @@ async def test_static_error_result_is_recorded_once(
         responses=[AIMessage(content="", tool_calls=[call]), AIMessage(content="done")]
     )
     runner = KitaruGraphRunner.from_agent_factory(
-        create_agent, factory_kwargs={"model": model, "tools": [lookup]}
+        create_agent,
+        factory_kwargs={"model": model, "tools": [lookup]},
+        agent_id=uuid.uuid4(),
     )
     inputs = {"messages": [HumanMessage(content="Look up first")]}
     result = runner.invoke(inputs) if sync else await runner.ainvoke(inputs)
@@ -268,6 +271,7 @@ async def test_reused_native_call_id_records_each_rejected_attempt(
             "tools": [lookup],
             "middleware": [RejectSecondCall()],
         },
+        agent_id=uuid.uuid4(),
     )
     inputs = {"messages": [HumanMessage(content="Look up first and second")]}
     result = runner.invoke(inputs) if sync else await runner.ainvoke(inputs)
@@ -301,6 +305,7 @@ async def test_rejected_attempt_redacts_arguments_and_disables_replay(
             "tools": [lookup],
             "middleware": [RejectSecondCall()],
         },
+        agent_id=uuid.uuid4(),
     )
     inputs = {"messages": [HumanMessage(content="Look up first")]}
     result = runner.invoke(inputs) if sync else await runner.ainvoke(inputs)
@@ -338,7 +343,9 @@ async def test_nested_tool_batches_record_rejection_once(
     async def ainvoke_inner(inputs: Any, config: RunnableConfig) -> Any:
         return await inner.ainvoke(inputs, config)
 
-    runner = KitaruGraphRunner(RunnableLambda(invoke_inner, afunc=ainvoke_inner))
+    runner = KitaruGraphRunner(
+        RunnableLambda(invoke_inner, afunc=ainvoke_inner), agent_id=uuid.uuid4()
+    )
     result = runner.invoke([call]) if sync else await runner.ainvoke([call])
 
     assert result["messages"][0] is rejection

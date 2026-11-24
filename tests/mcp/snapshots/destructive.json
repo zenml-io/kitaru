@@ -8452,6 +8452,209 @@
     }
   },
   {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Draft a GitHub issue about a Kitaru bug or confusing tool; send nothing.\n\nUse this when a Kitaru tool fails, returns something surprising, or its\ndescription misled you. Nothing is sent: show the user `issue_url` so they\ncan review the prefilled issue and submit it themselves. Describe the tool,\narguments, and result; leave out session content the user has not agreed\nto share.",
+    "inputSchema": {
+      "$defs": {
+        "FeedbackDraftRequest": {
+          "additionalProperties": false,
+          "description": "Describe a problem with Kitaru or its MCP tools for a GitHub issue draft.",
+          "properties": {
+            "expected": {
+              "anyOf": [
+                {
+                  "maxLength": 3000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Expected"
+            },
+            "problem": {
+              "description": "What went wrong: the tool, the arguments, and what it returned.",
+              "maxLength": 6000,
+              "minLength": 20,
+              "title": "Problem",
+              "type": "string"
+            },
+            "proposed_fix": {
+              "anyOf": [
+                {
+                  "maxLength": 6000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The change to Kitaru that would fix it, if you have one.",
+              "title": "Proposed Fix"
+            },
+            "title": {
+              "maxLength": 120,
+              "minLength": 8,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "title",
+            "problem"
+          ],
+          "title": "FeedbackDraftRequest",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/FeedbackDraftRequest"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "feedback_draft_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_feedback_draft",
+    "outputSchema": {
+      "$defs": {
+        "FeedbackDraftData": {
+          "additionalProperties": false,
+          "description": "A prefilled GitHub issue link and the text it carries.",
+          "properties": {
+            "body": {
+              "title": "Body",
+              "type": "string"
+            },
+            "issue_url": {
+              "title": "Issue Url",
+              "type": "string"
+            },
+            "truncated": {
+              "title": "Truncated",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "issue_url",
+            "body",
+            "truncated"
+          ],
+          "title": "FeedbackDraftData",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Typed feedback draft result.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FeedbackDraftData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "FeedbackDraftResult",
+      "type": "object"
+    }
+  },
+  {
     "_meta": {
       "ui": {
         "resourceUri": "ui://kitaru/failure-matrix.html"

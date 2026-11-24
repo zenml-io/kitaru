@@ -48,3 +48,13 @@ Still stuck? All three of these reach a human:
 - [Slack community](https://kitaru.ai/slack) for questions and quick pointers.
 - [kitaru.ai/help](https://kitaru.ai/help) to report a bug; it goes straight to GitHub issues. Attach the session or job ID and the failing command's output, and it gets fixed fastest.
 - [support@kitaru.ai](mailto:support@kitaru.ai) when email is easier.
+
+To draft the bug report from your terminal, or let a coding agent draft it, run `kitaru feedback`:
+
+```bash
+kitaru feedback --title "session read hides a tool error" \
+  --problem "kitaru session read <SESSION_ID> --full dropped an error node." \
+  --proposed-fix "Keep error nodes in full mode."
+```
+
+It sends nothing. It masks recognizable credentials and prints a link to a new GitHub issue with the title and description filled in, ending with your Kitaru, Python, and OS versions. Open the link, remove anything you do not want to share, and submit it. When a command crashes or the server answers with HTTP 500, the error's hint suggests this command; mistakes such as a wrong flag or a missing record do not.

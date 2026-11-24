@@ -111,7 +111,9 @@ class KitaruGraphRunner(Generic[InputT, OutputT]):
 
         Args:
             graph: Existing compiled LangGraph or compatible public runnable.
-            agent_id: Optional Kitaru agent identifier.
+            agent_id: Optional Kitaru agent identifier. Required outside a
+                Kitaru worker task unless ``agent_version_id`` is supplied;
+                task-bound runs infer this from the task's agent version.
             agent_version_id: Optional Kitaru agent-version identifier.
             session_name: Recorded name, falling back to KITARU_SESSION_NAME.
             batch_size: Number of completed child nodes per ingest batch.
@@ -323,6 +325,15 @@ class KitaruGraphRunner(Generic[InputT, OutputT]):
             return
         view = self.capabilities
         if override is not None:
+            operations = (
+                (override.model, CapabilityOperation.OVERRIDE_MODEL),
+                (override.prompt, CapabilityOperation.OVERRIDE_PROMPT),
+                (override.system_prompt, CapabilityOperation.OVERRIDE_SYSTEM_PROMPT),
+                (override.model_params, CapabilityOperation.OVERRIDE_MODEL_PARAMS),
+            )
+            for value, operation in operations:
+                if value is not None:
+                    _require_operation(view, operation)
             if isinstance(override.model, dict):
                 from .langchain import KitaruLangGraphMiddleware
 
@@ -333,15 +344,6 @@ class KitaruGraphRunner(Generic[InputT, OutputT]):
                     raise UnsupportedCapabilityError(
                         "Mapped model override requires a string model at construction"
                     )
-            operations = (
-                (override.model, CapabilityOperation.OVERRIDE_MODEL),
-                (override.prompt, CapabilityOperation.OVERRIDE_PROMPT),
-                (override.system_prompt, CapabilityOperation.OVERRIDE_SYSTEM_PROMPT),
-                (override.model_params, CapabilityOperation.OVERRIDE_MODEL_PARAMS),
-            )
-            for value, operation in operations:
-                if value is not None:
-                    _require_operation(view, operation)
         if recorder.replay is None:
             return
         policies = [

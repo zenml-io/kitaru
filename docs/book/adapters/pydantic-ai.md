@@ -18,6 +18,7 @@ agent = Agent(
     "openai:gpt-5.4", name="support-agent", system_prompt="You resolve support tickets."
 )
 
+# KITARU_AGENT_ID is this example's own env var; Kitaru does not read it automatically.
 support = KitaruAgent(agent, agent_id=uuid.UUID(os.environ["KITARU_AGENT_ID"]))
 
 result = support.run_sync("Refund order #4821.")
@@ -42,7 +43,7 @@ KitaruAgent(
 )
 ```
 
-Register the agent first (`kitaru agent register`) and hand its id to the wrapper, via `KITARU_AGENT_ID` in your own environment, as the examples do. When the script runs under a worker task (a replay), the id is optional: the adapter infers the agent from the task itself.
+Register the agent first (`kitaru agent register`) and pass its UUID as `agent_id=` (or `agent_version_id=`). In the example above, `KITARU_AGENT_ID` is the example script's own environment variable — Kitaru itself does not read `KITARU_AGENT_ID` automatically. When the script runs under a worker task (a replay), the id is optional: the adapter infers the agent from the task itself.
 
 The connection is the client's, not the adapter's: server and credential resolve the same way as for `KitaruAPIClient`: `KITARU_API_URL` (or the stored server URL), then the task token a worker injects (`KITARU_API_TOKEN`), then `KITARU_API_KEY`, then stored `kitaru login` credentials. That's what makes the same script work on your laptop, in production, and under a worker without edits.
 
