@@ -142,6 +142,7 @@ async def api_client(
         dispatcher=EventDispatcher(),
     )
     task_policy = TaskPolicy()
+    sessions = FakeSessionRepository()
     spec_builder = TaskSpecBuilder(
         agent_version_repository=FakeAgentVersionRepository(agents),
         plugin_repository=FakePluginRepository(),
@@ -150,12 +151,13 @@ async def api_client(
         replay_repository=FakeReplayRepository(),
         import_repository=FakeImportRepository(),
         connection_repository=FakeConnectionRepository(),
+        session_repository=sessions,
         policy=task_policy,
     )
     task_service = TaskService(
         repository=task_repository,
         worker_repository=worker_repository,
-        session_repository=FakeSessionRepository(),
+        session_repository=sessions,
         job_repository=job_repository,
         replay_repository=FakeReplayRepository(),
         spec_builder=spec_builder,

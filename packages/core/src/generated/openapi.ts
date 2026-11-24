@@ -5815,6 +5815,25 @@ export interface components {
             result: components["schemas"]["EvaluationStats"];
         };
         /**
+         * EvaluationBaselineContext
+         * @description Baseline identity and case metadata for evaluating a replay result.
+         */
+        EvaluationBaselineContext: {
+            /**
+             * Metadata
+             * @description Baseline session metadata.
+             */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /**
+             * Session Id
+             * Format: uuid
+             * @description Baseline session.
+             */
+            session_id: string;
+        };
+        /**
          * EvaluationBatchCreateRequest
          * @description Evaluation batch create request.
          */
@@ -6045,6 +6064,8 @@ export interface components {
          * @description Evaluation task details.
          */
         EvaluationTaskDetails: {
+            /** @description Baseline metadata when the scored session is a replay result. */
+            baseline?: components["schemas"]["EvaluationBaselineContext"] | null;
             /**
              * Evaluator Name
              * @description Name the evaluator emits results under.
