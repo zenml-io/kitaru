@@ -50,8 +50,9 @@ class KitaruAgent(
 
         Args:
             agent: PydanticAI agent to execute.
-            agent_id: Optional Kitaru agent identifier. Task-bound runs infer
-                this from the task's agent version.
+            agent_id: Optional Kitaru agent identifier. Required outside a
+                Kitaru worker task unless ``agent_version_id`` is supplied;
+                task-bound runs infer this from the task's agent version.
             agent_version_id: Optional Kitaru agent-version identifier.
             session_name: Recorded name, falling back to
                 ``KITARU_SESSION_NAME``.
@@ -70,6 +71,8 @@ class KitaruAgent(
         if batch_size < 1:
             raise ValueError("batch_size must be at least 1")
         super().__init__(agent)
+        self._agent_id = agent_id
+        self._agent_version_id = agent_version_id
         self._capability = _KitaruCapability(
             agent_id=agent_id,
             agent_version_id=agent_version_id,
@@ -80,11 +83,25 @@ class KitaruAgent(
             use_task_inputs_as_prompt=use_task_inputs_as_prompt,
         )
 
+    def _validate_identity(self) -> None:
+        """Require an explicit agent identity outside a Kitaru worker task."""
+        if (
+            self._agent_id is None
+            and self._agent_version_id is None
+            and not (os.environ.get("KITARU_TASK_ID") or "").strip()
+        ):
+            raise ValueError(
+                "This run is not inside a Kitaru worker task, so it needs an agent: "
+                "pass agent_id=<agent UUID> (or agent_version_id=<version UUID>; "
+                "see `kitaru agent get <name>`)."
+            )
+
     @asynccontextmanager
     async def iter(
         self, *args: Any, **kwargs: Any
     ) -> AsyncGenerator[AgentRun[Any, Any]]:
         """Run the wrapped agent with Kitaru as an outermost capability."""
+        self._validate_identity()
         capabilities = kwargs.pop("capabilities", None)
         kwargs["capabilities"] = [self._capability, *(capabilities or ())]
         async with super().iter(*args, **kwargs) as run:
