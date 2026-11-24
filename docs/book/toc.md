@@ -36,6 +36,8 @@
 - [Write an evaluator](guides/write-an-evaluator.md)
 - [TypeScript and Mastra evaluators](guides/typescript-evaluators.md)
 - [Write an analyzer](guides/write-an-analyzer.md)
+- [Review sessions in a custom trace viewer](guides/custom-trace-viewers.md)
+  - [Trace viewer reference](guides/trace-viewer-reference.md)
 - [Deterministic evaluations](guides/deterministic-evaluations.md)
 - [Judge evaluations](guides/judge-evaluations.md)
 - [Tool policies](guides/tool-policies.md)
