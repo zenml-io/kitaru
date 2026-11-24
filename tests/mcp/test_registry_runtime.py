@@ -8,10 +8,16 @@ from datetime import UTC, datetime
 import pytest
 from jsonschema import Draft202012Validator
 from mcp.types import TextContent
+from scripts.report_mcp_schema import (
+    MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES,
+    MAX_MODEL_TOOLS,
+    MAX_TOOL_SCHEMA_BYTES,
+)
 
 from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.session import SessionDetailResponse, SessionResponse
 from kitaru.api_models.v1.tag import TagResponse
+from kitaru.mcp.apps import is_model_visible
 from kitaru.mcp.errors import (
     MCPToolError,
     error_result,
@@ -40,6 +46,8 @@ EXPECTED = {
         "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
+        "kitaru_session_view",
+        "kitaru_viewer_read",
     ],
     CapabilityMode.STANDARD: [
         "kitaru_registry_read",
@@ -51,6 +59,8 @@ EXPECTED = {
         "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
+        "kitaru_session_view",
+        "kitaru_viewer_read",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
@@ -59,6 +69,7 @@ EXPECTED = {
         "kitaru_evaluators_manage",
         "kitaru_analyzers_manage",
         "kitaru_connections_manage",
+        "kitaru_viewer_write",
     ],
     CapabilityMode.DESTRUCTIVE: [
         "kitaru_registry_read",
@@ -70,6 +81,8 @@ EXPECTED = {
         "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
+        "kitaru_session_view",
+        "kitaru_viewer_read",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
@@ -78,6 +91,7 @@ EXPECTED = {
         "kitaru_evaluators_manage",
         "kitaru_analyzers_manage",
         "kitaru_connections_manage",
+        "kitaru_viewer_write",
         "kitaru_workflow_cancel",
         "kitaru_delete",
     ],
@@ -107,6 +121,8 @@ async def test_exact_capability_filtered_inventories_and_annotations() -> None:
                     "kitaru_feedback_draft",
                     "kitaru_failure_matrix",
                     "kitaru_failure_matrix_cell",
+                    "kitaru_session_view",
+                    "kitaru_viewer_read",
                 }
             )
 
@@ -123,9 +139,14 @@ async def test_actual_sdk_discovery_schemas_fit_budgets() -> None:
         combined = _compact_size(tool["inputSchema"]) + _compact_size(
             tool["outputSchema"]
         )
-        assert combined < 45 * 1024
-    assert _compact_size({"tools": dumped}) < 242 * 1024
-    assert len(tools) <= 19
+        assert combined < MAX_TOOL_SCHEMA_BYTES
+    # Hosts keep app-only tools out of the model's context, so the context
+    # budget counts the tools the model sees.
+    model_visible = [tool for tool in dumped if is_model_visible(tool.get("_meta"))]
+    assert (
+        _compact_size({"tools": model_visible}) < MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES
+    )
+    assert len(model_visible) <= MAX_MODEL_TOOLS
 
 
 @pytest.mark.parametrize("session_type", [SessionResponse, SessionDetailResponse])

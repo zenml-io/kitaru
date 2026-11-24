@@ -27,6 +27,8 @@
   "guides/write-an-evaluator.md": "https://docs.zenml.io/kitaru/guides/write-an-evaluator",
   "guides/typescript-evaluators.md": "https://docs.zenml.io/kitaru/guides/typescript-evaluators",
   "guides/write-an-analyzer.md": "https://docs.zenml.io/kitaru/guides/write-an-analyzer",
+  "guides/custom-trace-viewers.md": "https://docs.zenml.io/kitaru/guides/custom-trace-viewers",
+  "guides/trace-viewer-reference.md": "https://docs.zenml.io/kitaru/guides/custom-trace-viewers/trace-viewer-reference",
   "guides/deterministic-evaluations.md": "https://docs.zenml.io/kitaru/guides/deterministic-evaluations",
   "guides/judge-evaluations.md": "https://docs.zenml.io/kitaru/guides/judge-evaluations",
   "guides/tool-policies.md": "https://docs.zenml.io/kitaru/guides/tool-policies",

@@ -34,6 +34,7 @@ from kitaru.mcp.models.failure_matrix import (
     GroupSummary,
     MatrixCell,
 )
+from kitaru.mcp.tools.paging import read_up_to
 from kitaru.mcp.tools.transitions import (
     SessionOutcome,
     analyze_group,
@@ -203,7 +204,7 @@ async def fetch_group(
             iterator = client.sessions.iter_nodes(
                 session_id, SessionNodeListParams(size=PAGE_SIZE)
             )
-            nodes, capped = await _read_up_to(iterator, node_limit)
+            nodes, capped = await read_up_to(iterator, node_limit)
             return [_slim(node) for node in nodes], capped
 
     (
@@ -256,17 +257,6 @@ def _slim(node: SessionNodeResponse) -> SessionNodeResponse:
     )
 
 
-async def _read_up_to(
-    iterator: AsyncIterator[ItemT], limit: int
-) -> tuple[list[ItemT], bool]:
-    items: list[ItemT] = []
-    async for item in iterator:
-        if len(items) == limit:
-            return items, True
-        items.append(item)
-    return items, False
-
-
 async def _collect_by_session(
     iterate: Callable[[ParamsT], AsyncIterator[ItemT]],
     params_type: type[ParamsT],
@@ -278,7 +268,7 @@ async def _collect_by_session(
             filter=FilterCondition(field="session_id", op=FilterOp.IN, value=chunk),
             size=PAGE_SIZE,
         )
-        return await _read_up_to(iterate(params), MAX_RECORDS_PER_BATCH)
+        return await read_up_to(iterate(params), MAX_RECORDS_PER_BATCH)
 
     chunks = await asyncio.gather(
         *(chunk_items(start) for start in range(0, len(session_ids), IDS_PER_FILTER))
