@@ -262,6 +262,8 @@ In Kitaru 0.24.0 and later, imported sessions are unique on `(imported_from, ext
 
 A session skipped because it already existed before this import is not refreshed with changed content or new nodes. Changing the owner, importer version, or content does not create another copy under the same key. Imports without a provider are not reliably deduplicated because the stored key contains a null value.
 
+For direct SDK ingestion, `kitaru.task.importer.ingest_session` returns `None` only when that source identity already exists under the destination agent. Other conflicts, such as a session that no longer accepts nodes, raise `APIError` instead of reporting a duplicate skip. For native recording and importer-backed adapters, follow the [session-writing recipe](../adapters/custom.md).
+
 Kitaru 0.23.0 used the global `(imported_from, external_id)` key, so the same source identity could also collide across different agents. Check the destination server's version, rather than only the local SDK version. For other older versions or an unknown server version, verify the applicable contract before relying on duplicate skips or using a different agent to create a copy.
 
 ## No importer for your provider

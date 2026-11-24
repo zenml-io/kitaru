@@ -435,7 +435,12 @@ def test_run_rejects_an_already_imported_trace(
 ) -> None:
     """Raise SessionImportError when the session external id already exists."""
     adapter, client = _adapter(monkeypatch, _single_session_parser)
-    client.sessions.ingest_error = APIError(httpx.codes.CONFLICT, "conflict")
+    client.sessions.ingest_error = APIError(
+        httpx.codes.CONFLICT,
+        "Session with imported_from 'acme' and external_id 'trace-1' "
+        "is already registered",
+        code="duplicate_session_external_id",
+    )
 
     with pytest.raises(SessionImportError, match="already exists"):
         adapter.run(lambda: adapter.events.append("func"))
@@ -562,3 +567,18 @@ async def test_run_async_rejects_a_replay_with_an_override(
     assert adapter.events == []
     assert client.sessions.created == []
     assert client.sessions.ingested == []
+
+
+def test_run_preserves_an_unrelated_ingestion_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Return the original conflict when the completed trace cannot be ingested."""
+    adapter, client = _adapter(monkeypatch, _single_session_parser)
+    error = APIError(httpx.codes.CONFLICT, "task is not running")
+    client.sessions.ingest_error = error
+
+    with pytest.raises(APIError) as caught:
+        adapter.run(lambda: adapter.events.append("func"))
+
+    assert caught.value is error
+    assert "func" in adapter.events

@@ -138,3 +138,4 @@ async def test_ingest_round_trip(api_client: KitaruAPIClient) -> None:
     with pytest.raises(APIError) as caught:
         await api_client.sessions.ingest(request)
     assert caught.value.status_code == 409
+    assert caught.value.code == "duplicate_session_external_id"

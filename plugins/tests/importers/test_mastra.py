@@ -167,8 +167,12 @@ def test_namespace_changes_identity_without_changing_source_trace(
     assert namespaced.nodes == original.nodes
 
 
+@pytest.mark.parametrize(
+    "error_code", ["duplicate_session_external_id", None], ids=["coded", "legacy"]
+)
 async def test_reimport_skips_existing_sessions(
     traces: list[dict[str, Any]],
+    error_code: str | None,
 ) -> None:
     client = Mock(spec=KitaruAPIClient)
     stored: dict[tuple[str | None, str | None], SessionResponse] = {}
@@ -177,7 +181,13 @@ async def test_reimport_skips_existing_sessions(
     async def ingest(request: SessionIngestRequest) -> SessionResponse:
         key = (request.session.imported_from, request.session.external_id)
         if key in stored:
-            raise APIError(409, "source identity already imported")
+            raise APIError(
+                409,
+                f"Session with imported_from '{request.session.imported_from}' "
+                f"and external_id '{request.session.external_id}' "
+                "is already registered",
+                code=error_code,
+            )
         session = Mock(spec=SessionResponse)
         session.id = uuid4()
         stored[key] = session

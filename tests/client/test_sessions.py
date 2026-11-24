@@ -20,7 +20,12 @@ from decimal import Decimal
 import pytest
 
 from conftest import asgi_api_client
-from kitaru.api_models.v1.filter import AndFilter, Filter, FilterCondition, FilterOp
+from kitaru.api_models.v1.filter import (
+    AndFilter,
+    Filter,
+    FilterCondition,
+    FilterOp,
+)
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
     SessionDetailResponse,
@@ -37,6 +42,12 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeCreateRequest,
     SessionNodeListParams,
 )
+from kitaru.api_models.v1.tag import (
+    TagCreateRequest,
+    TagLinkCreateRequest,
+    TagResourceType,
+    TagUpdateRequest,
+)
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import (
@@ -44,6 +55,7 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize_with_task,
     get_session_node_service,
     get_session_service,
+    get_tag_service,
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
@@ -52,6 +64,7 @@ from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
 )
 from kitaru.server.application.services.session_service import SessionService
+from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.domain.account import Account
 from kitaru_test_support import (
     FakeAgentRepository,
@@ -60,6 +73,7 @@ from kitaru_test_support import (
     FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
+    FakeTagRepository,
     FakeTaskRepository,
     build_payload_store,
     override_idempotency,
@@ -78,7 +92,8 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
             JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
         )
     )
-    session_repository = FakeSessionRepository()
+    tag_repository = FakeTagRepository()
+    session_repository = FakeSessionRepository(tags=tag_repository)
     node_repository = FakeSessionNodeRepository()
     payload_store = build_payload_store().store
     session_service = SessionService(
@@ -96,6 +111,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
         payload_store=payload_store,
     )
     app.dependency_overrides[get_session_service] = lambda: session_service
+    app.dependency_overrides[get_tag_service] = lambda: TagService(tag_repository)
     app.dependency_overrides[get_session_node_service] = lambda: node_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
@@ -424,3 +440,111 @@ async def test_iter_nodes(
         )
     ]
     assert collected == expected
+
+
+async def test_tag_alias_pagination_and_current_tag_responses(
+    api_client: KitaruAPIClient,
+) -> None:
+    """Return linked tag data through SDK list, detail and update responses."""
+    sessions = [
+        await api_client.sessions.create(
+            SessionCreateRequest(
+                agent_id=uuid.uuid4(),
+                origin=SessionOrigin.RECORDED,
+                inputs={"secret": "payload"},
+                outputs=None,
+                metadata={},
+            )
+        )
+        for _ in range(4)
+    ]
+    assert all(session.tags == [] for session in sessions)
+    prod = await api_client.tags.create(TagCreateRequest(name="prod"))
+    excluded = await api_client.tags.create(TagCreateRequest(name="excluded"))
+    unrelated = await api_client.tags.create(
+        TagCreateRequest(name="other-session-only")
+    )
+    for session in sessions[:3]:
+        await api_client.tags.create_link(
+            prod.id,
+            TagLinkCreateRequest(
+                resource_type=TagResourceType.SESSION, resource_id=session.id
+            ),
+        )
+    for tag_id, session_id in (
+        (excluded.id, sessions[2].id),
+        (unrelated.id, sessions[3].id),
+    ):
+        await api_client.tags.create_link(
+            tag_id,
+            TagLinkCreateRequest(
+                resource_type=TagResourceType.SESSION, resource_id=session_id
+            ),
+        )
+
+    def expression(field: str) -> AndFilter:
+        return AndFilter.model_validate(
+            {
+                "and": [
+                    {
+                        "or": [
+                            {"field": field, "op": "in", "value": ["prod", "missing"]},
+                            {"field": "name", "op": "eq", "value": "missing"},
+                        ]
+                    },
+                    {"not": {"field": field, "op": "eq", "value": "excluded"}},
+                ]
+            }
+        )
+
+    first = await api_client.sessions.list(
+        SessionListParams(filter=expression("tags"), size=1, sort="created:asc")
+    )
+    assert [session.id for session in first.items] == [sessions[0].id]
+    assert first.items[0].tags == [prod]
+    assert "inputs" not in first.items[0].model_dump()
+    assert first.next_cursor is not None
+    second = await api_client.sessions.list(
+        SessionListParams(
+            filter=expression("tag"),
+            size=1,
+            sort="created:asc",
+            cursor=first.next_cursor,
+        )
+    )
+    assert [session.id for session in second.items] == [sessions[1].id]
+    assert second.items[0].tags == [prod]
+    assert second.next_cursor is None
+    detail = await api_client.sessions.get(sessions[0].id)
+    assert detail.tags == [prod]
+    assert detail.inputs == {"secret": "payload"}
+    renamed = await api_client.tags.update(prod.id, TagUpdateRequest(name="production"))
+    updated = await api_client.sessions.update(
+        sessions[0].id, SessionUpdateRequest(name="updated")
+    )
+    assert updated.tags == [renamed]
+    await api_client.tags.delete_link(prod.id, TagResourceType.SESSION, sessions[0].id)
+    assert (await api_client.sessions.get(sessions[0].id)).tags == []
+
+
+async def test_old_server_responses_without_tags_still_parse(
+    api_client: KitaruAPIClient,
+) -> None:
+    """Accept old list and detail wire responses that omitted tags."""
+    created = await api_client.sessions.create(
+        SessionCreateRequest(
+            agent_id=uuid.uuid4(),
+            origin=SessionOrigin.RECORDED,
+            inputs=None,
+            outputs=None,
+            metadata={},
+        )
+    )
+    assert (
+        SessionResponse.model_validate(created.model_dump(exclude={"tags"})).tags == []
+    )
+    detail = await api_client.sessions.get(created.id)
+    assert (
+        SessionDetailResponse.model_validate(detail.model_dump(exclude={"tags"})).tags
+        == []
+    )

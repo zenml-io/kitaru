@@ -230,6 +230,7 @@ def get_task_service(
     """
     policy = get_task_policy(settings)
     replay_repository = SQLReplayRepository(session)
+    session_repository = SQLSessionRepository(session, engine)
     spec_builder = TaskSpecBuilder(
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
@@ -240,12 +241,13 @@ def get_task_service(
         replay_repository=replay_repository,
         import_repository=SQLImportRepository(session),
         connection_repository=SQLConnectionRepository(session),
+        session_repository=session_repository,
         policy=policy,
     )
     return TaskService(
         repository=SQLTaskRepository(session),
         worker_repository=SQLWorkerRepository(session),
-        session_repository=SQLSessionRepository(session, engine),
+        session_repository=session_repository,
         job_repository=SQLJobRepository(session),
         replay_repository=replay_repository,
         spec_builder=spec_builder,
