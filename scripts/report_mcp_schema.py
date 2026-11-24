@@ -18,15 +18,15 @@ from kitaru.mcp.settings import CapabilityMode, MCPSettings
 SNAPSHOT_DIRECTORY = Path(__file__).parents[1] / "tests" / "mcp" / "snapshots"
 METRICS_PATH = SNAPSHOT_DIRECTORY / "metrics.json"
 EXPECTED_TOOL_COUNTS = {
-    CapabilityMode.READ_ONLY: 10,
-    CapabilityMode.STANDARD: 19,
-    CapabilityMode.DESTRUCTIVE: 21,
+    CapabilityMode.READ_ONLY: 11,
+    CapabilityMode.STANDARD: 20,
+    CapabilityMode.DESTRUCTIVE: 22,
 }
 # Hosts that support MCP Apps keep app-only tools out of the model's tool list,
 # so the context budgets below count only the tools the model sees.
-MAX_MODEL_TOOLS = 18
+MAX_MODEL_TOOLS = 19
 MAX_TOOL_SCHEMA_BYTES = 45 * 1024
-MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES = 239 * 1024
+MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES = 242 * 1024
 
 
 def _canonical_bytes(value: object) -> bytes:

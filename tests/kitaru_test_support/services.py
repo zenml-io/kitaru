@@ -321,6 +321,7 @@ def build_job_and_task_services(
         replay_repository=replays,
         import_repository=substrate.imports,
         connection_repository=substrate.connections,
+        session_repository=substrate.sessions,
         policy=task_policy,
     )
     task_service = TaskService(
@@ -479,6 +480,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         replay_repository=replays,
         import_repository=imports,
         connection_repository=connections,
+        session_repository=sessions,
         policy=task_policy,
     )
     task_service = TaskService(

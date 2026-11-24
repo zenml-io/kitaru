@@ -87,6 +87,7 @@ def fake_client(monkeypatch: pytest.MonkeyPatch) -> type[FakeClient]:
         "KITARU_API_KEY",
         "KITARU_API_TOKEN",
         "KITARU_API_URL",
+        "KITARU_AGENT_ID",
         "KITARU_TASK_ID",
         "KITARU_TASK_INPUTS",
         "KITARU_SESSION_NAME",

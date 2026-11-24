@@ -16,7 +16,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, TypedDict
 
 from sqlalchemy import (
     BigInteger,
@@ -46,6 +46,14 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 )
 from kitaru.server.domain.payload import Payload, PayloadMediaType
 from kitaru.server.domain.session import Session
+
+
+class _SessionPayloads(TypedDict, total=False):
+    """Session payload fields included in a database read."""
+
+    inputs: Payload | None
+    outputs: Payload | None
+
 
 SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session", ["imported_from", "external_id", "agent_id"]
@@ -263,7 +271,7 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             if has_tokens
             else None
         )
-        payloads: dict[str, Payload | None] = {}
+        payloads: _SessionPayloads = {}
         if "inputs" not in exclude:
             payloads["inputs"] = payload_from_columns(
                 self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON

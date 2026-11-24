@@ -87,6 +87,11 @@ async def test_replay_pipeline_completes_through_the_api(
 ) -> None:
     """A replay runs through claim, agent completion, and evaluator completion."""
     agent_id, version_id, baseline_id = await _setup_replayable_session(client)
+    baseline_metadata = {"case_kind": "refund", "expected": {"amount": 42}}
+    response = await client.patch(
+        f"/api/v1/sessions/{baseline_id}", json={"metadata": baseline_metadata}
+    )
+    assert response.status_code == 200
     await _register_evaluator(client)
 
     replay = (
@@ -121,7 +126,13 @@ async def test_replay_pipeline_completes_through_the_api(
     agent_entry = claimed["tasks"][0]
     agent_task = agent_entry["task"]
     assert agent_task["kind"] == "agent"
+    assert agent_entry["spec"]["details"]["inputs"] == {"q": "hi"}
+    assert "baseline" not in agent_entry["spec"]["details"]
     agent_task_headers = {"Authorization": f"Bearer {agent_entry['token']}"}
+    response = await client.get(
+        f"/api/v1/sessions/{baseline_id}", headers=agent_task_headers
+    )
+    assert response.status_code == 403
 
     await client.patch(
         f"/api/v1/tasks/{agent_task['id']}",
@@ -141,6 +152,7 @@ async def test_replay_pipeline_completes_through_the_api(
     ).json()
     assert result_session["agent_id"] == agent_id
     assert result_session["agent_version_id"] == version_id
+    assert result_session["metadata"] == {}
     await client.patch(
         f"/api/v1/sessions/{result_session['id']}",
         json={"status": "completed", "outputs": {}},
@@ -228,7 +240,23 @@ async def test_replay_pipeline_completes_through_the_api(
     eval_entry = claimed["tasks"][0]
     eval_task = eval_entry["task"]
     assert eval_task["kind"] == "evaluator"
+    assert eval_entry["spec"]["details"]["baseline"] == {
+        "session_id": baseline_id,
+        "metadata": baseline_metadata,
+    }
     eval_task_headers = {"Authorization": f"Bearer {eval_entry['token']}"}
+    response = await client.get(
+        f"/api/v1/tasks/{eval_task['id']}/spec", headers=eval_task_headers
+    )
+    assert response.status_code == 200
+    assert response.json()["details"]["baseline"] == {
+        "session_id": baseline_id,
+        "metadata": baseline_metadata,
+    }
+    response = await client.get(
+        f"/api/v1/sessions/{baseline_id}", headers=eval_task_headers
+    )
+    assert response.status_code == 403
 
     await client.patch(
         f"/api/v1/tasks/{eval_task['id']}",

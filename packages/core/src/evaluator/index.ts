@@ -8,12 +8,16 @@ import type {
 } from "../types.js";
 
 export type EvaluationResult = components["schemas"]["EvaluationResult"];
+export type EvaluationBaselineContext =
+  components["schemas"]["EvaluationBaselineContext"];
 export type EvaluatorParams = Record<string, JsonValue>;
 
-/** Full recorded session, including every node supplied by the evaluation task. */
+/** Scored session and its nodes, with optional original-session metadata. */
 export interface SessionView {
   session: SessionDetailResponse;
   nodes: SessionNodeResponse[];
+  /** Metadata from the original session when scoring a replay result. */
+  baseline?: EvaluationBaselineContext | null;
 }
 
 export type Evaluator = (
@@ -45,6 +49,36 @@ const RESULT_FIELDS = new Set([
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isJsonValue(value: unknown): boolean {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  return isObject(value) && Object.values(value).every(isJsonValue);
+}
+
+function validateBaselineContext(value: unknown): void {
+  if (value == null) return;
+  if (
+    !isObject(value) ||
+    typeof value.session_id !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      value.session_id,
+    ) ||
+    !isObject(value.metadata) ||
+    !Object.values(value.metadata).every(isJsonValue)
+  ) {
+    throw new TypeError(
+      "Expected baseline context with session_id and JSON metadata",
+    );
+  }
 }
 
 /** Reject invalid or duplicate rows before any result is emitted. */
@@ -132,6 +166,7 @@ export async function evaluateRequest(
       "Expected evaluator protocol version 1 with session, nodes, and params",
     );
   }
+  validateBaselineContext(request.session.baseline);
   // The Python task validates the full API payload before sending this envelope.
   const input = request as unknown as EvaluatorRequest;
   return {

@@ -62,6 +62,7 @@ Tools are gated by a **capability mode**, either `read-only` (the default), `sta
 | `kitaru_review_read` | read-only | Read [investigations and annotations](../concepts/investigations.md) |
 | `kitaru_connection_read` | read-only | Read [provider connections](../guides/provider-connections.md) without their secret values |
 | `kitaru_docs_search` | read-only | Search bundled Kitaru guides and return short excerpts with links to the published pages |
+| `kitaru_feedback_draft` | read-only | Draft a GitHub issue about a Kitaru bug or a confusing tool and return a prefilled link; nothing is sent |
 | `kitaru_failure_matrix` | read-only | Show where a group of sessions first goes wrong, as an interactive [transition failure matrix](#transition-failure-matrix) |
 | `kitaru_failure_matrix_cell` | read-only | List the sessions behind one matrix cell; the matrix view calls it, and hosts that support MCP Apps hide it from the assistant |
 | `kitaru_session_view` | read-only | Open a session, or an investigation's sessions, in an interactive [trace viewer](#trace-viewers): the built-in one or one you wrote |
@@ -80,6 +81,8 @@ Tools are gated by a **capability mode**, either `read-only` (the default), `sta
 Start assistants in `read-only`, move to `standard` when you want them building cohorts and starting runs, and reserve `destructive` for sessions where you are watching closely.
 
 Use `kitaru_docs_search` when the assistant needs to check how a Kitaru feature works. It searches the guides bundled with the installed Kitaru version and returns matching sections with published documentation URLs. Open the linked page when current behavior matters, since the live docs may have changed since the package was released. Exact session and experiment-run reads also return an `inspect` dashboard link, and exact investigation reads return a `review` link when the selected server reports a dashboard. These links point to the same record the tool returned and still require normal dashboard access.
+
+When a Kitaru tool fails, returns something surprising, or has a misleading description, the assistant can call `kitaru_feedback_draft` to write up what happened, what it expected, and a proposed fix. The tool sends nothing. It masks recognizable credentials and returns a link to a new issue on the Kitaru GitHub repository with the title and description filled in. You open the link, edit or delete anything you do not want to share, and submit the issue yourself. Very long reports are shortened to fit in the link, and the description ends with your Kitaru, Python, and OS versions and the MCP mode.
 
 ### Transition failure matrix
 

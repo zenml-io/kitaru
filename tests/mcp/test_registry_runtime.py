@@ -5,6 +5,8 @@ import json
 import uuid
 from datetime import UTC, datetime
 
+import pytest
+from jsonschema import Draft202012Validator
 from mcp.types import TextContent
 from scripts.report_mcp_schema import (
     MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES,
@@ -13,6 +15,8 @@ from scripts.report_mcp_schema import (
 )
 
 from kitaru.api_models.v1.agent import AgentResponse
+from kitaru.api_models.v1.session import SessionDetailResponse, SessionResponse
+from kitaru.api_models.v1.tag import TagResponse
 from kitaru.mcp.apps import is_model_visible
 from kitaru.mcp.errors import (
     MCPToolError,
@@ -20,7 +24,14 @@ from kitaru.mcp.errors import (
     protocol_result,
     success_result,
 )
-from kitaru.mcp.models.common import RegistryReadResult, ToolResult
+from kitaru.mcp.models.common import (
+    ActivityItem,
+    ActivityReadResult,
+    PageData,
+    PageMetadata,
+    RegistryReadResult,
+    ToolResult,
+)
 from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
 
@@ -32,6 +43,7 @@ EXPECTED = {
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
+        "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
         "kitaru_session_view",
@@ -44,6 +56,7 @@ EXPECTED = {
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
+        "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
         "kitaru_session_view",
@@ -65,6 +78,7 @@ EXPECTED = {
         "kitaru_review_read",
         "kitaru_connection_read",
         "kitaru_docs_search",
+        "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
         "kitaru_session_view",
@@ -104,6 +118,7 @@ async def test_exact_capability_filtered_inventories_and_annotations() -> None:
                     "kitaru_review_read",
                     "kitaru_connection_read",
                     "kitaru_docs_search",
+                    "kitaru_feedback_draft",
                     "kitaru_failure_matrix",
                     "kitaru_failure_matrix_cell",
                     "kitaru_session_view",
@@ -132,6 +147,57 @@ async def test_actual_sdk_discovery_schemas_fit_budgets() -> None:
         _compact_size({"tools": model_visible}) < MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES
     )
     assert len(model_visible) <= MAX_MODEL_TOOLS
+
+
+@pytest.mark.parametrize("session_type", [SessionResponse, SessionDetailResponse])
+@pytest.mark.parametrize("serialized", [False, True])
+def test_activity_result_preserves_generic_pages_and_complete_session_tags(
+    session_type: type[SessionResponse], serialized: bool
+) -> None:
+    now = datetime.now(UTC)
+    tag = TagResponse(
+        id=uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        name="reviewed",
+        created=now,
+        updated=now,
+    )
+    session = session_type.model_validate(
+        {
+            "id": uuid.uuid4(),
+            "owner_id": tag.owner_id,
+            "agent_id": uuid.uuid4(),
+            "number": 1,
+            "origin": "imported",
+            "status": "completed",
+            "metadata": {},
+            "llm_call_count": 0,
+            "tool_call_count": 0,
+            "tags": [tag],
+            "created": now,
+            "updated": now,
+            "inputs": {"question": "Why?"},
+            "outputs": {"answer": "Because."},
+        }
+    )
+    page = PageData[ActivityItem](
+        items=[session],
+        page=PageMetadata(size=1, next_cursor="next-page", has_more=True),
+    )
+
+    result = ActivityReadResult.model_validate(
+        {"ok": True, "data": page.model_dump(mode="json") if serialized else page}
+    )
+    result_data = result.model_dump(mode="json")["data"]
+
+    assert result_data == {
+        "items": [session.model_dump(mode="json")],
+        "page": {"size": 1, "next_cursor": "next-page", "has_more": True},
+    }
+    assert result_data["items"][0]["tags"] == [tag.model_dump(mode="json")]
+    Draft202012Validator(ActivityReadResult.model_json_schema()).validate(
+        result.model_dump(mode="json")
+    )
 
 
 async def test_activity_child_schema_exposes_only_kind_specific_fields() -> None:

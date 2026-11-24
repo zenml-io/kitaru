@@ -408,7 +408,10 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "call_evaluator",
             }
         ),
-        reexports={"EvaluationResult": "kitaru.api_models.v1.evaluation"},
+        reexports={
+            "EvaluationResult": "kitaru.api_models.v1.evaluation",
+            "EvaluationBaselineContext": "kitaru.api_models.v1.task",
+        },
     ),
     "kitaru.task.analyzer": ModuleSpec(
         symbols=frozenset(
