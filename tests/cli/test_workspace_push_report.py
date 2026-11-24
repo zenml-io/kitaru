@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from tests.cli.workspace_push_fakes import (
     DESTINATION_URL,
@@ -53,6 +54,7 @@ from kitaru.cli.workspace_push_report import (
     build_push_result,
     describe_not_copied,
 )
+from kitaru.client.credential_store import CredentialStore
 
 
 def test_session_identity_keeps_source_identity_and_fills_gaps() -> None:
@@ -340,7 +342,7 @@ def test_push_command_needs_no_credential_for_an_open_destination(
         {SOURCE_URL: uuid.uuid4(), DESTINATION_URL: uuid.uuid4()},
         destination_scheme=AuthScheme.NONE,
     )
-    build_client = workspace_push_destination.build_api_client
+    build_client = workspace_push_destination.build_destination_client
     credentials: list[str] = []
 
     def record_client(
@@ -352,13 +354,47 @@ def test_push_command_needs_no_credential_for_an_open_destination(
     async def push_nothing(*_args: Any, **_kwargs: Any) -> PushReport:
         return PushReport(SOURCE_URL, DESTINATION_URL, dry_run=False)
 
-    monkeypatch.setattr(workspace_push_destination, "build_api_client", record_client)
+    monkeypatch.setattr(
+        workspace_push_destination, "build_destination_client", record_client
+    )
     monkeypatch.setattr(workspace_push, "push_workspace", push_nothing)
 
     code = run_push()
 
     assert code == 0, capsys.readouterr().err
     assert credentials == ["none", "none"]
+
+
+@pytest.mark.parametrize("variable", ["KITARU_API_KEY", "KITARU_API_TOKEN"])
+async def test_unauthenticated_destination_client_sends_no_source_key(
+    monkeypatch: pytest.MonkeyPatch, variable: str
+) -> None:
+    """A client chosen to send no credential ignores the source's key."""
+    monkeypatch.setenv(variable, "KITKEY_source")
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    client = workspace_push_destination.build_destination_client(
+        DESTINATION_URL,
+        ResolvedCredential("none"),
+        CredentialStore(persist=False),
+        timeout=5.0,
+    )
+    client._http = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url=DESTINATION_URL,
+        headers=client._http.headers,
+    )
+    try:
+        await client.request("GET", "/api/v1/info")
+    finally:
+        await client.close()
+
+    assert len(requests) == 1
+    assert "authorization" not in requests[0].headers
 
 
 def test_push_command_rejects_another_url_of_the_source_server(

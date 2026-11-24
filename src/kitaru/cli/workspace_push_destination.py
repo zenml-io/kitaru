@@ -16,6 +16,7 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+from kitaru.analytics.source import AnalyticsSource
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.cli.config import (
     ResolvedCredential,
@@ -52,7 +53,7 @@ async def open_destination_client(
     Yields:
         Client for the destination, authenticated when it requires it.
     """
-    probe = build_api_client(
+    probe = build_destination_client(
         destination, ResolvedCredential("none"), credential_store, timeout
     )
     try:
@@ -64,11 +65,43 @@ async def open_destination_client(
     credential = select_destination_credential(
         destination_info, destination, credential_store
     )
-    client = build_api_client(destination, credential, credential_store, timeout)
+    client = build_destination_client(
+        destination, credential, credential_store, timeout
+    )
     try:
         yield client
     finally:
         await client.close()
+
+
+def build_destination_client(
+    destination: str,
+    credential: ResolvedCredential,
+    credential_store: CredentialStore,
+    timeout: float,
+) -> KitaruAPIClient:
+    """Build a client for the destination that authenticates only as selected.
+
+    Args:
+        destination: Destination server URL.
+        credential: Credential selected for the destination.
+        credential_store: Store holding the destination's credential.
+        timeout: HTTP timeout in seconds.
+
+    Returns:
+        Client for the destination.
+    """
+    if credential.source != "none":
+        return build_api_client(destination, credential, credential_store, timeout)
+    # An SDK client given neither a key nor a store falls back to
+    # KITARU_API_TOKEN and KITARU_API_KEY, which belong to the source, so an
+    # empty in-memory store keeps the source's key off the destination.
+    return KitaruAPIClient(
+        base_url=destination,
+        credential_store=CredentialStore(persist=False),
+        timeout=timeout,
+        analytics_source=AnalyticsSource.CLI,
+    )
 
 
 def check_distinct_servers(
