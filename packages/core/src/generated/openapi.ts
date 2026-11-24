@@ -5767,6 +5767,11 @@ export interface components {
          */
         ErrorBody: {
             /**
+             * Code
+             * @description Machine-readable error code.
+             */
+            code?: string | null;
+            /**
              * Detail
              * @description Error message.
              */
