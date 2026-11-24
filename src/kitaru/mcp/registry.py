@@ -54,6 +54,7 @@ from kitaru.mcp.models.failure_matrix import (
     FailureMatrixRequest,
     FailureMatrixResult,
 )
+from kitaru.mcp.models.feedback import FeedbackDraftRequest, FeedbackDraftResult
 from kitaru.mcp.models.management import CohortsManageRequest, ExperimentsManageRequest
 from kitaru.mcp.models.registry import RegistryReadRequest
 from kitaru.mcp.models.review import ReviewManageRequest, ReviewReadRequest
@@ -78,6 +79,7 @@ from kitaru.mcp.tools.docs import handle_docs_search
 from kitaru.mcp.tools.evaluators import handle_evaluators_manage
 from kitaru.mcp.tools.experiments import handle_experiments_manage
 from kitaru.mcp.tools.failure_matrix import handle_failure_cell, handle_failure_matrix
+from kitaru.mcp.tools.feedback import handle_feedback_draft
 from kitaru.mcp.tools.registry import handle_registry_read
 from kitaru.mcp.tools.review import handle_review_manage, handle_review_read
 from kitaru.mcp.tools.sessions import handle_session_read
@@ -186,6 +188,23 @@ async def docs_search_tool(
     return cast(
         DocsSearchResult,
         await _invoke(context, request, DocsSearchResult, handle_docs_search),
+    )
+
+
+async def feedback_draft_tool(
+    request: FeedbackDraftRequest, context: Context
+) -> FeedbackDraftResult:
+    """Draft a GitHub issue about a Kitaru bug or confusing tool; send nothing.
+
+    Use this when a Kitaru tool fails, returns something surprising, or its
+    description misled you. Nothing is sent: show the user `issue_url` so they
+    can review the prefilled issue and submit it themselves. Describe the tool,
+    arguments, and result; leave out session content the user has not agreed
+    to share.
+    """
+    return cast(
+        FeedbackDraftResult,
+        await _invoke(context, request, FeedbackDraftResult, handle_feedback_draft),
     )
 
 
@@ -402,6 +421,13 @@ TOOL_SPECS = (
         _describe(docs_search_tool),
         _annotations(read_only=True, destructive=False, idempotent=True),
         docs_search_tool,
+    ),
+    ToolSpec(
+        "kitaru_feedback_draft",
+        CapabilityMode.READ_ONLY,
+        _describe(feedback_draft_tool),
+        _annotations(read_only=True, destructive=False, idempotent=True),
+        feedback_draft_tool,
     ),
     ToolSpec(
         "kitaru_failure_matrix",

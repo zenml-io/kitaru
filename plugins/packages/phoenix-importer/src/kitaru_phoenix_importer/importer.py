@@ -111,10 +111,8 @@ def _attribute(attributes: dict[str, Any], *keys: str) -> Any:
     return None
 
 
-def _indexed_messages(
-    attributes: dict[str, Any], key: str
-) -> list[dict[str, Any]] | None:
-    """Collect Phoenix's indexed OpenInference message attributes."""
+def _get_indexed_fields(attributes: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    """Collect indexed attributes in numeric order without decoding field values."""
     messages: dict[int, dict[str, Any]] = defaultdict(dict)
     prefix = f"{key}."
     for attribute_key, value in attributes.items():
@@ -126,8 +124,55 @@ def _indexed_messages(
                 message_index = int(index)
             except ValueError:
                 continue
-            messages[message_index][field] = _decode_json(value)
-    return [messages[index] for index in sorted(messages)] or None
+            messages[message_index][field] = value
+    return [messages[index] for index in sorted(messages)]
+
+
+def _normalize_message_fields(fields: dict[str, Any], namespace: str) -> dict[str, Any]:
+    """Remove OpenInference namespaces and reconstruct known nested fields."""
+    normalized = {
+        key.removeprefix(f"{namespace}."): value for key, value in fields.items()
+    }
+    for key in ("function", "image", "audio", "video"):
+        prefix = f"{key}."
+        nested = {
+            field.removeprefix(prefix).removeprefix(prefix): value
+            for field, value in normalized.items()
+            if field.startswith(prefix)
+        }
+        if nested:
+            normalized = {
+                field: value
+                for field, value in normalized.items()
+                if not field.startswith(prefix)
+            }
+            normalized[key] = nested
+    return normalized
+
+
+def _indexed_messages(
+    attributes: dict[str, Any], key: str
+) -> list[dict[str, Any]] | None:
+    """Normalize flattened OpenInference messages and their indexed parts."""
+    messages = []
+    for fields in _get_indexed_fields(attributes, key):
+        message = _normalize_message_fields(fields, "message")
+        for field, namespace in (
+            ("tool_calls", "tool_call"),
+            ("contents", "message_content"),
+        ):
+            parts = _get_indexed_fields(message, field)
+            if parts:
+                message = {
+                    name: value
+                    for name, value in message.items()
+                    if not name.startswith(f"{field}.")
+                }
+                message[field] = [
+                    _normalize_message_fields(part, namespace) for part in parts
+                ]
+        messages.append(message)
+    return messages or None
 
 
 def _llm_messages(attributes: dict[str, Any], direction: str) -> Any:
@@ -136,6 +181,77 @@ def _llm_messages(attributes: dict[str, Any], direction: str) -> Any:
     if messages is not None:
         return messages
     return _indexed_messages(attributes, f"llm.{direction}_messages")
+
+
+def _get_part_text_selector(
+    part: Any, selector: str, *, reasoning: bool = False
+) -> str | None:
+    """Select visible text from a typed message content part."""
+    if not isinstance(part, dict):
+        return None
+    kinds = (
+        ("reasoning", "thinking")
+        if reasoning
+        else ("text", "input_text", "output_text")
+    )
+    if part.get("type") not in kinds:
+        return None
+    for field in ("text", "content", "thinking"):
+        value = part.get(field)
+        if isinstance(value, str) and value.strip():
+            return f"{selector}/{field}"
+    return None
+
+
+def _get_message_text_selector(message: dict[str, Any], selector: str) -> str | None:
+    """Select plain text or the first visible text part of a message."""
+    content = message.get("content")
+    if isinstance(content, str) and content.strip():
+        return f"{selector}/content"
+    for field in ("content", "contents", "parts"):
+        parts = message.get(field)
+        if isinstance(parts, list):
+            for index, part in enumerate(parts):
+                match = _get_part_text_selector(part, f"{selector}/{field}/{index}")
+                if match is not None:
+                    return match
+    return None
+
+
+def _get_message_selector(value: Any, role: str, *, latest: bool = False) -> str | None:
+    """Select text from the first or latest message of a particular role."""
+    if isinstance(value, str):
+        return "" if role != "system" and value.strip() else None
+    if not isinstance(value, list):
+        return None
+    indexes = range(len(value) - 1, -1, -1) if latest else range(len(value))
+    for index in indexes:
+        message = value[index]
+        if isinstance(message, dict) and message.get("role") == role:
+            return _get_message_text_selector(message, f"/{index}")
+    return None
+
+
+def _get_reasoning_selectors(value: Any) -> list[str]:
+    """Select visible reasoning from the first assistant output's content parts."""
+    selectors: list[str] = []
+    if not isinstance(value, list):
+        return selectors
+    for message_index, message in enumerate(value):
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        for field in ("content", "contents", "parts"):
+            parts = message.get(field)
+            if not isinstance(parts, list):
+                continue
+            for index, part in enumerate(parts):
+                selector = _get_part_text_selector(
+                    part, f"/{message_index}/{field}/{index}", reasoning=True
+                )
+                if selector is not None:
+                    selectors.append(selector)
+        return selectors
+    return selectors
 
 
 def _parse_values(
@@ -504,6 +620,31 @@ def _node(span: dict[str, Any], trace_id: str) -> tuple[ImportedNode, str | None
         output_messages = _llm_messages(raw_attributes, "output")
     else:
         input_messages = output_messages = None
+    inputs = (
+        input_messages
+        if input_messages is not None
+        else _attribute(
+            raw_attributes,
+            "input.value",
+            "gen_ai.prompt",
+            "gen_ai.tool.call.arguments",
+            "gcp.vertex.agent.tool_call_args",
+            "gcp.vertex.agent.llm_request",
+        )
+    )
+    outputs = (
+        output_messages
+        if output_messages is not None
+        else _attribute(
+            raw_attributes,
+            "output.value",
+            "gen_ai.completion",
+            "gen_ai.tool.call.result",
+            "tool.result",
+            "gcp.vertex.agent.tool_response",
+            "gcp.vertex.agent.llm_response",
+        )
+    )
     attributes: dict[str, Any] = {"phoenix.attributes": raw_attributes}
     if span.get("events") not in (None, []):
         attributes["phoenix.events"] = span["events"]
@@ -526,30 +667,27 @@ def _node(span: dict[str, Any], trace_id: str) -> tuple[ImportedNode, str | None
             ),
             started_at=_datetime(span.get("start_time")),
             ended_at=_datetime(span.get("end_time")),
-            inputs=(
-                input_messages
-                if node_type is NodeType.LLM_CALL and input_messages is not None
-                else _attribute(
-                    raw_attributes,
-                    "input.value",
-                    "gen_ai.prompt",
-                    "gen_ai.tool.call.arguments",
-                    "gcp.vertex.agent.tool_call_args",
-                    "gcp.vertex.agent.llm_request",
-                )
+            inputs=inputs,
+            outputs=outputs,
+            input_text_selector=(
+                _get_message_selector(inputs, "user", latest=True)
+                if node_type is NodeType.LLM_CALL
+                else None
             ),
-            outputs=(
-                output_messages
-                if node_type is NodeType.LLM_CALL and output_messages is not None
-                else _attribute(
-                    raw_attributes,
-                    "output.value",
-                    "gen_ai.completion",
-                    "gen_ai.tool.call.result",
-                    "tool.result",
-                    "gcp.vertex.agent.tool_response",
-                    "gcp.vertex.agent.llm_response",
-                )
+            output_text_selector=(
+                _get_message_selector(outputs, "assistant")
+                if node_type is NodeType.LLM_CALL
+                else None
+            ),
+            system_prompt_selector=(
+                _get_message_selector(inputs, "system")
+                if node_type is NodeType.LLM_CALL
+                else None
+            ),
+            reasoning_selectors=(
+                _get_reasoning_selectors(outputs)
+                if node_type is NodeType.LLM_CALL
+                else []
             ),
             requested_model=(
                 str(value)
