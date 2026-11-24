@@ -104,6 +104,20 @@ def build_user_enriched_properties(account: Account) -> dict[str, Any]:
     return properties
 
 
+def _get_non_empty_str(value: Any) -> str | None:
+    """Strip a string value, treating non-strings and blank strings as unset.
+
+    Args:
+        value: Value read from free-form account data.
+
+    Returns:
+        The stripped string, or None when nothing is left.
+    """
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
+
+
 def build_survey_traits(account: Account) -> dict[str, Any]:
     """Build the traits of an account from its onboarding survey answers.
 
@@ -114,24 +128,24 @@ def build_survey_traits(account: Account) -> dict[str, Any]:
         User traits.
     """
     metadata = account.metadata
-    traits: dict[str, Any] = {
-        key: metadata[key]
-        for key in ("newsletter", "framework", "trace_provider")
-        if metadata.get(key) is not None
-    }
-    survey_name = metadata.get("name")
-    traits["name"] = (
-        survey_name if isinstance(survey_name, str) and survey_name else account.name
-    )
+    traits: dict[str, Any] = {}
+    # Account metadata accepts arbitrary JSON, so only a real boolean counts as
+    # a newsletter answer.
+    newsletter = metadata.get("newsletter")
+    if isinstance(newsletter, bool):
+        traits["newsletter"] = newsletter
+    for key in ("framework", "trace_provider"):
+        if (answer := _get_non_empty_str(metadata.get(key))) is not None:
+            traits[key] = answer
+    traits["name"] = _get_non_empty_str(metadata.get("name")) or account.name
     # An address only goes on the profile with consent to be contacted. The
     # one typed into the survey is the newer answer, so it wins over the email
     # the account was created with.
-    if metadata.get("newsletter") is True:
-        work_email = metadata.get("work_email")
-        email = (
-            work_email if isinstance(work_email, str) and work_email else account.email
+    if newsletter is True:
+        email = _get_non_empty_str(metadata.get("work_email")) or _get_non_empty_str(
+            account.email
         )
-        if email:
+        if email is not None:
             traits["email"] = email
     return traits
 
