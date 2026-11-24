@@ -95,6 +95,17 @@ class CohortVersionRepository(Protocol):
         """
         ...
 
+    async def find_latest(self, cohort_id: uuid.UUID) -> CohortVersion | None:
+        """Find the highest-numbered surviving version of a cohort.
+
+        Args:
+            cohort_id: Id of the cohort.
+
+        Returns:
+            Highest-numbered stored version, or None when none remain.
+        """
+        ...
+
     async def query(
         self, version_filter: CohortVersionFilter
     ) -> tuple[list[CohortVersion], str | None]:

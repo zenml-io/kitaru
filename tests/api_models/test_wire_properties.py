@@ -368,6 +368,20 @@ def _session_response_inputs(
         "tokens": draw(st.one_of(st.none(), _TOKEN_USAGE)),
         "llm_call_count": draw(st.integers(0, 100000)),
         "tool_call_count": draw(st.integers(0, 100000)),
+        "tags": draw(
+            st.lists(
+                st.fixed_dictionaries(
+                    {
+                        "id": st.uuids(),
+                        "owner_id": st.uuids(),
+                        "created": _AWARE_DATETIMES,
+                        "updated": _AWARE_DATETIMES,
+                        "name": _SAFE_TEXT,
+                    }
+                ),
+                max_size=3,
+            )
+        ),
     }
     return kwargs, _wire_value(kwargs)
 

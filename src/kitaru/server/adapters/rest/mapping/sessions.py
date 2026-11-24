@@ -23,6 +23,7 @@ from kitaru.api_models.v1.session import (
     SessionUpdateRequest,
 )
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
+from kitaru.server.adapters.rest.mapping.tags import tag_to_response
 from kitaru.server.application.models.session import (
     SessionCreate,
     SessionFilter,
@@ -95,6 +96,7 @@ def session_to_response(session: Session) -> SessionResponse:
         tokens=session.tokens,
         llm_call_count=session.llm_call_count,
         tool_call_count=session.tool_call_count,
+        tags=[tag_to_response(tag) for tag in session.tags],
         created=session.created,
         updated=session.updated,
     )

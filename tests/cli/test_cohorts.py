@@ -483,6 +483,7 @@ async def test_version_create_preserves_order_and_empty_delta() -> None:
         remove_session_ids=None,
         display_version=None,
         baseline_id=None,
+        allow_unchanged=True,
     )
     assert "membership is unchanged" in empty.warnings[0]
     _, request = client.created_versions[-1]
@@ -503,6 +504,7 @@ async def test_version_create_empty_delta_copies_explicit_baseline() -> None:
         remove_session_ids=None,
         display_version=None,
         baseline_id=baseline_id,
+        allow_unchanged=True,
     )
 
     assert result.warnings == [
@@ -810,3 +812,91 @@ def test_public_argv_errors_are_structured_and_do_not_mutate(
     error = json.loads(capsys.readouterr().err)
     assert error["command"] == "cohort.version.create"
     assert error["error"]["kind"] == "invalid_arguments"
+
+
+@pytest.mark.parametrize("label", [None, "discovery-v1"])
+@pytest.mark.parametrize("baseline", [None, uuid.UUID(int=1)])
+async def test_version_create_empty_delta_rejected_before_lookup(
+    label: str | None, baseline: uuid.UUID | None
+) -> None:
+    """A label or baseline alone cannot accidentally create an unchanged version."""
+    client = StubCohortClient()
+    with pytest.raises(CLIError, match="--allow-unchanged"):
+        await cohorts.create_cohort_version(
+            client,
+            "regression",
+            add_session_ids=None,
+            remove_session_ids=[],
+            display_version=label,
+            baseline_id=baseline,
+        )
+    assert client.cohort_lookups == 0
+    assert client.created_versions == []
+
+
+async def test_latest_uses_highest_surviving_version() -> None:
+    """The assigned-number counter can point past every surviving version."""
+    client = StubCohortClient()
+    client.cohort.values["latest_version"] = 9
+    _, version = await cohorts.get_cohort_version(client, "regression@latest")
+    assert version.id == client.version_two.id
+
+
+@pytest.mark.parametrize("baseline", [None, uuid.UUID(int=1)])
+def test_public_empty_delta_requires_opt_in_with_display_version(
+    argv_client: StubCohortClient,
+    capsys: pytest.CaptureFixture[str],
+    baseline: uuid.UUID | None,
+) -> None:
+    """The public command requires opt-in even when a version label is supplied."""
+    args = [
+        "cohort",
+        "version",
+        "create",
+        "regression",
+        "--display-version",
+        "discovery-v1",
+    ]
+    if baseline is not None:
+        args.extend(["--baseline", str(baseline)])
+    assert app_module.main(args) != 0
+    error = json.loads(capsys.readouterr().err)
+    assert error["error"]["kind"] == "invalid_arguments"
+    assert "--allow-unchanged" in error["error"]["message"]
+    assert argv_client.cohort_lookups == 0
+    assert argv_client.created_versions == []
+    assert app_module.main([*args, "--allow-unchanged"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["warnings"]
+    _, request = argv_client.created_versions[-1]
+    assert request.baseline_id == baseline
+    assert request.display_version == "discovery-v1"
+    assert request.add_session_ids == []
+    assert request.remove_session_ids == []
+
+
+def test_cohort_version_create_help_and_schema_explain_opt_in(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Offline help and machine schema describe the intentional empty copy flag."""
+    assert app_module.main(["cohort", "version", "create", "--help"]) == 0
+    assert "--allow-unchanged" in capsys.readouterr().out
+    assert app_module.main(["schema", "cohort", "version", "create"]) == 0
+    schema = json.loads(capsys.readouterr().out)
+    assert "--allow-unchanged" in json.dumps(schema)
+
+
+async def test_latest_without_surviving_versions_is_not_found() -> None:
+    """A positive high-water mark does not promise a live version."""
+    client = StubCohortClient()
+    client.cohort.values["latest_version"] = 9
+
+    async def no_versions(cohort_id: uuid.UUID):
+        assert cohort_id == client.cohort.id
+        for version in []:
+            yield version
+
+    client.cohorts.iter_versions = no_versions
+    with pytest.raises(CLIError, match="has no versions") as error:
+        await cohorts.get_cohort_version(client, "regression@latest")
+    assert error.value.kind == "not_found"

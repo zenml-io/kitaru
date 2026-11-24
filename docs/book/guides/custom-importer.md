@@ -55,6 +55,8 @@ Yield lazily; the import consumes one item at a time, so payload size is bounded
 
 Set a stable `external_id` from your source system and register a nonempty provider name. In Kitaru 0.24.0 and later, the provider and `external_id` identify an imported session per destination logical agent. Re-importing the same identity under that agent skips the existing session, even if you select another agent version; importing it under a different agent creates a separate session. A session skipped because it was stored by an earlier import is not refreshed with new content.
 
+Registered importer jobs pass the configured provider to `kitaru.task.importer.ingest_session`, which stores it as `imported_from`. If you call the helper directly from an importer-backed adapter, pass the real source provider yourself. This is required when the call includes nodes for a terminal `RECORDED` or `REPLAY` session. Native recording and replay write nodes while the session is `IN_PROGRESS`, then finish it; see [Build a project-local adapter](../adapters/custom.md).
+
 Kitaru 0.23.0 used a global `(imported_from, external_id)` key across agents. Check the destination server's version before relying on either scope. See [Kitaru JSONL](importing-sessions.md) for the full identity and deduplication rules.
 
 ## Fetch traces from your own API instead of a file

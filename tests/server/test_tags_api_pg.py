@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """End-to-end tag tests against PostgreSQL."""
 
+import json
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -123,3 +124,80 @@ async def test_delete_cascades_links_across_requests(client: httpx.AsyncClient) 
         f"/api/v1/tags/{created['id']}/links/session/{resource_id}"
     )
     assert response.status_code == 404
+
+
+async def test_session_tag_reads_and_alias_pagination(
+    client: httpx.AsyncClient,
+) -> None:
+    """Load current tags across requests and share canonical alias cursors."""
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    sessions = []
+    for _ in range(3):
+        response = await client.post(
+            "/api/v1/sessions",
+            json={
+                "agent_id": agent["id"],
+                "origin": "recorded",
+                "inputs": {"private": "payload"},
+                "outputs": None,
+                "metadata": {},
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["tags"] == []
+        sessions.append(response.json())
+    tag = (await client.post("/api/v1/tags", json={"name": "prod"})).json()
+    for session in sessions[:2]:
+        response = await client.post(
+            f"/api/v1/tags/{tag['id']}/links",
+            json={"resource_type": "session", "resource_id": session["id"]},
+        )
+        assert response.status_code == 201
+    first = await client.get(
+        "/api/v1/sessions",
+        params={
+            "size": 1,
+            "sort": "created:asc",
+            "filter": json.dumps({"field": "tags", "op": "eq", "value": "prod"}),
+        },
+    )
+    assert first.status_code == 200
+    page = first.json()
+    assert [s["id"] for s in page["items"]] == [sessions[0]["id"]]
+    assert page["items"][0]["tags"] == [tag]
+    assert "inputs" not in page["items"][0]
+    second = await client.get(
+        "/api/v1/sessions",
+        params={
+            "size": 1,
+            "sort": "created:asc",
+            "filter": json.dumps({"field": "tag", "op": "eq", "value": "prod"}),
+            "cursor": page["next_cursor"],
+        },
+    )
+    assert second.status_code == 200
+    assert [s["id"] for s in second.json()["items"]] == [sessions[1]["id"]]
+    assert second.json()["items"][0]["tags"] == [tag]
+    assert second.json()["next_cursor"] is None
+    renamed = (
+        await client.patch(f"/api/v1/tags/{tag['id']}", json={"name": "production"})
+    ).json()
+    responses = [
+        await client.get(f"/api/v1/sessions/{sessions[0]['id']}"),
+        await client.patch(
+            f"/api/v1/sessions/{sessions[0]['id']}", json={"name": "updated"}
+        ),
+    ]
+    for response in responses:
+        assert response.status_code == 200
+        assert response.json()["tags"] == [renamed]
+    response = await client.delete(
+        f"/api/v1/tags/{tag['id']}/links/session/{sessions[0]['id']}"
+    )
+    assert response.status_code == 204
+    assert (await client.get(f"/api/v1/sessions/{sessions[0]['id']}")).json()[
+        "tags"
+    ] == []
+    assert (await client.get(f"/api/v1/sessions/{sessions[2]['id']}")).json()[
+        "tags"
+    ] == []
