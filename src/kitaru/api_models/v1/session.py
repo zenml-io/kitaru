@@ -28,6 +28,7 @@ from kitaru.api_models.v1.base import (
 )
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.filter import FilterableListParams
+from kitaru.api_models.v1.tag import TagResponse
 
 
 class SessionOrigin(StrEnum):
@@ -195,6 +196,7 @@ class SessionResponse(OwnedResponseModel):
     tokens: TokenUsage | None = Field(default=None, description="Total token usage.")
     llm_call_count: int = Field(description="Number of LLM call nodes.")
     tool_call_count: int = Field(description="Number of tool call nodes.")
+    tags: list[TagResponse] = Field(default_factory=list, description="Linked tags.")
 
 
 class SessionDetailResponse(SessionResponse):

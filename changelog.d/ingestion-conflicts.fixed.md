@@ -1,0 +1,1 @@
+- Fixed session ingestion reporting unrelated conflicts as duplicate sessions. Importer-backed adapters now preserve the server error, import jobs count refused sessions as failures, and duplicate detection remains compatible with older servers.

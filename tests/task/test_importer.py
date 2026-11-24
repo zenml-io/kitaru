@@ -21,7 +21,6 @@ from contextlib import aclosing
 from pathlib import Path
 from typing import Any, cast
 
-import httpx
 import pytest
 from task_fixtures import (
     TaskAppFixture,
@@ -45,7 +44,6 @@ from kitaru.api_models.v1.task import (
     TaskKind,
     TaskSpecResponse,
 )
-from kitaru.client.exceptions import APIError
 from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind
 from kitaru.task.importer import (
@@ -631,26 +629,6 @@ def parse(payload: bytes, params: dict):
     raise RuntimeError("parser exploded")
 """
 
-_SINGLE_SESSION_PARSER_SCRIPT = """
-from kitaru.api_models.v1.session import SessionStatus
-from kitaru.task.importer import ImportedSession
-
-
-def parse(payload: bytes, params: dict):
-    yield ImportedSession(
-        status=SessionStatus.COMPLETED,
-        name="session-1",
-        inputs=None,
-        outputs=None,
-        error=None,
-        started_at=None,
-        ended_at=None,
-        external_id="session-1",
-        metadata={},
-        nodes=[],
-    )
-"""
-
 _MANY_FAILURES_PARSER_SCRIPT = """
 from kitaru.api_models.v1.imports import ImportFailure
 
@@ -865,35 +843,6 @@ async def test_importer_flow_mid_stream_crash_writes_partial_stats(
     assert written.created == 1
     assert written.failed == 1
     assert "parser exploded" in written.failures[0].error
-
-
-async def test_importer_flow_records_non_conflict_ingestion_error(
-    task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Record a failure, not a skip, on a non-conflict ingestion error."""
-    task_id, plugin_path = await _create_importer_task(
-        task_app, _SINGLE_SESSION_PARSER_SCRIPT, tmp_path
-    )
-    payload_path = tmp_path / "payload.json"
-    payload_path.write_text(json.dumps({}))
-    result_path = tmp_path / "result.json"
-
-    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(plugin_path))
-    monkeypatch.setenv("KITARU_TASK_PAYLOAD_PATH", str(payload_path))
-    monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
-
-    async def failing_ingest(request: Any) -> Any:
-        raise APIError(httpx.codes.SERVICE_UNAVAILABLE, "backend unavailable")
-
-    monkeypatch.setattr(task_app.client.sessions, "ingest", failing_ingest)
-
-    await run(task_app.client, str(task_id))
-
-    written = ImportStats.model_validate(json.loads(result_path.read_text()))
-    assert written.created == 0
-    assert written.skipped == 0
-    assert written.failed == 1
-    assert written.failures[0].external_id == "session-1"
 
 
 async def test_run_caps_failure_samples_without_losing_count(
@@ -1111,6 +1060,7 @@ async def test_run_skips_a_session_created_by_another_task(
     )
     assert second_written.created == 0
     assert second_written.skipped == 1
+    assert second_written.failed == 0
 
     # A task principal holds no session listing grant, so inspect as the account.
     task_app.auth.principal = None

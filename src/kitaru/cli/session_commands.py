@@ -373,7 +373,8 @@ async def session_import(
     session_app,
     build_spec(
         ("session", "list"),
-        "List sessions.",
+        "List one page of sessions. Continue with --cursor using page.next_cursor; "
+        "--size/--limit sets the page size, not a total across pages.",
         parameters=(
             *LIST_PARAMETERS,
             ParameterSpec(
@@ -500,8 +501,7 @@ async def session_get(session: uuid.UUID, /) -> CommandResult:
         "List a session's nodes in index order.",
         parameters=(
             ParameterSpec("SESSION", "UUID", "argument", True, "Session ID."),
-            ParameterSpec("--size", "integer", "option", False, "Items per page."),
-            ParameterSpec("--cursor", "string", "option", False, "Page cursor."),
+            *LIST_PARAMETERS[:2],
             ParameterSpec(
                 "--filter",
                 "JSON",

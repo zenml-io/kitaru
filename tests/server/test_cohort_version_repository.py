@@ -548,3 +548,51 @@ async def test_session_in_cohort_version_delete_conflict(setup: Setup) -> None:
         match=f"Session {session_id} is referenced by a cohort version",
     ):
         await sessions.delete(session_id)
+
+
+async def test_find_latest_tracks_surviving_numbers_and_cohort(setup: Setup) -> None:
+    """Find by assigned number rather than id, ignoring deleted and other versions."""
+    repository, _, owner_id, cohort_id, make_cohort_id, _, _, _ = setup
+    assert await repository.find_latest(cohort_id) is None
+    first = await repository.create(
+        CohortVersion(
+            id=uuid.UUID(int=30),
+            owner_id=owner_id,
+            cohort_id=cohort_id,
+            session_count=0,
+        ),
+        [],
+    )
+    second = await repository.create(
+        CohortVersion(
+            id=uuid.UUID(int=20),
+            owner_id=owner_id,
+            cohort_id=cohort_id,
+            session_count=0,
+        ),
+        [],
+    )
+    third = await repository.create(
+        CohortVersion(
+            id=uuid.UUID(int=10),
+            owner_id=owner_id,
+            cohort_id=cohort_id,
+            session_count=0,
+        ),
+        [],
+    )
+    other_id = await make_cohort_id()
+    await repository.create(
+        CohortVersion(owner_id=owner_id, cohort_id=other_id, session_count=0), []
+    )
+    assert await repository.find_latest(cohort_id) == third
+    await repository.delete(second.id)
+    assert await repository.find_latest(cohort_id) == third
+    await repository.delete(third.id)
+    assert await repository.find_latest(cohort_id) == first
+    await repository.delete(first.id)
+    assert await repository.find_latest(cohort_id) is None
+    following = await repository.create(
+        CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=0), []
+    )
+    assert following.version == 4
