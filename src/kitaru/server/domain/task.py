@@ -48,6 +48,7 @@ __all__ = [
     "ApiImportSourceSpec",
     "BlobImportSourceSpec",
     "DuplicateEvaluationTask",
+    "EvaluationBaselineContext",
     "EvaluationTask",
     "EvaluationTaskDetails",
     "ImportSourceSpec",
@@ -809,6 +810,13 @@ class AgentTaskDetails(FrozenModel):
     replay_id: uuid.UUID | None = None
 
 
+class EvaluationBaselineContext(FrozenModel):
+    """Baseline identity and case metadata for evaluating a replay result."""
+
+    session_id: uuid.UUID
+    metadata: dict[str, Any]
+
+
 class EvaluationTaskDetails(FrozenModel):
     """Evaluation task details."""
 
@@ -817,6 +825,7 @@ class EvaluationTaskDetails(FrozenModel):
     params: dict[str, Any] = Field(default_factory=dict)
     plugin: PluginSpec
     input_session_id: uuid.UUID
+    baseline: EvaluationBaselineContext | None = None
 
 
 class ImportTaskDetails(FrozenModel):

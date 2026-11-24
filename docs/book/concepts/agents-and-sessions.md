@@ -24,6 +24,23 @@ kitaru agent register support-agent \
 
 This creates the agent and its first **agent version** in one step. A version pins what "the agent" meant at a point in time: a run spec (the command that starts your agent, its working directory, environment, secrets, and timeout) plus optional capability metadata (tools, MCP servers, skills). The run spec is what a [worker](workers.md) executes when a replay or experiment re-runs the agent in your environment.
 
+To register from a YAML or JSON spec, put the agent's description under `parent` and the version's description under `version`:
+
+```yaml
+parent:
+  description: Resolves support tickets
+version:
+  description: Adds refund lookup
+  run_spec:
+    command: python support.py
+```
+
+```bash
+kitaru agent register support-agent --spec agent.yaml
+```
+
+A top-level `description` is also accepted as shorthand for `parent.description`. If you provide both, they must agree. `version.description` always describes only that version. A registration spec supplies the complete definition, so do not combine `--spec` with direct options such as `--description` or `--command`. For `agent version register --spec`, the document contains only the version fields, without the `parent` and `version` sections.
+
 Versions are server-numbered (1, 2, 3, …); `--display-version` attaches your own label, such as a semver, a git SHA, or a branch name:
 
 ```bash
@@ -131,9 +148,42 @@ kitaru session list --agent support-agent --origin recorded
 kitaru session nodes <session-id> --include-payloads
 ```
 
+`session list` returns one page, with 20 sessions by default. Use `--size` (or its alias `--limit`) to request 1–1,000 sessions per page:
+
+```bash
+kitaru session list --agent support-agent --tag imported-baseline --size 100 -o json
+```
+
+The JSON response includes `items` and `page.next_cursor`. If that cursor is not null, pass it with `--cursor` and keep the same filters and sort to read the next page. Stop when `page.next_cursor` is null. `--limit` sets the page size; it does not fetch every page or cap a separate all-results operation. Use either `--size` or `--limit` in one invocation.
+
 To read a whole session at once, `kitaru session read <session-id>` prints a compact transcript: the request and system prompt once, then one line per node with each model call's new text, short tool arguments and results, and errors in full. Long fields end in `[+N chars]`; `kitaru session read <session-id> --node 4 --full` shows the node at position 4 without cuts.
 
 Sessions attach to the rest of the system by reference: a [cohort version](cohorts.md) pins a set of session ids, an [evaluation](evaluators.md) row evaluates one session, and a [replay](replay.md) points at its baseline session and produces a result session. **Tags** group resources ad hoc before they graduate into a cohort or another durable structure. A tag can link to a session, cohort, cohort version, agent version, experiment, or experiment run. Apply one to a whole import with `kitaru session import --tag ...`, then select on it anywhere that resource supports a `tag` filter, such as `kitaru session evaluate --tag ...`.
+
+In the Python client, filter sessions by the tag's name with `field="tag"`. The session filter also accepts `field="tags"` as an alias. `eq` matches one tag name; `in` matches any of the supplied names. To require several tags, combine separate conditions with `and`.
+
+```python
+import asyncio
+
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
+from kitaru.api_models.v1.session import SessionListParams
+from kitaru.client import KitaruAPIClient
+
+
+async def main() -> None:
+    params = SessionListParams(
+        size=100,
+        filter=FilterCondition(field="tag", op=FilterOp.EQ, value="imported-baseline"),
+    )
+    async with KitaruAPIClient() as client:
+        async for session in client.sessions.iter(params):
+            print(session.id, [tag.name for tag in session.tags])
+
+
+asyncio.run(main())
+```
+
+`list()` returns one page, while `iter()` follows cursors until all matching sessions have been read. Session list and detail responses include the currently linked tags; sessions without tags return an empty list. The Python client also accepts older server responses without the `tags` field, using an empty list, so an empty list from an older server does not establish that the session has no tags.
 
 The native MCP server can list and filter tags, use existing filtered reads to rediscover tagged resources, and create, rename, link, unlink, or delete tags according to its capability mode. It cannot enumerate every link belonging to a tag. Deleting a tag removes all of its resource links; it does not delete the linked resources.
 

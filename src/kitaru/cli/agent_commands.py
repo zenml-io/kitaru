@@ -35,7 +35,14 @@ from kitaru.cli.output import CLIError, CommandResult
 from kitaru.cli.schema import ParameterSpec
 
 _AGENT_SOURCE_PARAMETERS = (
-    ParameterSpec("--spec", "path", "option", False, "YAML or JSON spec document."),
+    ParameterSpec(
+        "--spec",
+        "path",
+        "option",
+        False,
+        "Version-only YAML or JSON spec; description describes this version. Cannot "
+        "combine with direct agent options.",
+    ),
     ParameterSpec(
         "--command", "string", "option", False, "Shell command stored as supplied."
     ),
@@ -80,16 +87,29 @@ def _agent_direct_values(
         parameters=(
             ParameterSpec("NAME", "string", "argument", True, "New agent name."),
             ParameterSpec(
-                "--description", "string", "option", False, "Parent description."
+                "--description",
+                "string",
+                "option",
+                False,
+                "Agent description (parent.description in --spec).",
             ),
             ParameterSpec(
                 "--version-description",
                 "string",
                 "option",
                 False,
-                "Version description.",
+                "Version description (version.description in --spec).",
             ),
-            *_AGENT_SOURCE_PARAMETERS,
+            ParameterSpec(
+                "--spec",
+                "path",
+                "option",
+                False,
+                "Agent YAML or JSON: parent.description describes the agent; "
+                "top-level description is shorthand. version.description describes "
+                "the version. Cannot combine with direct agent options.",
+            ),
+            *_AGENT_SOURCE_PARAMETERS[1:],
         ),
         read_only=False,
         side_effects=("reads_local_file", "creates_remote_state"),
@@ -130,7 +150,14 @@ async def agent_register(
             skill=skill,
         ):
             raise CLIError(
-                "invalid_arguments", "--spec conflicts with direct agent options."
+                "invalid_arguments",
+                "--spec conflicts with direct agent options.",
+                hint=(
+                    "Put the agent description in parent.description (or top-level "
+                    "description), and the version description in "
+                    "version.description. Alternatively omit --spec and use direct "
+                    "options."
+                ),
             )
         parent_request, version_request = registration.load_agent_register_spec(
             name, spec
@@ -283,7 +310,12 @@ async def agent_version_register(
             skill=skill,
         ):
             raise CLIError(
-                "invalid_arguments", "--spec conflicts with direct agent options."
+                "invalid_arguments",
+                "--spec conflicts with direct agent options.",
+                hint=(
+                    "Put the version description in description in the version-only "
+                    "spec, or omit --spec and use direct options."
+                ),
             )
         request = registration.load_agent_version_spec(spec)
     else:

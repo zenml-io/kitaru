@@ -292,6 +292,13 @@ async def cohort_delete(cohort: str, /, *, force: bool = False) -> CommandResult
                 False,
                 "Human-readable version.",
             ),
+            ParameterSpec(
+                "--allow-unchanged",
+                "boolean",
+                "option",
+                False,
+                "Allow an empty delta to copy the latest or baseline membership.",
+            ),
             IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
@@ -308,6 +315,12 @@ async def cohort_version_create(
     remove_session: list[uuid.UUID] | None = None,
     baseline: uuid.UUID | None = None,
     display_version: str | None = None,
+    allow_unchanged: Annotated[
+        bool,
+        Parameter(
+            help="Allow an empty delta to copy the latest or baseline membership."
+        ),
+    ] = False,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create an immutable version from an ordered membership delta."""
@@ -319,6 +332,7 @@ async def cohort_version_create(
             remove_session_ids=remove_session,
             baseline_id=baseline,
             display_version=display_version,
+            allow_unchanged=allow_unchanged,
             idempotency_key=idempotency_key,
         )
 

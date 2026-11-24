@@ -56,6 +56,7 @@ from kitaru.server.adapters.db.orm.session_group import (
     SessionGroupORM,
     SessionGroupSessionORM,
 )
+from kitaru.server.adapters.db.orm.tag import TagLinkORM, TagORM
 from kitaru.server.adapters.db.pagination import IdOrder, paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session import SessionFilter
@@ -253,7 +254,11 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 AgentVersionNotFound(agent_version_id)
             )
         await self._add(row, constraints)
-        return row.to_domain(exclude={column.key for column in PAYLOAD_COLUMNS})
+        return (
+            await self._hydrate_tags(
+                [row.to_domain(exclude={column.key for column in PAYLOAD_COLUMNS})]
+            )
+        )[0]
 
     async def get(
         self, session_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
@@ -277,7 +282,11 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         row = await self._get_row(
             session_id, exclusive=exclusive, deferred_columns=deferred
         )
-        return row.to_domain(exclude={column.key for column in deferred})
+        return (
+            await self._hydrate_tags(
+                [row.to_domain(exclude={column.key for column in deferred})]
+            )
+        )[0]
 
     async def get_by_task_id(
         self, task_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
@@ -300,7 +309,11 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             statement = statement.with_for_update()
         row = (await self._session.scalars(statement)).one_or_none()
         exclude = {column.key for column in deferred}
-        return row.to_domain(exclude=exclude) if row is not None else None
+        return (
+            (await self._hydrate_tags([row.to_domain(exclude=exclude)]))[0]
+            if row is not None
+            else None
+        )
 
     async def query(
         self, session_filter: SessionFilter, include_payloads: bool
@@ -332,7 +345,9 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             IdOrder(SessionORM.id, session_filter.sort),
         )
         exclude = {column.key for column in deferred}
-        return [row.to_domain(exclude=exclude) for row in rows], next_cursor
+        return await self._hydrate_tags(
+            [row.to_domain(exclude=exclude) for row in rows]
+        ), next_cursor
 
     async def create_group(
         self, job_id: uuid.UUID, session_ids: Sequence[uuid.UUID]
@@ -411,10 +426,33 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         deferred = () if include_payloads else PAYLOAD_COLUMNS
         rows = await self._load_by_ids(list(session_ids), deferred_columns=deferred)
         exclude = {column.key for column in deferred}
-        return {
-            session_id: row.to_domain(exclude=exclude)
-            for session_id, row in rows.items()
-        }
+        sessions = await self._hydrate_tags(
+            [row.to_domain(exclude=exclude) for row in rows.values()]
+        )
+        return {session.id: session for session in sessions}
+
+    async def _hydrate_tags(self, sessions: list[Session]) -> list[Session]:
+        """Load current tags for a bounded set of sessions in one query.
+
+        Args:
+            sessions: Stored sessions to populate.
+
+        Returns:
+            Sessions with their current linked tags.
+        """
+        if not sessions:
+            return sessions
+        by_id = {session.id: session for session in sessions}
+        statement = (
+            select(TagLinkORM.session_id, TagORM)
+            .join(TagORM, TagORM.id == TagLinkORM.tag_id)
+            .where(TagLinkORM.session_id.in_(by_id))
+            .order_by(TagORM.id)
+        )
+        for session_id, tag in (await self._session.execute(statement)).all():
+            assert session_id is not None
+            by_id[session_id].tags.append(tag.to_domain())
+        return sessions
 
     async def update(self, session: Session) -> Session:
         """Persist changes to an existing session.
@@ -442,7 +480,11 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 )
             }
         )
-        return row.to_domain(exclude={column.key for column in PAYLOAD_COLUMNS})
+        return (
+            await self._hydrate_tags(
+                [row.to_domain(exclude={column.key for column in PAYLOAD_COLUMNS})]
+            )
+        )[0]
 
     async def finalize_replay_inputs(self, session: Session) -> Session:
         """Persist final replay inputs with the terminal session transition.
@@ -463,7 +505,11 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 )
             }
         )
-        return row.to_domain(exclude={column.key for column in PAYLOAD_COLUMNS})
+        return (
+            await self._hydrate_tags(
+                [row.to_domain(exclude={column.key for column in PAYLOAD_COLUMNS})]
+            )
+        )[0]
 
     async def delete(self, session_id: uuid.UUID) -> None:
         """Delete a session by id.

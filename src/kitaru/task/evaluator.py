@@ -24,12 +24,17 @@ from pydantic import BaseModel
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.session import SessionDetailResponse
 from kitaru.api_models.v1.session_node import SessionNodeResponse
-from kitaru.api_models.v1.task import EvaluationTaskDetails, ScriptPluginSpec
+from kitaru.api_models.v1.task import (
+    EvaluationBaselineContext,
+    EvaluationTaskDetails,
+    ScriptPluginSpec,
+)
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.task.plugins import PluginLoadError, load_plugin_entrypoint, load_source_ref
 from kitaru.task.task_io import get_required_env, write_task_result
 
 __all__ = [
+    "EvaluationBaselineContext",
     "EvaluationError",
     "EvaluationResult",
     "EvaluatorReturn",
@@ -46,10 +51,11 @@ class EvaluationError(Exception):
 
 
 class SessionView(BaseModel):
-    """Session view."""
+    """Scored session and nodes with optional original-session metadata."""
 
     session: SessionDetailResponse
     nodes: list[SessionNodeResponse]
+    baseline: EvaluationBaselineContext | None = None
 
 
 EvaluatorReturn = EvaluationResult | list[EvaluationResult]
@@ -143,7 +149,9 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
     evaluator = _resolve_evaluator(details)
 
     full = await client.sessions.get_with_nodes(details.input_session_id)
-    view = SessionView(session=full.session, nodes=full.nodes)
+    view = SessionView(
+        session=full.session, nodes=full.nodes, baseline=details.baseline
+    )
     results = await call_evaluator(
         details.evaluator_name, evaluator, view, details.params
     )

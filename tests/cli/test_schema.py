@@ -359,7 +359,7 @@ def test_cohort_schema_describes_exact_and_destructive_commands() -> None:
         parameter["name"] for parameter in commands["cohort.version.list"]["parameters"]
     }
     assert "--filter" not in version_list_parameters
-    assert {"--size", "--cursor", "--sort"} <= version_list_parameters
+    assert {"--size/--limit", "--cursor", "--sort"} <= version_list_parameters
     version_reference = {
         parameter["name"]: parameter
         for parameter in commands["cohort.version.get"]["parameters"]
@@ -504,7 +504,7 @@ def test_help_exposes_only_the_schema_command_surface(capsys) -> None:
     assert app_module.main(["session", "list", "--help"]) == 0
     help_text = capsys.readouterr().out
     assert "Items per page" in help_text
-    assert "Cursor from the previous page" in help_text
+    assert "page.next_cursor" in help_text
     assert "created:asc or created:desc" in help_text
     assert "JSON filter expression" in help_text
 
