@@ -2,11 +2,10 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-25
+
 - Record `input_tokens_details.cache_write_tokens` as `cache_write_input_tokens` and include cache writes in genai-prices cost estimates.
-
-### Release context
-
-- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
+- Require Kitaru 0.27.7 or later for `TokenUsage.cache_write_input_tokens`.
 
 ## 0.4.2 - 2026-11-02
 

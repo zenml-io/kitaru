@@ -2,15 +2,15 @@
 
 ## Unreleased
 
-- Import prompt-cache writes from `input_cache_write_tokens`, `cache_write_tokens`, or `cache_creation_input_tokens` usage details, or from the sum of `input_cache_creation`, `input_ephemeral_5m_input_tokens`, and `input_ephemeral_1h_input_tokens`, as `cache_write_input_tokens`.
 - Preserve recorded `gen_ai.system_instructions` in node attributes and retain unsupported offered tool definitions so replay can reject an incomplete request instead of silently removing instructions or tools.
 - Keep PydanticAI's `model_request_parameters`, without its tool lists, under the `langfuse.model_request_parameters` node metadata key, so `allow_text_output` (which made PydanticAI send `tool_choice: required`) survives the import.
 - Keep a tool's `strict` flag and functions declared without parameters (with an empty schema) in `kitaru.tool_definitions`.
 - Keep generation tool definitions under the `kitaru.tool_definitions` node metadata key, normalized to the OpenAI chat-completions form, from `input.tools`, PydanticAI `model_request_parameters` function and output tools, or `gen_ai.tool.definitions`.
 
-### Release context
+## 0.6.0 - 2026-11-25
 
-- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
+- Import prompt-cache writes from `input_cache_write_tokens`, `cache_write_tokens`, or `cache_creation_input_tokens` usage details, or from the sum of `input_cache_creation`, `input_ephemeral_5m_input_tokens`, and `input_ephemeral_1h_input_tokens`, as `cache_write_input_tokens`.
+- Require Kitaru 0.27.7 or later for `TokenUsage.cache_write_input_tokens`.
 
 ## 0.5.0 - 2026-10-30
 
