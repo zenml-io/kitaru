@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Bundle Kitaru UI `0.6.0`, including the Kaizen/Hashi redesign, MLflow trace provider, provider API key links, tinted evaluation verdict pills, raw node JSON inspector fill, and repository-or-traces onboarding.
 - The server now sends an analytics identify call when a user first finishes the onboarding survey, carrying their name, newsletter choice, framework, and trace provider. The email is included only when they opted in to the newsletter. Analytics stay off with `KITARU_SERVER_ANALYTICS_OPT_IN=false`.
 - Updated the default plugin catalog pins to `kitaru-post-import-insights==0.5.0`, `kitaru-braintrust-importer==0.5.0`, `kitaru-langfuse-importer==0.6.0`, `kitaru-logfire-importer==0.5.0`, `kitaru-langsmith-importer==0.5.0`, `kitaru-mlflow-importer==0.2.0`, and `kitaru-phoenix-importer==0.5.0`, delivering `cache_write_input_tokens` capture, resource insight cards, import-free session analysis, and Phoenix message rendering.
 - Coordinated companion plugin and TypeScript releases: `kitaru-claude-agent-sdk` `0.2.0`, `kitaru-elevenlabs-importer` `0.2.0`, `kitaru-langgraph` `0.4.0`, `kitaru-mastra-importer` `0.3.0`, `kitaru-openai-agents` `0.5.0`, `kitaru-pydantic-ai` `0.5.0`, and `@zenml-io/kitaru`, `@zenml-io/kitaru-mastra`, and `@zenml-io/kitaru-vercel-ai` `0.9.0`.
