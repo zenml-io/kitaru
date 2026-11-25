@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.27.8] - 2026-11-25
+
+### Added
+
+- Added the `kitaru_session_view` MCP tool, which opens a session, or an investigation's sessions one by one, in an interactive trace viewer in hosts that support MCP Apps. Reviewers highlight text or click steps to save notes, answer the investigation's questions, and set verdicts; everything is saved as ordinary Kitaru annotations and verdicts. Besides the built-in `default` viewer, a custom viewer is one HTML file in `~/.config/kitaru/viewers` (or `--viewers-dir`, `KITARU_MCP_VIEWERS_DIR`), and the app-only `kitaru_viewer_read` and `kitaru_viewer_write` tools serve it. `python -m kitaru.mcp.viewer_preview` previews a viewer in a local stand-in for an MCP host, and the `kitaru-trace-viewer` skill builds a viewer from your own sessions.
+- Add `kitaru feedback`, which drafts a GitHub issue about a Kitaru bug and prints a prefilled link that you review and submit yourself. Nothing is sent automatically. When a command crashes or the server returns HTTP 500, the error hint now suggests it.
+- Add the `kitaru_feedback_draft` MCP tool. When a Kitaru tool fails or misleads an assistant, the assistant can write up the problem and a proposed fix, and the tool returns a prefilled GitHub issue link that you review and submit yourself. Nothing is sent automatically.
+- Added `last_user_activity` to `GET /api/v1/info`. It reports when a user last used the server, and the current time while a task is claimed or running. It is null when unknown or not recorded. Worker traffic (registration, token renewal, the startup lookup of a pre-registered worker, claim polling, and heartbeats) does not count.
+- Added `kitaru session analyze --agent AGENT --analyzer ANALYZER@VERSION`, which runs analyzers over any set of one agent's finished sessions selected by session IDs, `--tag`, `--cohort`, `--import-id`, `--started-after`, `--started-before`, or `--filter`. The server fixes the matching sessions when it creates the job, and caps one request at `KITARU_SERVER_ANALYSIS_SESSION_LIMIT` sessions (1,000 by default). The SDK and REST equivalents are `client.analyses.create(...)` and `POST /api/v1/analyses`.
+- Added an `analysis` operation to the `kitaru_workflow_start` MCP tool, so coding agents can run analyzers over existing sessions.
+
+### Changed
+
+- The server now sends an analytics identify call when a user first finishes the onboarding survey, carrying their name, newsletter choice, framework, and trace provider. The email is included only when they opted in to the newsletter. Analytics stay off with `KITARU_SERVER_ANALYTICS_OPT_IN=false`.
+- Updated the default plugin catalog pins to `kitaru-post-import-insights==0.5.0`, `kitaru-braintrust-importer==0.5.0`, `kitaru-langfuse-importer==0.6.0`, `kitaru-logfire-importer==0.5.0`, `kitaru-langsmith-importer==0.5.0`, `kitaru-mlflow-importer==0.2.0`, and `kitaru-phoenix-importer==0.5.0`, delivering `cache_write_input_tokens` capture, resource insight cards, import-free session analysis, and Phoenix message rendering.
+- Coordinated companion plugin and TypeScript releases: `kitaru-claude-agent-sdk` `0.2.0`, `kitaru-elevenlabs-importer` `0.2.0`, `kitaru-langgraph` `0.4.0`, `kitaru-mastra-importer` `0.3.0`, `kitaru-openai-agents` `0.5.0`, `kitaru-pydantic-ai` `0.5.0`, and `@zenml-io/kitaru`, `@zenml-io/kitaru-mastra`, and `@zenml-io/kitaru-vercel-ai` `0.9.0`.
+
+### Fixed
+
+- Require `--allow-unchanged` when the CLI creates a cohort version without membership changes, while preserving intentional copies and existing Python client and REST behavior.
+- Resolve default cohort baselines and `@latest` to the highest surviving version after deletion without reusing version numbers.
+- Accept an agent registration spec's top-level `description` as shorthand for `parent.description`, with a clear error when both descriptions conflict.
+- Accept `tags` as an alias for the session filter's `tag` field and include linked tags in session responses; Python clients continue to accept responses from older servers without tags.
+- Accept `--limit` as an alias for `--size` on paginated list commands and clarify cursor pagination.
+- Made a replay result's baseline session ID and metadata available to Python and TypeScript evaluators through `SessionView.baseline`, keeping case labels separate from agent inputs and result metadata.
+- Fixed session ingestion reporting unrelated conflicts as duplicate sessions. Importer-backed adapters now preserve the server error, import jobs count refused sessions as failures, and duplicate detection remains compatible with older servers.
+- Fixed Phoenix-imported model calls showing raw message fields instead of readable prompts and replies, while preserving tool calls and visible reasoning.
+- Fixed `kitaru worker start` occasionally crashing with exit code 1 instead of draining when Ctrl-C or SIGTERM arrived while the worker was writing a lifecycle event.
+
 ## [0.27.7] - 2026-11-10
 
 ### Added

@@ -2,13 +2,12 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-25
+
 - Raise a clear `ValueError` before calling the server when `KitaruAgent` runs outside a Kitaru worker task without `agent_id` or `agent_version_id`.
 - Record PydanticAI's `cache_write_tokens` as `cache_write_input_tokens`, include cache writes in genai-prices cost estimates, and pass them to custom cost calculators as `PydanticAIUsageSummary.cache_write_input_tokens`.
 - Support PydanticAI 2.62 through 2.66 in addition to the existing 2.14 through 2.61 minor lines.
-
-### Release context
-
-- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
+- Require Kitaru 0.27.7 or later for `TokenUsage.cache_write_input_tokens`.
 
 ## 0.4.0 - 2026-10-30
 
