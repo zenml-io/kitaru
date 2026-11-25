@@ -123,10 +123,10 @@ async def update_insight(
     service: Annotated[InsightService, Depends(get_insight_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> InsightResponse:
-    """Update an insight's title and description.
+    """Update an insight's title, summary, or status.
 
     Clients observe HTTP 200 on success, 404 when no insight has this id,
-    and 422 when the update clears the insight title.
+    and 422 when the update clears a required field.
 
     Args:
         insight_id: Id of the insight.

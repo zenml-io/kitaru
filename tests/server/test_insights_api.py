@@ -20,7 +20,11 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from kitaru.api_models.v1.insight import MAX_INSIGHT_BATCH_SIZE, TextInsightData
+from kitaru.api_models.v1.insight import (
+    MAX_INSIGHT_BATCH_SIZE,
+    InsightFinding,
+    TextArtifact,
+)
 from kitaru.server.adapters.rest.dependencies import authorize, get_insight_service
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
@@ -40,13 +44,32 @@ from kitaru_test_support import (
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
 
-def _text_insight(title: str = "insight", name: str = "insight") -> dict[str, object]:
-    """Build a text insight input payload."""
-    return {
+def _text_insight(
+    title: str = "insight",
+    name: str = "insight",
+    *,
+    summary: str | None = None,
+    source_provider: str | None = None,
+) -> dict[str, object]:
+    """Build a structured insight input payload."""
+    payload: dict[str, object] = {
         "name": name,
         "title": title,
-        "data": {"type": "text", "content": "Latency regressed."},
+        "findings": [
+            {
+                "id": "f1",
+                "title": title,
+                "artifacts": [
+                    {"type": "text", "style": "body", "content": "Latency regressed."}
+                ],
+            }
+        ],
     }
+    if summary is not None:
+        payload["summary"] = summary
+    if source_provider is not None:
+        payload["source_provider"] = source_provider
+    return payload
 
 
 @pytest.fixture
@@ -117,6 +140,9 @@ async def test_create_insights(client: httpx.AsyncClient, agent_id: str) -> None
         assert uuid.UUID(item["id"])
         assert item["owner_id"] == str(ACCOUNT.id)
         assert item["agent_id"] == agent_id
+        assert item["status"] == "new"
+        assert item["task_id"] is None
+        assert len(item["findings"]) == 1
         assert item["created"] is not None
         assert item["updated"] is not None
 
@@ -148,9 +174,7 @@ async def test_create_insights_empty_title(
         "/api/v1/insights",
         json={
             "agent_id": agent_id,
-            "insights": [
-                {"name": "n", "title": "", "data": {"type": "text", "content": "a"}}
-            ],
+            "insights": [_text_insight(title="")],
         },
     )
     assert response.status_code == 422
@@ -164,9 +188,7 @@ async def test_create_insights_empty_name(
         "/api/v1/insights",
         json={
             "agent_id": agent_id,
-            "insights": [
-                {"name": "", "title": "t", "data": {"type": "text", "content": "a"}}
-            ],
+            "insights": [_text_insight(name="")],
         },
     )
     assert response.status_code == 422
@@ -188,7 +210,7 @@ async def test_create_insights_over_batch_limit(
 async def test_create_insights_duplicate_category_labels(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
-    """Observe HTTP 422 when a categorical insight repeats a category label."""
+    """Observe HTTP 422 when a categorical artifact repeats a category label."""
     response = await client.post(
         "/api/v1/insights",
         json={
@@ -197,13 +219,22 @@ async def test_create_insights_duplicate_category_labels(
                 {
                     "name": "categories",
                     "title": "categories",
-                    "data": {
-                        "type": "categorical",
-                        "values": [
-                            {"label": "a", "value": 1.0},
-                            {"label": "a", "value": 2.0},
-                        ],
-                    },
+                    "findings": [
+                        {
+                            "id": "f1",
+                            "title": "categories",
+                            "artifacts": [
+                                {
+                                    "type": "categorical",
+                                    "unit": "sessions",
+                                    "values": [
+                                        {"label": "a", "value": 1.0},
+                                        {"label": "a", "value": 2.0},
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
                 }
             ],
         },
@@ -223,13 +254,30 @@ async def test_create_insights_non_contiguous_bins(
                 {
                     "name": "latency",
                     "title": "latency",
-                    "data": {
-                        "type": "binned",
-                        "bins": [
-                            {"lower_bound": None, "upper_bound": 1.0, "count": 3},
-                            {"lower_bound": 2.0, "upper_bound": None, "count": 1},
-                        ],
-                    },
+                    "findings": [
+                        {
+                            "id": "f1",
+                            "title": "latency",
+                            "artifacts": [
+                                {
+                                    "type": "binned",
+                                    "unit": "seconds",
+                                    "bins": [
+                                        {
+                                            "lower_bound": None,
+                                            "upper_bound": 1.0,
+                                            "count": 3,
+                                        },
+                                        {
+                                            "lower_bound": 2.0,
+                                            "upper_bound": None,
+                                            "count": 1,
+                                        },
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
                 }
             ],
         },
@@ -251,6 +299,7 @@ async def test_get_insight(client: httpx.AsyncClient, agent_id: str) -> None:
     assert body == created
     assert body["analyzer_version_id"] is None
     assert body["analyzer_params"] is None
+    assert body["task_id"] is None
     assert body["import_id"] is None
 
 
@@ -266,7 +315,7 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight(
     plugin_repository: FakePluginRepository,
     agent_id: str,
 ) -> None:
-    """Carry the analyzer version and params for an insight produced by a task."""
+    """Carry the analyzer version, task id, and params for a task-born insight."""
     plugin = await plugin_repository.create(
         Plugin(owner_id=ACCOUNT.id, kind=PluginKind.ANALYZER, name="trends")
     )
@@ -275,6 +324,7 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight(
         ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="analyze"),
         display_version=None,
     )
+    task_id = uuid.uuid4()
     stored = await insight_repository.create_many(
         [
             Insight(
@@ -282,8 +332,15 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight(
                 agent_id=uuid.UUID(agent_id),
                 name="insight",
                 title="insight",
-                data=TextInsightData(content="Latency regressed."),
+                findings=[
+                    InsightFinding(
+                        id="f1",
+                        title="insight",
+                        artifacts=[TextArtifact(content="Latency regressed.")],
+                    )
+                ],
                 analyzer_version_id=version.id,
+                task_id=task_id,
                 analyzer_params={"window_days": 7},
                 import_id=uuid.uuid4(),
             )
@@ -294,6 +351,7 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight(
     assert response.status_code == 200
     body = response.json()
     assert body["analyzer_version_id"] == str(version.id)
+    assert body["task_id"] == str(task_id)
     assert body["analyzer_params"] == {"window_days": 7}
     assert body["import_id"] == str(stored[0].import_id)
 
@@ -365,38 +423,49 @@ async def test_list_insights_filters_by_name(
     assert body["items"][0]["name"] == "first"
 
 
-async def test_list_insights_filters_by_type(
+async def test_list_insights_filters_by_status_and_source_provider(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
-    """Filter insights by their data type."""
-    await client.post(
-        "/api/v1/insights",
-        json={"agent_id": agent_id, "insights": [_text_insight()]},
-    )
-    await client.post(
-        "/api/v1/insights",
-        json={
-            "agent_id": agent_id,
-            "insights": [
-                {
-                    "name": "categories",
-                    "title": "categories",
-                    "data": {
-                        "type": "categorical",
-                        "values": [{"label": "a", "value": 1.0}],
-                    },
-                }
-            ],
-        },
+    """Filter insights by status and source_provider."""
+    created = (
+        await client.post(
+            "/api/v1/insights",
+            json={
+                "agent_id": agent_id,
+                "insights": [
+                    _text_insight("first", name="first", source_provider="Langfuse"),
+                    _text_insight("second", name="second", source_provider="LangSmith"),
+                ],
+            },
+        )
+    ).json()
+    await client.patch(
+        f"/api/v1/insights/{created[0]['id']}", json={"status": "reviewed"}
     )
 
-    filter_expression = {"field": "type", "op": "eq", "value": "categorical"}
-    response = await client.get(
-        "/api/v1/insights", params={"filter": json.dumps(filter_expression)}
-    )
-    body = response.json()
-    assert len(body["items"]) == 1
-    assert body["items"][0]["data"]["type"] == "categorical"
+    by_status = (
+        await client.get(
+            "/api/v1/insights",
+            params={
+                "filter": json.dumps(
+                    {"field": "status", "op": "eq", "value": "reviewed"}
+                )
+            },
+        )
+    ).json()
+    assert [item["id"] for item in by_status["items"]] == [created[0]["id"]]
+
+    by_provider = (
+        await client.get(
+            "/api/v1/insights",
+            params={
+                "filter": json.dumps(
+                    {"field": "source_provider", "op": "eq", "value": "LangSmith"}
+                )
+            },
+        )
+    ).json()
+    assert [item["id"] for item in by_provider["items"]] == [created[1]["id"]]
 
 
 async def test_list_insights_walks_pages(
@@ -428,10 +497,10 @@ async def test_list_insights_walks_pages(
     assert len(set(collected)) == 3
 
 
-async def test_update_insight_title_and_description(
+async def test_update_insight_title_summary_and_status(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
-    """Update an insight's title and description."""
+    """Update an insight's title, summary, and status."""
     created = (
         await client.post(
             "/api/v1/insights",
@@ -440,43 +509,48 @@ async def test_update_insight_title_and_description(
     ).json()[0]
     response = await client.patch(
         f"/api/v1/insights/{created['id']}",
-        json={"title": "renamed", "description": "new description"},
+        json={"title": "renamed", "summary": "new summary", "status": "reviewed"},
     )
     assert response.status_code == 200
     body = response.json()
     assert body["title"] == "renamed"
-    assert body["description"] == "new description"
+    assert body["summary"] == "new summary"
+    assert body["status"] == "reviewed"
 
 
-async def test_update_insight_clears_description_with_explicit_null(
+async def test_update_insight_clears_summary_with_explicit_null(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
-    """Clear an insight's description with an explicit null."""
-    insight = _text_insight()
-    insight["description"] = "old description"
+    """Clear an insight's summary with an explicit null."""
     created = (
         await client.post(
-            "/api/v1/insights", json={"agent_id": agent_id, "insights": [insight]}
+            "/api/v1/insights",
+            json={
+                "agent_id": agent_id,
+                "insights": [_text_insight(summary="old summary")],
+            },
         )
     ).json()[0]
-    assert created["description"] == "old description"
+    assert created["summary"] == "old summary"
 
     response = await client.patch(
-        f"/api/v1/insights/{created['id']}", json={"description": None}
+        f"/api/v1/insights/{created['id']}", json={"summary": None}
     )
     assert response.status_code == 200
-    assert response.json()["description"] is None
+    assert response.json()["summary"] is None
 
 
-async def test_update_insight_omitted_description_leaves_it_unchanged(
+async def test_update_insight_omitted_summary_leaves_it_unchanged(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
-    """Leave an insight's description untouched when the field is omitted."""
-    insight = _text_insight()
-    insight["description"] = "old description"
+    """Leave an insight's summary untouched when the field is omitted."""
     created = (
         await client.post(
-            "/api/v1/insights", json={"agent_id": agent_id, "insights": [insight]}
+            "/api/v1/insights",
+            json={
+                "agent_id": agent_id,
+                "insights": [_text_insight(summary="old summary")],
+            },
         )
     ).json()[0]
 
@@ -486,7 +560,7 @@ async def test_update_insight_omitted_description_leaves_it_unchanged(
     assert response.status_code == 200
     body = response.json()
     assert body["title"] == "renamed"
-    assert body["description"] == "old description"
+    assert body["summary"] == "old summary"
 
 
 async def test_update_insight_rejects_name(

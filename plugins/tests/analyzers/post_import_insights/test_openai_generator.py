@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kitaru.api_models.v1.insight import CategoricalInsightData, CategoryValue
+from kitaru.api_models.v1.insight import StatGridArtifact, StatItem
 from kitaru_post_import_insights.generation import (
     AnalystPlan,
     AnalystProjection,
@@ -61,8 +61,8 @@ def _projection() -> AnalystProjection:
                 detector_description="Repeated calls",
                 caveat=None,
                 facts=[],
-                chart_data=CategoricalInsightData(
-                    values=[CategoryValue(label="Observed", value=1)]
+                chart_data=StatGridArtifact(
+                    items=[StatItem(label="Observed", value=1)]
                 ),
                 evidence_locators=[
                     EvidenceLocator(

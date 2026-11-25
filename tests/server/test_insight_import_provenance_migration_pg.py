@@ -26,9 +26,6 @@ from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
 from kitaru.server.adapters.db.repositories.agent_repository import SQLAgentRepository
-from kitaru.server.adapters.db.repositories.insight_repository import (
-    SQLInsightRepository,
-)
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
@@ -145,10 +142,17 @@ async def test_upgrade_backfills_imports_and_downgrade_preserves_insights() -> N
 
         await alembic.upgrade(IMPORT_PROVENANCE_REVISION)
         async with factory() as session:
-            insights = SQLInsightRepository(session)
-            assert (await insights.get(insight_ids[0])).import_id == import_id
-            assert (await insights.get(insight_ids[1])).import_id is None
-            assert (await insights.get(insight_ids[2])).import_id is None
+            # Read the historical schema directly, since later migrations
+            # replaced the insight columns selected by InsightORM.
+            rows = {
+                row.id: row.import_id
+                for row in (
+                    await session.execute(text("SELECT id, import_id FROM insight"))
+                ).all()
+            }
+            assert rows[insight_ids[0]] == import_id
+            assert rows[insight_ids[1]] is None
+            assert rows[insight_ids[2]] is None
             plugins = SQLPluginRepository(session)
             await plugins.delete(plugin.id)
             await session.commit()

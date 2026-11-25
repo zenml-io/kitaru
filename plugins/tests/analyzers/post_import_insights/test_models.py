@@ -21,12 +21,13 @@ from pydantic import ValidationError
 
 from kitaru.api_models.v1.insight import (
     Bin,
-    BinnedInsightData,
-    CategoricalInsightData,
+    BinnedArtifact,
+    CategoricalArtifact,
     CategoryValue,
     InsightBatchCreateRequest,
+    InsightFinding,
     InsightInput,
-    TextInsightData,
+    TextArtifact,
 )
 from kitaru_post_import_insights import (
     INSIGHT_METADATA_KEY,
@@ -194,14 +195,22 @@ def _insight(
     *,
     name: str,
     title: str,
-    data: CategoricalInsightData | BinnedInsightData | TextInsightData,
+    data: CategoricalArtifact | BinnedArtifact | TextArtifact,
     metadata: InsightCardMetadata,
 ) -> InsightInput:
     return InsightInput(
         name=name,
         title=title,
-        description="A deterministic finding with editorial explanation.",
-        data=data,
+        summary="A deterministic finding with editorial explanation.",
+        findings=[
+            InsightFinding(
+                id=name,
+                title=title,
+                summary="A deterministic finding with editorial explanation.",
+                artifacts=[data],
+                contributing_session_ids=metadata.contributing_session_ids,
+            )
+        ],
         metadata={INSIGHT_METADATA_KEY: metadata.model_dump(mode="json")},
     )
 
@@ -210,7 +219,8 @@ def _result() -> InsightGenerationResult:
     categorical = _insight(
         name="tool-error-rate",
         title="Tool errors affect 2 of 3 sessions",
-        data=CategoricalInsightData(
+        data=CategoricalArtifact(
+            presentation="ranked_bars",
             unit="sessions",
             values=[
                 CategoryValue(label="tool error", value=2),
@@ -222,7 +232,8 @@ def _result() -> InsightGenerationResult:
     binned = _insight(
         name="tool-call-tail",
         title="One session makes 10 or more tool calls",
-        data=BinnedInsightData(
+        data=BinnedArtifact(
+            presentation="columns",
             unit="calls",
             bins=[
                 Bin(lower_bound=0, upper_bound=5, count=2),
@@ -266,8 +277,8 @@ def test_result_uses_canonical_insight_inputs_for_batch_creation() -> None:
     """Pass generated categorical and binned inputs directly to batch creation."""
     result = _result()
 
-    assert isinstance(result.insights[0].data, CategoricalInsightData)
-    assert isinstance(result.insights[1].data, BinnedInsightData)
+    assert isinstance(result.insights[0].findings[0].artifacts[0], CategoricalArtifact)
+    assert isinstance(result.insights[1].findings[0].artifacts[0], BinnedArtifact)
     request = InsightBatchCreateRequest(
         agent_id=result.context.agent_id,
         insights=result.insights,
@@ -416,9 +427,11 @@ def test_card_identity_respects_domain_constraints(field: str, value: str) -> No
 def test_text_insights_are_rejected() -> None:
     """Keep generated cards chart-backed."""
     data = _result().model_dump()
-    data["insights"][0]["data"] = {"type": "text", "content": "Unsupported"}
+    data["insights"][0]["findings"][0]["artifacts"] = [
+        {"type": "text", "content": "Unsupported"}
+    ]
 
-    with pytest.raises(ValidationError, match="categorical or binned"):
+    with pytest.raises(ValidationError, match="categorical, binned, or stat_grid"):
         InsightGenerationResult.model_validate(data)
 
 

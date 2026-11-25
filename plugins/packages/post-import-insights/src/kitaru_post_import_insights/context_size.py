@@ -15,7 +15,7 @@
 
 import uuid
 
-from kitaru.api_models.v1.insight import Bin, BinnedInsightData
+from kitaru.api_models.v1.insight import Bin, BinnedArtifact
 from kitaru_post_import_insights.findings import (
     CandidateCoverage,
     CandidateFinding,
@@ -279,7 +279,8 @@ class ContextSize:
                 "this agent's model calls, and at least "
                 f"{format_count(MIN_OUTLIER_TOKENS)} tokens. {_INPUT_CAVEAT}"
             ),
-            data=BinnedInsightData(
+            data=BinnedArtifact(
+                presentation="columns",
                 unit="tokens",
                 bins=[
                     Bin(upper_bound=median, count=sized_calls - at_least_median),

@@ -32,8 +32,8 @@ from typing import Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field
 
 from kitaru.api_models.v1.insight import (
-    CategoricalInsightData,
-    CategoryValue,
+    CategoricalArtifact,
+    StatGridArtifact,
 )
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import (
@@ -47,6 +47,7 @@ from kitaru_post_import_insights.findings import (
     CandidateFinding,
     DeterministicFact,
     build_binned,
+    build_categorical,
     calculate_percent,
     format_briefing,
     pluralize,
@@ -1333,17 +1334,14 @@ def _build_model_mix_briefing(
 
 def _build_categorical(
     values: Counter[str] | LabelCounts, *, unit: str
-) -> CategoricalInsightData:
+) -> CategoricalArtifact | StatGridArtifact:
     """Build categorical data with deterministic count and label ordering."""
     ordered = (
         values.top()
         if isinstance(values, LabelCounts)
         else sorted(values.items(), key=lambda item: (-item[1], item[0]))
     )
-    return CategoricalInsightData(
-        unit=unit,
-        values=[CategoryValue(label=label, value=value) for label, value in ordered],
-    )
+    return build_categorical(ordered, unit=unit)
 
 
 def _build_signal_candidate(

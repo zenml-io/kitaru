@@ -22,8 +22,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from kitaru.api_models.v1.insight import (
     Bin,
-    BinnedInsightData,
-    CategoricalInsightData,
+    BinnedArtifact,
+    CategoricalArtifact,
+    CategoryValue,
+    StatGridArtifact,
+    StatItem,
 )
 from kitaru_post_import_insights.models import (
     MAX_CONTRIBUTING_SESSIONS,
@@ -80,7 +83,7 @@ class CandidateFinding(_FindingModel):
     title: str = Field(min_length=1, max_length=255)
     fallback_description: str = Field(min_length=1, max_length=1000)
     caveat: str | None = Field(default=None, min_length=1, max_length=1000)
-    data: CategoricalInsightData | BinnedInsightData
+    data: CategoricalArtifact | BinnedArtifact | StatGridArtifact
     facts: list[DeterministicFact] = Field(default_factory=list, max_length=20)
     coverage: CandidateCoverage
     contributing_session_ids: list[uuid.UUID] = Field(
@@ -163,7 +166,38 @@ def pluralize(count: int, singular: str, plural: str | None = None) -> str:
     return f"{count} {noun}"
 
 
-def build_binned(values: Histogram, *, unit: str) -> BinnedInsightData:
+def build_categorical(
+    items: Sequence[tuple[str, int | float]],
+    *,
+    unit: str,
+) -> CategoricalArtifact | StatGridArtifact:
+    """Build ranked bars (max 8, folding excess into 'Other') or a stat tile."""
+    if len(items) == 1:
+        label, value = items[0]
+        return StatGridArtifact(
+            items=[StatItem(label=label[:60], value=value, unit=unit)]
+        )
+    if len(items) > 8:
+        top = list(items[:7])
+        other_total = sum(float(v) for _, v in items[7:])
+        other_label = "Other"
+        existing = {label for label, _ in top}
+        if other_label in existing:
+            top = [
+                (label, (float(v) + other_total) if label == other_label else v)
+                for label, v in top
+            ]
+        else:
+            top.append((other_label, other_total))
+        items = top
+    return CategoricalArtifact(
+        presentation="ranked_bars",
+        unit=unit,
+        values=[CategoryValue(label=label, value=value) for label, value in items],
+    )
+
+
+def build_binned(values: Histogram, *, unit: str) -> BinnedArtifact:
     """Count values into contiguous half-open bins."""
     bounds = values.bounds
     bins = [
@@ -174,4 +208,4 @@ def build_binned(values: Histogram, *, unit: str) -> BinnedInsightData:
         )
         for index, count in enumerate(values.bins)
     ]
-    return BinnedInsightData(unit=unit, bins=bins)
+    return BinnedArtifact(presentation="columns", unit=unit, bins=bins)

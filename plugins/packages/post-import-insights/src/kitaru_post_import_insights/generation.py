@@ -9,7 +9,11 @@ from typing import Generic, Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from kitaru.api_models.v1.insight import BinnedInsightData, CategoricalInsightData
+from kitaru.api_models.v1.insight import (
+    BinnedArtifact,
+    CategoricalArtifact,
+    StatGridArtifact,
+)
 from kitaru_post_import_insights.copy_validation import validate_card_copy
 from kitaru_post_import_insights.models import (
     MAX_INSIGHTS,
@@ -55,7 +59,7 @@ class CandidateProjection(_GenerationModel):
     detector_description: str
     caveat: str | None
     facts: list[DeterministicFact]
-    chart_data: CategoricalInsightData | BinnedInsightData
+    chart_data: CategoricalArtifact | BinnedArtifact | StatGridArtifact
     evidence_locators: list[EvidenceLocator]
     contributing_session_count: int = Field(ge=1)
 

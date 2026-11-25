@@ -27,8 +27,8 @@ import pytest
 from pydantic import ValidationError
 
 from kitaru.api_models.v1.insight import (
-    BinnedInsightData,
-    CategoricalInsightData,
+    BinnedArtifact,
+    CategoricalArtifact,
 )
 from kitaru.api_models.v1.session import (
     SessionDetailResponse,
@@ -101,7 +101,7 @@ def test_full_import_profiles_more_than_25000_nodes() -> None:
     assert result.coverage.nodes_analyzed == 26_001
     assert _candidate(result, "tool-error-mix").coverage.occurrences == 1
     distribution = _candidate(result, "tool-call-distribution")
-    assert isinstance(distribution.data, BinnedInsightData)
+    assert isinstance(distribution.data, BinnedArtifact)
     assert [bin_.count for bin_ in distribution.data.bins] == [1, 0, 0, 0, 260]
     assert distribution.coverage.occurrences == 261
     assert {fact.name: fact.value for fact in distribution.facts} == {
@@ -173,11 +173,11 @@ def test_spilled_high_cardinality_counts_are_exact_and_order_independent() -> No
         "models": 1101,
         "model_calls": 1101,
     }
-    assert isinstance(candidate.data, CategoricalInsightData)
-    assert len(candidate.data.values) == 21
+    assert isinstance(candidate.data, CategoricalArtifact)
+    assert len(candidate.data.values) == 8
     assert sum(value.value for value in candidate.data.values) == 1101
-    assert candidate.data.values[-1].label == "_Other categories (combined)"
-    assert candidate.data.values[-1].value == 1081
+    assert candidate.data.values[-1].label == "Other"
+    assert candidate.data.values[-1].value == 1094
     assert candidate.coverage.affected_sessions == 1101
     assert "combines the remaining identifiers" in (candidate.caveat or "")
 
@@ -824,7 +824,7 @@ def test_mixed_recorded_tools_and_output_requests_share_request_distribution() -
 
     assert candidate.title == "Tool requests per session have a measurable spread"
     assert candidate.data.unit == "requests"
-    assert isinstance(candidate.data, BinnedInsightData)
+    assert isinstance(candidate.data, BinnedArtifact)
     assert [bin_.count for bin_ in candidate.data.bins] == [1, 1, 0, 0, 0]
     assert "recorded tool nodes where available" in candidate.caveat
     assert profile_sessions([requested, recorded]) == result
@@ -890,7 +890,7 @@ def test_model_mix_counts_identifiers_without_normalizing_aliases() -> None:
     candidate = _candidate(profile_sessions([_session(1, nodes)]), "model-mix")
 
     assert candidate.title == "2 recorded model identifiers appear in these sessions"
-    assert isinstance(candidate.data, CategoricalInsightData)
+    assert isinstance(candidate.data, CategoricalArtifact)
     assert {item.label for item in candidate.data.values} == set(names)
     assert "same model" in candidate.caveat
 
@@ -928,22 +928,20 @@ def test_profiles_status_tool_model_activity_and_duration_charts() -> None:
     result = profile_sessions([first, second])
 
     outcome = _candidate(result, "session-outcomes")
-    assert isinstance(outcome.data, CategoricalInsightData)
+    assert isinstance(outcome.data, CategoricalArtifact)
     assert outcome.contributing_session_ids == [second.session.id]
     assert outcome.evidence[0].signal == "session-status"
+    assert isinstance(_candidate(result, "tool-call-distribution").data, BinnedArtifact)
     assert isinstance(
-        _candidate(result, "tool-call-distribution").data, BinnedInsightData
+        _candidate(result, "model-call-distribution").data, BinnedArtifact
     )
     assert isinstance(
-        _candidate(result, "model-call-distribution").data, BinnedInsightData
+        _candidate(result, "total-activity-distribution").data, BinnedArtifact
     )
     assert isinstance(
-        _candidate(result, "total-activity-distribution").data, BinnedInsightData
+        _candidate(result, "recorded-duration-distribution").data, BinnedArtifact
     )
-    assert isinstance(
-        _candidate(result, "recorded-duration-distribution").data, BinnedInsightData
-    )
-    assert isinstance(_candidate(result, "model-mix").data, CategoricalInsightData)
+    assert isinstance(_candidate(result, "model-mix").data, CategoricalArtifact)
 
 
 def test_duration_distribution_references_only_sessions_with_valid_timing() -> None:
@@ -1068,7 +1066,7 @@ def test_imported_tool_labels_stay_in_chart_data(candidate_id: str) -> None:
         sessions.append(_calls(number, calls))
 
     candidate = _candidate(profile_sessions(sessions), candidate_id)
-    assert isinstance(candidate.data, CategoricalInsightData)
+    assert isinstance(candidate.data, CategoricalArtifact)
     expected_labels = {malicious_label, other_label}
     if candidate_id == "short-tool-cycles":
         expected_labels = {f"{label} -> finish" for label in expected_labels}

@@ -16,7 +16,7 @@
 import uuid
 from decimal import ROUND_HALF_UP, Decimal
 
-from kitaru.api_models.v1.insight import CategoricalInsightData, CategoryValue
+from kitaru.api_models.v1.insight import CategoricalArtifact, CategoryValue
 from kitaru_post_import_insights.findings import (
     CandidateCoverage,
     CandidateFinding,
@@ -169,7 +169,8 @@ class CostConcentration:
                     "starting point."
                 ),
                 caveat=caveat,
-                data=CategoricalInsightData(
+                data=CategoricalArtifact(
+                    presentation="ranked_bars",
                     unit="percent",
                     values=[
                         CategoryValue(

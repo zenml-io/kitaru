@@ -832,7 +832,13 @@ async def test_job_settles_only_after_analysis_tasks_drain(
                 {
                     "name": "summary",
                     "title": "Summary",
-                    "data": {"type": "text", "content": "ok"},
+                    "findings": [
+                        {
+                            "id": "f1",
+                            "title": "Summary",
+                            "artifacts": [{"type": "text", "content": "ok"}],
+                        }
+                    ],
                 }
             ],
         ),

@@ -15,8 +15,8 @@
 
 import uuid
 from pathlib import Path
-from typing import Literal
 
+from kitaru.api_models.v1.insight import InsightStatus
 from kitaru.api_models.v1.investigation import (
     InvestigationSessionVerdict,
     InvestigationStatus,
@@ -134,11 +134,18 @@ async def insight_create(
                 "Only insights with this exact name.",
             ),
             ParameterSpec(
-                "--type",
-                "text|categorical|binned",
+                "--status",
+                "new|reviewed|archived",
                 "option",
                 False,
-                "Only insights with this data type.",
+                "Only insights with this review status.",
+            ),
+            ParameterSpec(
+                "--source-provider",
+                "string",
+                "option",
+                False,
+                "Only insights from this trace provider.",
             ),
         ),
         errors=ASSET_READ_ERRORS,
@@ -152,7 +159,8 @@ async def insight_list(
     filter: str | None = None,
     agent: str | None = None,
     name: str | None = None,
-    type: Literal["text", "categorical", "binned"] | None = None,
+    status: InsightStatus | None = None,
+    source_provider: str | None = None,
 ) -> CommandResult:
     """List one server page of insights."""
     async with invocation_context.open_asset_client() as client:
@@ -164,7 +172,8 @@ async def insight_list(
             filter=filter,
             agent=agent,
             name=name,
-            type=type,
+            status=status,
+            source_provider=source_provider,
         )
 
 
@@ -191,15 +200,20 @@ async def insight_get(insight: uuid.UUID, /) -> CommandResult:
         parameters=(
             ParameterSpec("INSIGHT", "UUID", "argument", True, "Insight ID."),
             ParameterSpec("--title", "string", "option", False, "New title."),
+            ParameterSpec("--summary", "string", "option", False, "New summary."),
             ParameterSpec(
-                "--description", "string", "option", False, "New description."
-            ),
-            ParameterSpec(
-                "--clear-description",
+                "--clear-summary",
                 "boolean",
                 "option",
                 False,
-                "Clear the description.",
+                "Clear the summary.",
+            ),
+            ParameterSpec(
+                "--status",
+                "new|reviewed|archived",
+                "option",
+                False,
+                "New review status.",
             ),
         ),
         read_only=False,
@@ -213,8 +227,9 @@ async def insight_update(
     /,
     *,
     title: str | None = None,
-    description: str | None = None,
-    clear_description: bool = False,
+    summary: str | None = None,
+    clear_summary: bool = False,
+    status: InsightStatus | None = None,
 ) -> CommandResult:
     """Update selected fields on one insight."""
     async with invocation_context.open_asset_client() as client:
@@ -222,8 +237,9 @@ async def insight_update(
             client,
             insight,
             title=title,
-            description=description,
-            clear_description=clear_description,
+            summary=summary,
+            clear_summary=clear_summary,
+            status=status,
         )
 
 

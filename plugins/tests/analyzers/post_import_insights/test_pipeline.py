@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from kitaru.api_models.v1.insight import BinnedInsightData
+from kitaru.api_models.v1.insight import BinnedArtifact
 from kitaru.api_models.v1.session import (
     SessionDetailResponse,
     SessionOrigin,
@@ -317,8 +317,9 @@ async def test_message_only_traces_generate_honest_activity_and_identifier_cards
     assert cards["tool-call-distribution"].title == (
         "Tool requests per session have a measurable spread"
     )
-    assert isinstance(cards["tool-call-distribution"].data, BinnedInsightData)
-    assert cards["tool-call-distribution"].data.unit == "requests"
+    chart = cards["tool-call-distribution"].findings[0].artifacts[0]
+    assert isinstance(chart, BinnedArtifact)
+    assert chart.unit == "requests"
     assert cards["model-mix"].title == (
         "2 recorded model identifiers appear in these sessions"
     )
@@ -356,12 +357,13 @@ async def test_deterministic_result_is_canonical_and_byte_stable() -> None:
         ) == _context().model_dump(mode="json")
         assert metadata.check_first == candidate.caveat
         assert metadata.generation.prompt == "2026-09-09.1"
-        assert finding["card_description"] == insight.description
+        assert finding["card_description"] == insight.summary
         assert finding["deterministic_description"] == candidate.fallback_description
         assert finding["facts"] == [
             fact.model_dump(mode="json") for fact in candidate.facts
         ]
-        assert finding["chart"] == insight.data.model_dump(mode="json")
+        chart = insight.findings[0].artifacts[0].model_dump(mode="json")
+        assert finding["chart"] == chart
         assert finding["candidate_coverage"] == candidate.coverage.model_dump(
             mode="json"
         )
@@ -385,11 +387,7 @@ async def test_deterministic_result_is_canonical_and_byte_stable() -> None:
         assert (
             str(metadata.contributing_session_ids[0]) in metadata.investigation_prompt
         )
-        chart_json = json.dumps(
-            insight.data.model_dump(mode="json"),
-            sort_keys=True,
-            separators=(",", ":"),
-        )
+        chart_json = json.dumps(chart, sort_keys=True, separators=(",", ":"))
         assert chart_json in metadata.investigation_prompt
 
 
@@ -491,8 +489,8 @@ async def test_model_result_keeps_editorial_and_deterministic_descriptions() -> 
     assert result.mode is GenerationMode.MODEL_BACKED
     insight = result.insights[0]
     finding = _get_finding_data(result.card_metadata(insight).investigation_prompt)
-    assert insight.description == "This pattern is worth a closer look."
-    assert finding["card_description"] == insight.description
+    assert insight.summary == "This pattern is worth a closer look."
+    assert finding["card_description"] == insight.summary
     assert finding["deterministic_description"] == candidate.fallback_description
 
 
@@ -580,7 +578,7 @@ async def test_result_byte_bound_retains_largest_ordered_card_prefix(
     for insight in bounded.insights:
         prompt = bounded.card_metadata(insight).investigation_prompt
         finding = _get_finding_data(prompt)
-        assert finding["card_description"] == insight.description
+        assert finding["card_description"] == insight.summary
         assert finding["overall_coverage"] == bounded.coverage.model_dump(mode="json")
 
 
@@ -945,7 +943,7 @@ async def test_distribution_evidence_survives_reference_caps_and_roundtrip(
     assert finding["contributing_session_ids"] == [
         str(session_id) for session_id in expected_contributors
     ]
-    assert isinstance(candidate.data, BinnedInsightData)
+    assert isinstance(candidate.data, BinnedArtifact)
     assert finding["evidence_scope"] == {
         "kind": "highest_values_in_highest_occupied_bin",
         "bin_index": len(candidate.data.bins) - 1,

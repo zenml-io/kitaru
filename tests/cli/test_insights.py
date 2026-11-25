@@ -63,11 +63,21 @@ class StubInsightClient:
                 "agent_id": str(self.agent.id),
                 "name": "latency-regressed",
                 "title": "Latency regressed",
-                "description": "p95 latency doubled after the deploy",
-                "data": {
-                    "type": "text",
-                    "content": "Latency doubled after the deploy.",
-                },
+                "summary": "p95 latency doubled after the deploy",
+                "status": "new",
+                "findings": [
+                    {
+                        "id": "f1",
+                        "title": "Latency regressed",
+                        "artifacts": [
+                            {
+                                "type": "text",
+                                "style": "body",
+                                "content": "Latency doubled after the deploy.",
+                            }
+                        ],
+                    }
+                ],
                 "metadata": {},
             },
         )
@@ -142,17 +152,37 @@ async def test_create_resolves_agent_and_parses_each_insight_json() -> None:
                 {
                     "name": "latency-regressed",
                     "title": "Latency regressed",
-                    "data": {"type": "text", "content": "It got slower."},
+                    "findings": [
+                        {
+                            "id": "f1",
+                            "title": "Latency regressed",
+                            "artifacts": [
+                                {"type": "text", "content": "It got slower."}
+                            ],
+                        }
+                    ],
                 }
             ),
             json.dumps(
                 {
                     "name": "error-mix",
                     "title": "Error mix",
-                    "data": {
-                        "type": "categorical",
-                        "values": [{"label": "timeout", "value": 3}],
-                    },
+                    "findings": [
+                        {
+                            "id": "f1",
+                            "title": "Error mix",
+                            "artifacts": [
+                                {
+                                    "type": "categorical",
+                                    "unit": "sessions",
+                                    "values": [
+                                        {"label": "timeout", "value": 3},
+                                        {"label": "other", "value": 1},
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
                 }
             ),
         ],
@@ -161,26 +191,12 @@ async def test_create_resolves_agent_and_parses_each_insight_json() -> None:
 
     [(agent_id, insight_inputs)] = client.create_calls
     assert agent_id == client.agent.id
-    assert [item.model_dump(mode="json") for item in insight_inputs] == [
-        {
-            "name": "latency-regressed",
-            "title": "Latency regressed",
-            "description": None,
-            "data": {"type": "text", "content": "It got slower."},
-            "metadata": {},
-        },
-        {
-            "name": "error-mix",
-            "title": "Error mix",
-            "description": None,
-            "data": {
-                "type": "categorical",
-                "unit": None,
-                "values": [{"label": "timeout", "value": 3}],
-            },
-            "metadata": {},
-        },
+    assert [item.name for item in insight_inputs] == [
+        "latency-regressed",
+        "error-mix",
     ]
+    assert insight_inputs[0].findings[0].artifacts[0].type == "text"
+    assert insight_inputs[1].findings[0].artifacts[0].type == "categorical"
     assert client.create_idempotency_keys == ["retry-insights"]
     assert result.items == [client.insight.model_dump(mode="json")]
 
@@ -219,7 +235,13 @@ async def test_create_rejects_malformed_insight_json(
 _TEXT_INSIGHT = {
     "name": "latency-regressed",
     "title": "Latency regressed",
-    "data": {"type": "text", "content": "It got slower."},
+    "findings": [
+        {
+            "id": "f1",
+            "title": "Latency regressed",
+            "artifacts": [{"type": "text", "content": "It got slower."}],
+        }
+    ],
 }
 
 
@@ -300,8 +322,8 @@ async def test_create_rejects_insight_with_insight_file(tmp_path: Path) -> None:
     assert client.create_calls == []
 
 
-async def test_list_combines_agent_and_type_filters_with_the_generic_filter() -> None:
-    """List folds --agent, --name, --type, and --filter into one AND expression."""
+async def test_list_combines_agent_and_status_filters_with_the_generic_filter() -> None:
+    """Fold --agent, --name, --status, --source-provider, and --filter into AND."""
     client = StubInsightClient()
 
     result = await insights.list_insights(
@@ -312,7 +334,8 @@ async def test_list_combines_agent_and_type_filters_with_the_generic_filter() ->
         filter=json.dumps({"field": "title", "op": "eq", "value": "Latency"}),
         agent="assistant",
         name="latency-regressed",
-        type="text",
+        status="new",
+        source_provider="Langfuse",
     )
 
     [params] = client.list_calls
@@ -322,7 +345,8 @@ async def test_list_combines_agent_and_type_filters_with_the_generic_filter() ->
             {"field": "title", "op": "eq", "value": "Latency"},
             {"field": "agent_id", "op": "eq", "value": str(client.agent.id)},
             {"field": "name", "op": "eq", "value": "latency-regressed"},
-            {"field": "type", "op": "eq", "value": "text"},
+            {"field": "status", "op": "eq", "value": "new"},
+            {"field": "source_provider", "op": "eq", "value": "Langfuse"},
         ]
     }
     assert client.agent_lookups == 1
@@ -331,7 +355,7 @@ async def test_list_combines_agent_and_type_filters_with_the_generic_filter() ->
 
 
 async def test_list_without_shortcuts_uses_the_generic_filter_only() -> None:
-    """List without --agent, --name, or --type leaves the generic filter untouched."""
+    """List without shortcut flags leaves the generic filter untouched."""
     client = StubInsightClient()
 
     await insights.list_insights(
@@ -342,7 +366,8 @@ async def test_list_without_shortcuts_uses_the_generic_filter_only() -> None:
         filter=None,
         agent=None,
         name=None,
-        type=None,
+        status=None,
+        source_provider=None,
     )
 
     [params] = client.list_calls
@@ -362,13 +387,15 @@ async def test_crud_commands_map_to_sdk() -> None:
         client,
         insight_id,
         title="renamed",
-        description=None,
-        clear_description=True,
+        summary=None,
+        clear_summary=True,
+        status="reviewed",
     )
     _, request = client.update_calls[-1]
     assert request.model_dump(mode="json", exclude_unset=True) == {
         "title": "renamed",
-        "description": None,
+        "summary": None,
+        "status": "reviewed",
     }
 
     with pytest.raises(CLIError, match="requires --force"):
@@ -403,7 +430,8 @@ async def test_get_and_list_pass_through_analyzer_provenance() -> None:
         filter=None,
         agent=None,
         name=None,
-        type=None,
+        status=None,
+        source_provider=None,
     )
     assert listed.items is not None
     assert listed.items[0]["analyzer_version_id"] == analyzer_version_id
@@ -418,16 +446,18 @@ async def test_sparse_update_rejects_conflicts_and_empty_changes() -> None:
             client,
             client.insight.id,
             title=None,
-            description="set",
-            clear_description=True,
+            summary="set",
+            clear_summary=True,
+            status=None,
         )
     with pytest.raises(CLIError, match="Select at least one"):
         await insights.update_insight(
             client,
             client.insight.id,
             title=None,
-            description=None,
-            clear_description=False,
+            summary=None,
+            clear_summary=False,
+            status=None,
         )
     assert client.update_calls == []
 
@@ -451,13 +481,7 @@ def test_public_argv_and_schema_cover_insight_lifecycle(
     """Every public insight leaf is registered with structured output."""
     client = argv_client
     insight_id = str(client.insight.id)
-    payload = json.dumps(
-        {
-            "name": "latency-regressed",
-            "title": "Latency regressed",
-            "data": {"type": "text", "content": "c"},
-        }
-    )
+    payload = json.dumps(_TEXT_INSIGHT)
 
     commands = [
         (

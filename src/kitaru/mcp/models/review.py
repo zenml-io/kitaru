@@ -11,7 +11,11 @@ from pydantic import Field, model_validator
 from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.filter import Filter
-from kitaru.api_models.v1.insight import MAX_INSIGHT_BATCH_SIZE, InsightInput
+from kitaru.api_models.v1.insight import (
+    MAX_INSIGHT_BATCH_SIZE,
+    InsightInput,
+    InsightStatus,
+)
 from kitaru.api_models.v1.investigation import (
     InvestigationSessionInput,
     InvestigationSessionVerdict,
@@ -134,28 +138,31 @@ class InsightsCreate(MCPModel):
 
 
 class InsightUpdate(MCPModel):
-    """Sparsely update one insight's title or description."""
+    """Sparsely update one insight's title, summary, or status."""
 
     operation: Literal["update_insight"]
     insight_id: uuid.UUID
     title: str | None = None
-    description: str | None = None
-    clear_description: bool = False
+    summary: str | None = None
+    clear_summary: bool = False
+    status: InsightStatus | None = None
 
     @model_validator(mode="after")
     def _validate_update(self) -> "InsightUpdate":
         if "title" in self.model_fields_set and self.title is None:
             raise ValueError("title cannot be null")
         if (
-            "description" in self.model_fields_set
-            and self.description is None
-            and not self.clear_description
+            "summary" in self.model_fields_set
+            and self.summary is None
+            and not self.clear_summary
         ):
-            raise ValueError("description cannot be null without clear_description")
-        if self.description is not None and self.clear_description:
-            raise ValueError("description and clear_description conflict")
-        if not ({"title", "description"} & self.model_fields_set) and not (
-            self.clear_description
+            raise ValueError("summary cannot be null without clear_summary")
+        if self.summary is not None and self.clear_summary:
+            raise ValueError("summary and clear_summary conflict")
+        if "status" in self.model_fields_set and self.status is None:
+            raise ValueError("status cannot be null")
+        if not ({"title", "summary", "status"} & self.model_fields_set) and not (
+            self.clear_summary
         ):
             raise ValueError("insight update must change at least one field")
         return self

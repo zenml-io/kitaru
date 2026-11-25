@@ -30,7 +30,16 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from kitaru.api_models.v1.insight import InsightInput, TextInsightData
+from kitaru.api_models.v1.insight import (
+    EvidenceArtifact,
+    EvidenceRow,
+    InsightCoverage,
+    InsightFinding,
+    InsightHighlight,
+    InsightInput,
+    RateArtifact,
+    TextArtifact,
+)
 from kitaru.api_models.v1.session_node import NodeType, SessionWithNodesResponse
 from kitaru.client import KitaruAPIClient
 from kitaru.json_pointer import resolve_json_pointer
@@ -385,22 +394,55 @@ def _get_start(session: SessionWithNodesResponse) -> float:
 def _to_insight(
     position: int, finding: Finding, session_ids: Sequence[UUID]
 ) -> InsightInput:
-    """Turn one finding into an insight that names its sessions."""
-    return InsightInput(
-        name=f"session-finding-{position + 1}",
-        title=finding.title,
-        description=(
-            f"Verified in {len(finding.sessions)} of {len(session_ids)} imported "
-            f"sessions. Harm: {finding.harm}."
+    """Turn one finding into a structured insight that names its sessions."""
+    matching_ids = [session_ids[n] for n in finding.sessions]
+    total = len(session_ids)
+    rate = len(matching_ids) / total if total else 0.0
+    summary = (
+        f"Verified in {len(matching_ids)} of {total} imported "
+        f"sessions. Harm: {finding.harm}."
+    )
+    finding_id = f"session-finding-{position + 1}"
+    artifacts: list[Any] = [
+        RateArtifact(
+            presentation="share_bar",
+            rate=rate,
+            numerator=len(matching_ids),
+            denominator=max(total, 1),
+            basis="Every session verified",
+            tone="danger" if finding.harm == "high" else "risk",
         ),
-        data=TextInsightData(content=finding.example),
+        TextArtifact(style="body", content=finding.example),
+        EvidenceArtifact(
+            presentation="compact",
+            total_sessions=len(matching_ids),
+            rows=[
+                EvidenceRow(session_id=sid, verdict="fail") for sid in matching_ids[:25]
+            ],
+        ),
+    ]
+    return InsightInput(
+        name=finding_id,
+        title=finding.title,
+        summary=summary,
+        coverage=InsightCoverage(sessions_analyzed=total, sessions_available=total),
+        highlight=InsightHighlight(finding_id=finding_id, artifact_index=0),
+        findings=[
+            InsightFinding(
+                id=finding_id,
+                title=finding.title,
+                summary=summary,
+                body=finding.example,
+                severity=finding.harm,
+                artifacts=artifacts,
+                contributing_session_ids=matching_ids,
+            )
+        ],
         metadata={
             SESSION_FINDINGS_METADATA_KEY: {
                 "harm": finding.harm,
                 "checks": finding.checks,
-                "contributing_session_ids": [
-                    str(session_ids[n]) for n in finding.sessions
-                ],
+                "contributing_session_ids": [str(sid) for sid in matching_ids],
             }
         },
     )

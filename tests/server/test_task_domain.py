@@ -278,7 +278,13 @@ def test_evaluator_result_accepted() -> None:
     assert task.result == result
 
 
-_INSIGHT = {"name": "trend", "title": "Trend", "data": {"type": "text", "content": "x"}}
+_INSIGHT = {
+    "name": "trend",
+    "title": "Trend",
+    "findings": [
+        {"id": "f1", "title": "Trend", "artifacts": [{"type": "text", "content": "x"}]}
+    ],
+}
 
 
 def _analysis_task(**overrides: Any) -> AnalysisTask:
@@ -305,8 +311,8 @@ def _analysis_task(**overrides: Any) -> AnalysisTask:
     [
         None,
         "not-a-list",
-        [{"title": "Trend", "data": {"type": "text", "content": "x"}}],
-        [{"name": "trend", "data": {"type": "text", "content": "x"}}],
+        [{"title": "Trend", "findings": _INSIGHT["findings"]}],
+        [{"name": "trend", "findings": _INSIGHT["findings"]}],
         [_INSIGHT, _INSIGHT],
     ],
 )
@@ -326,7 +332,13 @@ def test_analyzer_result_accepted(empty: bool) -> None:
         {
             "name": "outliers",
             "title": "Outliers",
-            "data": {"type": "text", "content": "y"},
+            "findings": [
+                {
+                    "id": "f1",
+                    "title": "Outliers",
+                    "artifacts": [{"type": "text", "content": "y"}],
+                }
+            ],
         },
     ]
     if empty:

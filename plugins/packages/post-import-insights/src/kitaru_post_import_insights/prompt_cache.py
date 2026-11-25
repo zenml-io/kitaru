@@ -15,7 +15,7 @@
 
 from typing import Any
 
-from kitaru.api_models.v1.insight import CategoricalInsightData, CategoryValue
+from kitaru.api_models.v1.insight import CategoricalArtifact, CategoryValue
 from kitaru.api_models.v1.session_node import SessionNodeResponse
 from kitaru.json_pointer import resolve_json_pointer
 from kitaru_post_import_insights.findings import (
@@ -315,7 +315,8 @@ class PromptCacheUse:
                 title=title,
                 fallback_description=description,
                 caveat=caveat,
-                data=CategoricalInsightData(
+                data=CategoricalArtifact(
+                    presentation="ranked_bars",
                     unit="calls",
                     values=[
                         CategoryValue(

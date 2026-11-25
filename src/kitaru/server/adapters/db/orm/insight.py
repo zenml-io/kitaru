@@ -14,14 +14,21 @@
 """Insight ORM table."""
 
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from pydantic import TypeAdapter
 from sqlalchemy import ForeignKeyConstraint, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from kitaru.api_models.v1.insight import InsightData
+from kitaru.api_models.v1.insight import (
+    InsightAction,
+    InsightCoverage,
+    InsightFinding,
+    InsightHighlight,
+    InsightStatus,
+    SuggestedQuestion,
+)
 from kitaru.server.adapters.db.orm.base import (
     Base,
     TimestampMixin,
@@ -31,7 +38,10 @@ from kitaru.server.adapters.db.orm.orm_utils import foreign_key_name, index_name
 from kitaru.server.domain.insight import Insight
 from kitaru.server.domain.names import MAX_NAME_LENGTH
 
-_INSIGHT_DATA_ADAPTER: TypeAdapter[InsightData] = TypeAdapter(InsightData)
+_FINDINGS_ADAPTER: TypeAdapter[list[InsightFinding]] = TypeAdapter(list[InsightFinding])
+_QUESTIONS_ADAPTER: TypeAdapter[list[SuggestedQuestion]] = TypeAdapter(
+    list[SuggestedQuestion]
+)
 
 INSIGHT_OWNER_ID_FOREIGN_KEY = foreign_key_name("insight", ["owner_id"])
 INSIGHT_AGENT_ID_FOREIGN_KEY = foreign_key_name("insight", ["agent_id"])
@@ -46,7 +56,8 @@ INSIGHT_ANALYZER_VERSION_ID_INDEX = index_name("insight", ["analyzer_version_id"
 INSIGHT_TASK_ID_INDEX = index_name("insight", ["task_id"])
 INSIGHT_IMPORT_ID_INDEX = index_name("insight", ["import_id"])
 
-TYPE_LENGTH = 32
+STATUS_LENGTH = 32
+SOURCE_PROVIDER_LENGTH = 80
 
 
 class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -96,11 +107,16 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # No foreign key, identifies the analyzer invocation that produced this row
     # alongside its siblings.
     invocation_id: Mapped[uuid.UUID | None]
+    source_provider: Mapped[str | None] = mapped_column(String(SOURCE_PROVIDER_LENGTH))
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     title: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
-    description: Mapped[str | None] = mapped_column(Text)
-    type: Mapped[str] = mapped_column(String(TYPE_LENGTH))
-    data: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    summary: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
+    coverage: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    highlight: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    next_step: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    findings: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    suggested_questions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB)
     analyzer_params: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB(none_as_null=True)
@@ -125,11 +141,31 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             task_id=insight.task_id,
             import_id=insight.import_id,
             invocation_id=insight.invocation_id,
+            source_provider=insight.source_provider,
             name=insight.name,
             title=insight.title,
-            description=insight.description,
-            type=insight.data.type,
-            data=insight.data.model_dump(mode="json"),
+            summary=insight.summary,
+            status=insight.status,
+            coverage=(
+                insight.coverage.model_dump(mode="json")
+                if insight.coverage is not None
+                else None
+            ),
+            highlight=(
+                insight.highlight.model_dump(mode="json")
+                if insight.highlight is not None
+                else None
+            ),
+            next_step=(
+                insight.next_step.model_dump(mode="json")
+                if insight.next_step is not None
+                else None
+            ),
+            findings=[finding.model_dump(mode="json") for finding in insight.findings],
+            suggested_questions=[
+                question.model_dump(mode="json")
+                for question in insight.suggested_questions
+            ],
             metadata_=insight.metadata,
             analyzer_params=insight.analyzer_params,
             params_hash=insight.params_hash,
@@ -149,10 +185,30 @@ class InsightORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             task_id=self.task_id,
             import_id=self.import_id,
             invocation_id=self.invocation_id,
+            source_provider=self.source_provider,
             name=self.name,
             title=self.title,
-            description=self.description,
-            data=_INSIGHT_DATA_ADAPTER.validate_python(self.data),
+            summary=self.summary,
+            status=cast(InsightStatus, self.status),
+            coverage=(
+                InsightCoverage.model_validate(self.coverage)
+                if self.coverage is not None
+                else None
+            ),
+            highlight=(
+                InsightHighlight.model_validate(self.highlight)
+                if self.highlight is not None
+                else None
+            ),
+            next_step=(
+                InsightAction.model_validate(self.next_step)
+                if self.next_step is not None
+                else None
+            ),
+            findings=_FINDINGS_ADAPTER.validate_python(self.findings),
+            suggested_questions=_QUESTIONS_ADAPTER.validate_python(
+                self.suggested_questions
+            ),
             metadata=self.metadata_,
             analyzer_params=self.analyzer_params,
             params_hash=self.params_hash,

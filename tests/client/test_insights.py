@@ -22,11 +22,12 @@ from conftest import asgi_api_client
 from kitaru.api_models.v1.agent import AgentCreateRequest
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp, NotFilter
 from kitaru.api_models.v1.insight import (
+    InsightFinding,
     InsightInput,
     InsightListParams,
     InsightResponse,
     InsightUpdateRequest,
-    TextInsightData,
+    TextArtifact,
 )
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import NotFoundError
@@ -83,23 +84,20 @@ async def _make_agent(api_client: KitaruAPIClient) -> uuid.UUID:
 
 
 def _insight_input(
-    name: str = "insight", title: str = "insight", description: str | None = None
+    name: str = "insight", title: str = "insight", summary: str | None = None
 ) -> InsightInput:
-    """Build a minimal text insight input.
-
-    Args:
-        name: Insight name.
-        title: Insight title.
-        description: Insight description.
-
-    Returns:
-        Insight input ready to pass to insights.create.
-    """
+    """Build a minimal structured insight input."""
     return InsightInput(
         name=name,
         title=title,
-        description=description,
-        data=TextInsightData(content="root cause"),
+        summary=summary,
+        findings=[
+            InsightFinding(
+                id="f1",
+                title=title,
+                artifacts=[TextArtifact(content="root cause")],
+            )
+        ],
     )
 
 
@@ -109,7 +107,7 @@ async def test_create(api_client: KitaruAPIClient) -> None:
     insights = await api_client.insights.create(
         agent_id,
         [
-            _insight_input(title="first", description="rationale"),
+            _insight_input(title="first", summary="rationale"),
             _insight_input(title="second"),
         ],
     )
@@ -117,8 +115,9 @@ async def test_create(api_client: KitaruAPIClient) -> None:
     assert isinstance(insights[0], InsightResponse)
     assert insights[0].owner_id == ACCOUNT.id
     assert insights[0].agent_id == agent_id
-    assert insights[0].description == "rationale"
-    assert insights[1].description is None
+    assert insights[0].summary == "rationale"
+    assert insights[0].status == "new"
+    assert insights[1].summary is None
 
 
 async def test_create_missing_agent(api_client: KitaruAPIClient) -> None:
@@ -174,22 +173,24 @@ async def test_import_scope_excludes_manual_insights(
 
 
 async def test_update(api_client: KitaruAPIClient) -> None:
-    """Update an insight's title and description through the SDK."""
+    """Update an insight's title, summary, and status through the SDK."""
     agent_id = await _make_agent(api_client)
     created = (
-        await api_client.insights.create(agent_id, [_insight_input(description="old")])
+        await api_client.insights.create(agent_id, [_insight_input(summary="old")])
     )[0]
     updated = await api_client.insights.update(
-        created.id, InsightUpdateRequest(description="new")
+        created.id, InsightUpdateRequest(summary="new", status="reviewed")
     )
     assert updated.title == created.title
-    assert updated.description == "new"
+    assert updated.summary == "new"
+    assert updated.status == "reviewed"
 
     updated = await api_client.insights.update(
         created.id, InsightUpdateRequest(title="renamed")
     )
     assert updated.title == "renamed"
-    assert updated.description == "new"
+    assert updated.summary == "new"
+    assert updated.status == "reviewed"
 
 
 async def test_delete(api_client: KitaruAPIClient) -> None:

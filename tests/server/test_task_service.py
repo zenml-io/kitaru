@@ -1066,13 +1066,12 @@ async def test_apply_status_analyzer_terminal_tracks_analysis_completed() -> Non
     task = await create_analysis_task(tasks, job.id, import_id=import_.id)
     await create_agent_task(tasks, job.id)
 
-    result = [
-        {
-            "name": "summary",
-            "title": "Summary",
-            "data": {"type": "text", "content": "ok"},
-        }
-    ]
+    finding = {
+        "id": "f1",
+        "title": "Summary",
+        "artifacts": [{"type": "text", "content": "ok"}],
+    }
+    result = [{"name": "summary", "title": "Summary", "findings": [finding]}]
     completed = await _complete_task(transitions, task, result=result)
 
     assert completed.status is TaskStatus.COMPLETED

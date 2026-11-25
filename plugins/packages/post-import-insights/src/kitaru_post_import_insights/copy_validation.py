@@ -5,7 +5,7 @@
 
 import re
 
-from kitaru.api_models.v1.insight import CategoricalInsightData
+from kitaru.api_models.v1.insight import CategoricalArtifact, StatGridArtifact
 from kitaru_post_import_insights.profiling import CandidateFinding
 
 # A numeric token is a number plus an optional unit, so the number parser can
@@ -263,13 +263,13 @@ def _validate_copy_safety(value: str) -> None:
 
 def _get_quantified_labels(candidate: CandidateFinding) -> set[str]:
     """Return quantity-bearing labels that also contain an identity token."""
-    if not isinstance(candidate.data, CategoricalInsightData):
+    if isinstance(candidate.data, CategoricalArtifact):
+        labels = [item.label for item in candidate.data.values]
+    elif isinstance(candidate.data, StatGridArtifact):
+        labels = [item.label for item in candidate.data.items]
+    else:
         return set()
-    return {
-        item.label
-        for item in candidate.data.values
-        if _is_identity_bearing_quantified_label(item.label)
-    }
+    return {label for label in labels if _is_identity_bearing_quantified_label(label)}
 
 
 def _is_identity_bearing_quantified_label(label: str) -> bool:
@@ -332,17 +332,8 @@ def _has_outcome_wording(value: str) -> bool:
 def _get_supported_outcome_categories(candidate: CandidateFinding) -> set[str]:
     """Return outcomes stated by the deterministic candidate evidence."""
     categories = set()
-    if (
-        candidate.id == "session-outcomes"
-        and candidate.family == "outcome"
-        and isinstance(candidate.data, CategoricalInsightData)
-    ):
-        categories.update(
-            outcome
-            for item in candidate.data.values
-            if item.value > 0
-            and (outcome := _SESSION_STATUS_OUTCOMES.get(item.label)) is not None
-        )
+    if candidate.id == "session-outcomes" and candidate.family == "outcome":
+        categories.update(_get_supported_session_outcome_categories(candidate))
     for value in (
         candidate.eyebrow,
         candidate.title,
@@ -357,17 +348,22 @@ def _get_supported_session_outcome_categories(
     candidate: CandidateFinding,
 ) -> set[str]:
     """Return observed session outcomes represented by a candidate."""
-    if not (
-        candidate.id == "session-outcomes"
-        and candidate.family == "outcome"
-        and isinstance(candidate.data, CategoricalInsightData)
-    ):
+    if not (candidate.id == "session-outcomes" and candidate.family == "outcome"):
+        return set()
+    if isinstance(candidate.data, CategoricalArtifact):
+        items = [(item.label, float(item.value)) for item in candidate.data.values]
+    elif isinstance(candidate.data, StatGridArtifact):
+        items = [
+            (item.label, float(item.value))
+            for item in candidate.data.items
+            if isinstance(item.value, (int, float))
+        ]
+    else:
         return set()
     return {
         outcome
-        for item in candidate.data.values
-        if item.value > 0
-        and (outcome := _SESSION_STATUS_OUTCOMES.get(item.label)) is not None
+        for label, value in items
+        if value > 0 and (outcome := _SESSION_STATUS_OUTCOMES.get(label)) is not None
     }
 
 
@@ -429,7 +425,11 @@ def _get_grounded_numbers(candidate: CandidateFinding) -> dict[str, set[float]]:
         "seconds": set(),
     }
     data = candidate.data
-    chart_kind, chart_scale = _classify_unit(data.unit)
+    if isinstance(data, StatGridArtifact):
+        chart_unit = data.items[0].unit or "count"
+    else:
+        chart_unit = data.unit
+    chart_kind, chart_scale = _classify_unit(chart_unit)
     for fact in candidate.facts:
         # A statistic of the chart's values, such as "maximum", is measured in
         # the chart's unit; every other fact keeps the unit its name declares.
@@ -447,8 +447,13 @@ def _get_grounded_numbers(candidate: CandidateFinding) -> dict[str, set[float]]:
             values = [float(fact.value)]
         numbers[kind].update(value * scale for value in values)
     kind, scale = chart_kind, chart_scale
-    if isinstance(data, CategoricalInsightData):
+    if isinstance(data, CategoricalArtifact):
         numbers[kind].update(float(item.value) * scale for item in data.values)
+    elif isinstance(data, StatGridArtifact):
+        for item in data.items:
+            if isinstance(item.value, (int, float)):
+                item_kind, item_scale = _classify_unit(item.unit or chart_unit)
+                numbers[item_kind].add(float(item.value) * item_scale)
     else:
         for bin_ in data.bins:
             numbers["count"].add(float(bin_.count))
@@ -481,14 +486,22 @@ def _matches_grounded(value: float, decimals: int, grounded: set[float]) -> bool
 
 def _get_label_values(candidate: CandidateFinding) -> dict[str, float]:
     """Map each categorical label, and its outcome category, to its own value."""
-    if not isinstance(candidate.data, CategoricalInsightData):
+    if isinstance(candidate.data, CategoricalArtifact):
+        pairs = [(item.label, float(item.value)) for item in candidate.data.values]
+    elif isinstance(candidate.data, StatGridArtifact):
+        pairs = [
+            (item.label, float(item.value))
+            for item in candidate.data.items
+            if isinstance(item.value, (int, float))
+        ]
+    else:
         return {}
     values: dict[str, float] = {}
-    for item in candidate.data.values:
-        values[item.label.lower()] = float(item.value)
-        outcome = _SESSION_STATUS_OUTCOMES.get(item.label)
+    for label, value in pairs:
+        values[label.lower()] = value
+        outcome = _SESSION_STATUS_OUTCOMES.get(label)
         if outcome is not None:
-            values[outcome] = float(item.value)
+            values[outcome] = value
     return values
 
 
@@ -594,7 +607,11 @@ def _is_grounded_number(
 
 def _get_declared_units(candidate: CandidateFinding) -> set[str]:
     """Return the chart unit and the unit suffix of each fact name, lowercased."""
-    return {(candidate.data.unit or "").lower()} | {
+    if isinstance(candidate.data, StatGridArtifact):
+        chart_units = {(item.unit or "").lower() for item in candidate.data.items}
+    else:
+        chart_units = {(candidate.data.unit or "").lower()}
+    return chart_units | {
         fact.name.lower().rsplit("_", 1)[-1] for fact in candidate.facts
     }
 

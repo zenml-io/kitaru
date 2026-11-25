@@ -21,7 +21,7 @@ from functools import partial
 
 import pytest
 
-from kitaru.api_models.v1.insight import BinnedInsightData, CategoricalInsightData
+from kitaru.api_models.v1.insight import BinnedArtifact, CategoricalArtifact
 from kitaru.api_models.v1.session import (
     SessionDetailResponse,
     SessionOrigin,
@@ -213,7 +213,7 @@ def test_cost_concentration_reports_the_costliest_tenth() -> None:
         (_id(1), _node_id(1, 1)),
         (_id(2), _node_id(2, 1)),
     ]
-    assert isinstance(candidate.data, CategoricalInsightData)
+    assert isinstance(candidate.data, CategoricalArtifact)
     assert [(item.label, item.value) for item in candidate.data.values] == [
         ("Costliest 2 sessions", 68.97),
         ("Next 8 sessions", 13.79),
@@ -257,7 +257,7 @@ def test_time_share_counts_overlapping_calls_once() -> None:
     assert candidate.title == (
         "search (tool) covers 80% of recorded session time in 5 of 5 sessions"
     )
-    assert isinstance(candidate.data, CategoricalInsightData)
+    assert isinstance(candidate.data, CategoricalArtifact)
     assert [(item.label, item.value) for item in candidate.data.values] == [
         ("search (tool)", 40.0),
         ("model-a (model)", 5.0),
@@ -325,7 +325,7 @@ def test_context_growth_reports_sessions_whose_input_triples() -> None:
         (_id(1), _node_id(1, 2)),
         (_id(3), _node_id(3, 2)),
     ]
-    assert isinstance(candidate.data, BinnedInsightData)
+    assert isinstance(candidate.data, BinnedArtifact)
     assert [item.count for item in candidate.data.bins] == [1, 0, 0, 1, 2, 0]
     assert "1 session with model calls had fewer than two" in (candidate.caveat or "")
     validate_card_copy(
@@ -435,7 +435,7 @@ def test_context_outliers_point_at_oversized_calls() -> None:
         (_id(21), _node_id(21, 0)),
         (_id(22), _node_id(22, 0)),
     ]
-    assert isinstance(candidate.data, BinnedInsightData)
+    assert isinstance(candidate.data, BinnedArtifact)
     assert [
         (item.lower_bound, item.upper_bound, item.count) for item in candidate.data.bins
     ] == [(None, 2_000, 0), (2_000, 10_000, 20), (10_000, None, 2)]
@@ -594,7 +594,7 @@ def test_tool_paths_chart_common_paths_and_one_off_sessions() -> None:
         "All 4 tool paths cover 100% of sessions; 2 sessions took a path no other "
         "session took"
     )
-    assert isinstance(candidate.data, CategoricalInsightData)
+    assert isinstance(candidate.data, CategoricalArtifact)
     assert [(item.label, item.value) for item in candidate.data.values] == [
         ("search -> answer", 8),
         ("lookup -> search", 2),

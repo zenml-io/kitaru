@@ -17,7 +17,7 @@ import hashlib
 import uuid
 from itertools import groupby
 
-from kitaru.api_models.v1.insight import CategoricalInsightData, CategoryValue
+from kitaru.api_models.v1.insight import CategoricalArtifact, CategoryValue
 from kitaru_post_import_insights.findings import (
     CandidateCoverage,
     CandidateFinding,
@@ -154,7 +154,8 @@ class ToolPaths:
                         else ""
                     )
                 ),
-                data=CategoricalInsightData(
+                data=CategoricalArtifact(
+                    presentation="path_bars",
                     unit="sessions",
                     values=[
                         CategoryValue(label=label, value=count) for label, count in top

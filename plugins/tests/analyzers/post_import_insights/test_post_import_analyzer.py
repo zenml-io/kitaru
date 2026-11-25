@@ -457,9 +457,9 @@ async def test_both_analyzers_generate_independent_cards_for_the_same_import(
     assert len(openai) == 1
     original = next(card for card in deterministic if card.name == openai[0].name)
     assert original is not openai[0]
-    assert original.data == openai[0].data
-    assert openai[0].description == "This pattern is worth a closer look."
-    assert original.description != openai[0].description
+    assert original.findings[0].artifacts[0] == openai[0].findings[0].artifacts[0]
+    assert openai[0].summary == "This pattern is worth a closer look."
+    assert original.summary != openai[0].summary
     assert InsightGenerationResult.card_metadata(original).evidence == (
         InsightGenerationResult.card_metadata(openai[0]).evidence
     )
