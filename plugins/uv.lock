@@ -1365,7 +1365,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.27.7+dev"
+version = "0.27.8"
 source = { editable = "../" }
 dependencies = [
     { name = "httpx" },
@@ -1449,7 +1449,7 @@ fuzz = [{ name = "schemathesis", specifier = ">=4.25,<5" }]
 
 [[package]]
 name = "kitaru-braintrust-importer"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "packages/braintrust-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1478,7 +1478,7 @@ provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-claude-agent-sdk"
-version = "0.1.2"
+version = "0.2.0"
 source = { editable = "packages/claude-agent-sdk" }
 dependencies = [
     { name = "claude-agent-sdk" },
@@ -1493,7 +1493,7 @@ requires-dist = [
 
 [[package]]
 name = "kitaru-elevenlabs-importer"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/elevenlabs-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1527,7 +1527,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-langfuse-importer"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "packages/langfuse-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1554,7 +1554,7 @@ provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-langgraph"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "packages/langgraph" }
 dependencies = [
     { name = "genai-prices" },
@@ -1582,7 +1582,7 @@ provides-extras = ["deepagents"]
 
 [[package]]
 name = "kitaru-langsmith-importer"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "packages/langsmith-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1609,7 +1609,7 @@ provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-logfire-importer"
-version = "0.4.1"
+version = "0.5.0"
 source = { editable = "packages/logfire-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1639,7 +1639,7 @@ provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-mastra-importer"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/mastra-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1650,7 +1650,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-mlflow-importer"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/mlflow-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1672,7 +1672,7 @@ provides-extras = ["api"]
 
 [[package]]
 name = "kitaru-openai-agents"
-version = "0.4.2"
+version = "0.5.0"
 source = { editable = "packages/openai-agents" }
 dependencies = [
     { name = "genai-prices" },
@@ -1689,7 +1689,7 @@ requires-dist = [
 
 [[package]]
 name = "kitaru-phoenix-importer"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "packages/phoenix-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1723,7 +1723,7 @@ provides-extras = ["api", "adapter"]
 
 [[package]]
 name = "kitaru-post-import-insights"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "packages/post-import-insights" }
 dependencies = [
     { name = "kitaru" },
@@ -1743,7 +1743,7 @@ provides-extras = ["openai"]
 
 [[package]]
 name = "kitaru-pydantic-ai"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "packages/pydantic-ai" }
 dependencies = [
     { name = "genai-prices" },

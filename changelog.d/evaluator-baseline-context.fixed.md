@@ -1,1 +1,0 @@
-- Made a replay result's baseline session ID and metadata available to Python and TypeScript evaluators through `SessionView.baseline`, keeping case labels separate from agent inputs and result metadata.

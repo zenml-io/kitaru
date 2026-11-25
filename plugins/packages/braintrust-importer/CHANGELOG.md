@@ -2,11 +2,10 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-25
+
 - Import `prompt_cache_creation_tokens`, or the sum of the 5-minute and 1-hour creation metrics when Braintrust reports only those, as `cache_write_input_tokens`. Non-integer or negative values fail the session like the other token metrics.
-
-### Release context
-
-- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
+- Require Kitaru 0.27.7 or later for `TokenUsage.cache_write_input_tokens`.
 
 ## 0.4.0 - 2026-09-21
 

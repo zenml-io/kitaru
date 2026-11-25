@@ -178,8 +178,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Generate deterministic insights from imported sessions.",
         provider=None,
         entrypoint="kitaru_post_import_insights.analyzer:analyze_post_import_sessions",
-        requirement="kitaru-post-import-insights==0.4.0",
-        display_version="0.4.0",
+        requirement="kitaru-post-import-insights==0.5.0",
+        display_version="0.5.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.ANALYZER,
@@ -189,8 +189,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         ),
         provider="openai",
         entrypoint="kitaru_post_import_insights.analyzer:analyze_openai_post_import_sessions",
-        requirement="kitaru-post-import-insights[openai]==0.4.0",
-        display_version="0.4.0",
+        requirement="kitaru-post-import-insights[openai]==0.5.0",
+        display_version="0.5.0",
         connection_schema=OpenAIConnection,
     ),
     DefaultPluginDefinition(
@@ -204,8 +204,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         entrypoint=(
             "kitaru_post_import_insights.session_findings:analyze_session_findings"
         ),
-        requirement="kitaru-post-import-insights[openai]==0.4.0",
-        display_version="0.4.0",
+        requirement="kitaru-post-import-insights[openai]==0.5.0",
+        display_version="0.5.0",
         connection_schema=OpenAIConnection,
     ),
     DefaultPluginDefinition(
@@ -214,8 +214,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import Braintrust project-log and UI exports.",
         provider="braintrust",
         entrypoint="kitaru_braintrust_importer.importer:importer",
-        requirement="kitaru-braintrust-importer==0.4.0",
-        display_version="0.4.0",
+        requirement="kitaru-braintrust-importer==0.5.0",
+        display_version="0.5.0",
         connection_schema=BraintrustConnection,
     ),
     DefaultPluginDefinition(
@@ -233,8 +233,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import Langfuse JSON and JSONL trace exports.",
         provider="langfuse",
         entrypoint="kitaru_langfuse_importer.importer:importer",
-        requirement="kitaru-langfuse-importer==0.5.0",
-        display_version="0.5.0",
+        requirement="kitaru-langfuse-importer==0.6.0",
+        display_version="0.6.0",
         connection_schema=LangfuseConnection,
     ),
     DefaultPluginDefinition(
@@ -243,8 +243,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import Logfire records-query JSON and NDJSON exports.",
         provider="logfire",
         entrypoint="kitaru_logfire_importer.importer:importer",
-        requirement="kitaru-logfire-importer==0.4.1",
-        display_version="0.4.1",
+        requirement="kitaru-logfire-importer==0.5.0",
+        display_version="0.5.0",
         connection_schema=LogfireConnection,
     ),
     DefaultPluginDefinition(
@@ -253,8 +253,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import LangSmith run-query and bulk-export records.",
         provider="langsmith",
         entrypoint="kitaru_langsmith_importer.importer:importer",
-        requirement="kitaru-langsmith-importer==0.4.0",
-        display_version="0.4.0",
+        requirement="kitaru-langsmith-importer==0.5.0",
+        display_version="0.5.0",
         connection_schema=LangsmithConnection,
     ),
     DefaultPluginDefinition(
@@ -263,8 +263,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import MLflow trace exports and tracking server traces.",
         provider="mlflow",
         entrypoint="kitaru_mlflow_importer.importer:importer",
-        requirement="kitaru-mlflow-importer==0.1.0",
-        display_version="0.1.0",
+        requirement="kitaru-mlflow-importer==0.2.0",
+        display_version="0.2.0",
         connection_schema=MlflowConnection,
     ),
     DefaultPluginDefinition(
@@ -273,8 +273,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import Arize Phoenix JSON and JSONL trace exports.",
         provider="phoenix",
         entrypoint="kitaru_phoenix_importer.importer:importer",
-        requirement="kitaru-phoenix-importer==0.4.0",
-        display_version="0.4.0",
+        requirement="kitaru-phoenix-importer==0.5.0",
+        display_version="0.5.0",
         connection_schema=PhoenixConnection,
     ),
     DefaultPluginDefinition(
