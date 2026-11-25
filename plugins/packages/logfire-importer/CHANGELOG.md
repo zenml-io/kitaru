@@ -2,11 +2,10 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-25
+
 - Import prompt-cache writes from `gen_ai.usage.details.cache_write_tokens` or `gen_ai.usage.cache_creation.input_tokens` as `cache_write_input_tokens`.
-
-### Release context
-
-- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
+- Require Kitaru 0.27.7 or later for `TokenUsage.cache_write_input_tokens`.
 
 ## 0.4.1 - 2026-10-08
 

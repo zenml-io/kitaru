@@ -1,6 +1,6 @@
 [project]
 name = "kitaru-langsmith-importer"
-version = "0.4.0"
+version = "0.5.0"
 description = "LangSmith trace importer for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"
