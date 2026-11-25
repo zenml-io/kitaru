@@ -11,13 +11,12 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
-"""Reusable normalized-session to Insight generation pipeline."""
+"""Reusable normalized-session to structured Insight report pipeline."""
 
 import json
 import uuid
 from collections.abc import Iterable, Sequence
-from itertools import combinations
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,10 +25,16 @@ from kitaru.api_models.v1.insight import (
     EvidenceArtifact,
     EvidenceRow,
     InsightAction,
+    InsightArtifact,
     InsightCoverage,
     InsightFinding,
     InsightHighlight,
     InsightInput,
+    RateArtifact,
+    StatGridArtifact,
+    StepStripArtifact,
+    SuggestedQuestion,
+    ToolCycleArtifact,
 )
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
 from kitaru_post_import_insights.generation import (
@@ -41,18 +46,22 @@ from kitaru_post_import_insights.generation import (
 )
 from kitaru_post_import_insights.models import (
     DEFAULT_CTA_LABEL,
+    DEFAULT_MAX_PRIMARY_FINDINGS,
     DISTRIBUTION_TOP_BIN_SIGNAL,
     INSIGHT_METADATA_KEY,
     MAX_INVESTIGATION_PROMPT_LENGTH,
+    MAX_PRIMARY_FINDINGS,
     Coverage,
     CoverageTruncation,
     EvidenceLocator,
+    FindingMetadata,
+    FocusArea,
     GenerationDiagnostics,
     GenerationMode,
     GenerationVersions,
-    InsightCardMetadata,
     InsightGenerationContext,
     InsightGenerationResult,
+    InsightReportMetadata,
     PageIntro,
     PageRecommendation,
 )
@@ -66,7 +75,9 @@ from kitaru_post_import_insights.profiling import (
 
 _CTA_LABELS = {
     "failed-identical-retries": "Investigate tool retries",
+    "tool-health-overview": "Investigate tool trouble",
     "short-tool-cycles": "Investigate tool cycles",
+    "failure-transitions": "Investigate where failures start",
     "adjacent-same-tool-failures": "Investigate repeated tool failures",
     "adjacent-identical-calls": "Investigate repeated tool calls",
     "tool-error-mix": "Investigate tool errors",
@@ -89,7 +100,7 @@ _CTA_LABELS = {
     "tool-paths": "Investigate tool paths",
 }
 
-PROMPT_VERSION = "2026-09-09.1"
+PROMPT_VERSION = "2026-11-25.1"
 _MAX_COVERAGE_CAVEATS = 10
 INVESTIGATION_SKILL = "kitaru-investigation"
 _UNTRUSTED_DATA_NOTICE = (
@@ -126,6 +137,10 @@ class InsightGenerationConfig(BaseModel):
 
     profiling: ProfilingConfig = Field(default_factory=ProfilingConfig)
     model: ModelGenerationConfig | None = None
+    max_findings: int = Field(
+        default=DEFAULT_MAX_PRIMARY_FINDINGS, ge=1, le=MAX_PRIMARY_FINDINGS
+    )
+    focus: FocusArea | None = None
     max_contributing_sessions_per_insight: int = Field(default=200, ge=1, le=1000)
     max_result_bytes: int = Field(default=1_000_000, ge=1_000, le=10_000_000)
 
@@ -254,7 +269,7 @@ def _build_investigation_prompt(
     contributing_session_ids: Sequence[uuid.UUID],
     evidence: Sequence[EvidenceLocator],
 ) -> str:
-    """Build standalone deterministic context for the card's copied prompt."""
+    """Build standalone deterministic context for a finding's copied prompt."""
     context_data = json.dumps(
         context.model_dump(mode="json"),
         sort_keys=True,
@@ -313,32 +328,147 @@ def _build_output_coverage(
     *,
     maximum_contributions: int,
 ) -> Coverage:
-    """Add caller-facing coverage when card references need another bound."""
+    """Add contribution truncation and omitted-candidate disclosure caveats."""
     by_id = {candidate.id: candidate for candidate in profiling.candidates}
+    all_included = [
+        *plan.selection.selected_candidate_ids,
+        *plan.secondary_candidate_ids,
+    ]
+    coverage = profiling.coverage
     available = max(
-        (
-            len(by_id[candidate_id].contributing_session_ids)
-            for candidate_id in plan.selection.selected_candidate_ids
-        ),
+        (len(by_id[cid].contributing_session_ids) for cid in all_included),
         default=0,
     )
-    if available <= maximum_contributions:
-        return profiling.coverage
-    return profiling.coverage.model_copy(
-        update={
-            "truncations": [
-                *profiling.coverage.truncations,
-                CoverageTruncation(
-                    dimension="card_contributing_sessions",
-                    available=available,
-                    analyzed=maximum_contributions,
+    if available > maximum_contributions:
+        coverage = coverage.model_copy(
+            update={
+                "truncations": [
+                    *coverage.truncations,
+                    CoverageTruncation(
+                        dimension="card_contributing_sessions",
+                        available=available,
+                        analyzed=maximum_contributions,
+                    ),
+                ],
+                "caveats": _append_coverage_caveat(
+                    coverage.caveats,
+                    "Finding contribution references were limited by "
+                    "output configuration.",
                 ),
-            ],
-            "caveats": _append_coverage_caveat(
-                profiling.coverage.caveats,
-                "Card contribution references were limited by output configuration.",
-            ),
-        }
+            }
+        )
+    if plan.omitted_candidate_ids:
+        omitted_titles = [by_id[cid].title for cid in plan.omitted_candidate_ids[:5]]
+        extra = len(plan.omitted_candidate_ids) - len(omitted_titles)
+        suffix = f" (+{extra} more)" if extra > 0 else ""
+        message = (
+            "Additional signals cleared their thresholds beyond the primary "
+            f"finding limit: {'; '.join(omitted_titles)}{suffix}."
+        )
+        coverage = coverage.model_copy(
+            update={"caveats": _append_coverage_caveat(coverage.caveats, message)}
+        )
+    return coverage
+
+
+def _pick_highlight_artifact_index(artifacts: Sequence[InsightArtifact]) -> int:
+    """Select the cleanest grid-tile artifact index from a finding's artifacts."""
+    for index, artifact in enumerate(artifacts):
+        if isinstance(
+            artifact,
+            RateArtifact | ToolCycleArtifact | StepStripArtifact | StatGridArtifact,
+        ):
+            return index
+    return 0
+
+
+def _build_insight_coverage(coverage: Coverage) -> InsightCoverage:
+    """Project internal profiling coverage to the public InsightCoverage model."""
+    return InsightCoverage(
+        sessions_analyzed=coverage.sessions_analyzed,
+        sessions_available=coverage.sessions_available,
+        skipped=max(coverage.sessions_available - coverage.sessions_analyzed, 0),
+        failed=0,
+        started_after=coverage.started_after,
+        started_before=coverage.started_before,
+        caveats=list(coverage.caveats[:10]),
+    )
+
+
+def _collect_report_questions(
+    findings: Sequence[InsightFinding],
+) -> list[SuggestedQuestion]:
+    """Collect up to 5 unique report-level sidebar chat questions from top findings."""
+    questions: list[SuggestedQuestion] = []
+    seen: set[str] = set()
+    for finding in findings:
+        for question in finding.suggested_questions:
+            key = question.label.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            questions.append(question)
+            if len(questions) == 5:
+                return questions
+    return questions
+
+
+def _assemble_report_from_findings(
+    *,
+    findings: list[InsightFinding],
+    finding_meta: dict[str, FindingMetadata],
+    recommended_id: str,
+    omitted_titles: list[str],
+    coverage: Coverage,
+    context: InsightGenerationContext,
+    analysis_version: str,
+    mode: GenerationMode,
+) -> InsightInput:
+    """Assemble one structured multi-finding InsightInput report."""
+    by_id = {finding.id: finding for finding in findings}
+    recommended = by_id[recommended_id]
+    report_name = (
+        "openai-post-import-insights"
+        if mode is GenerationMode.MODEL_BACKED
+        else "post-import-insights"
+    )
+    source_provider = context.source_provider or (
+        context.source_import.provider if context.source_import is not None else None
+    )
+    highlight_index = _pick_highlight_artifact_index(recommended.artifacts)
+    next_step = (
+        InsightAction(
+            label=recommended.action.label,
+            summary=(recommended.summary or recommended.title)[:300],
+            prompt=recommended.action.prompt,
+        )
+        if recommended.action is not None
+        else None
+    )
+    metadata = InsightReportMetadata(
+        recommended_finding_id=recommended_id,
+        omitted_candidates=omitted_titles[:30],
+        coverage=coverage,
+        context=context,
+        generation=GenerationVersions(
+            analysis=analysis_version,
+            prompt=PROMPT_VERSION,
+        ),
+        findings=finding_meta,
+    )
+    return InsightInput(
+        name=report_name,
+        title=recommended.title,
+        summary=recommended.summary,
+        source_provider=source_provider,
+        coverage=_build_insight_coverage(coverage),
+        highlight=InsightHighlight(
+            finding_id=recommended_id, artifact_index=highlight_index
+        ),
+        next_step=next_step,
+        findings=findings,
+        suggested_questions=_collect_report_questions(findings),
+        metadata={INSIGHT_METADATA_KEY: metadata.model_dump(mode="json")},
     )
 
 
@@ -349,7 +479,7 @@ def _assemble_result(
     context: InsightGenerationContext,
     config: InsightGenerationConfig,
 ) -> InsightGenerationResult:
-    """Assemble only deterministic facts and validated editorial fields."""
+    """Assemble one structured multi-finding report from the generation plan."""
     by_id = {candidate.id: candidate for candidate in profiling.candidates}
     copy_by_id = {item.id: item for item in plan.editorial.insights}
     base_coverage = _build_output_coverage(
@@ -357,14 +487,17 @@ def _assemble_result(
         plan,
         maximum_contributions=config.max_contributing_sessions_per_insight,
     )
-    selected_ids = list(plan.selection.selected_candidate_ids)
-    retained_ids = list(selected_ids)
+    ordered_entries: list[tuple[str, Literal["primary", "secondary"]]] = [
+        *((cid, "primary") for cid in plan.selection.selected_candidate_ids),
+        *((cid, "secondary") for cid in plan.secondary_candidate_ids),
+    ]
+    retained_entries = list(ordered_entries)
     maximum_oversized_prompt = 0
     prepared: dict[str, tuple[list[uuid.UUID], list[EvidenceLocator], str]] = {}
 
-    while retained_ids:
+    while retained_entries:
         coverage = base_coverage
-        if len(retained_ids) < len(selected_ids):
+        if len(retained_entries) < len(ordered_entries):
             coverage = base_coverage.model_copy(
                 update={
                     "truncations": [
@@ -377,18 +510,20 @@ def _assemble_result(
                     ],
                     "caveats": _append_coverage_caveat(
                         base_coverage.caveats,
-                        (
-                            "Selected cards with oversized investigation prompts "
-                            "were omitted."
-                        ),
+                        "Findings with oversized investigation prompts were omitted.",
                     ),
                 }
             )
 
         prepared = {}
         oversized_ids: set[str] = set()
-        for candidate_id in retained_ids:
+        for candidate_id, _ in retained_entries:
             candidate = by_id[candidate_id]
+            description = (
+                copy_by_id[candidate_id].description
+                if candidate_id in copy_by_id
+                else candidate.fallback_description
+            )
             contributing_ids, evidence = _get_bounded_references(
                 candidate,
                 maximum=config.max_contributing_sessions_per_insight,
@@ -396,7 +531,7 @@ def _assemble_result(
             try:
                 prompt = _build_investigation_prompt(
                     candidate,
-                    card_description=copy_by_id[candidate_id].description,
+                    card_description=description,
                     context=context,
                     coverage=coverage,
                     contributing_session_ids=contributing_ids,
@@ -412,18 +547,17 @@ def _assemble_result(
 
         if not oversized_ids:
             break
-        retained_ids = [
-            candidate_id
-            for candidate_id in retained_ids
-            if candidate_id not in oversized_ids
+        retained_entries = [
+            entry for entry in retained_entries if entry[0] not in oversized_ids
         ]
 
-    if not retained_ids:
+    if not retained_entries:
         raise _OutputBoundError(
             available=maximum_oversized_prompt,
             maximum=MAX_INVESTIGATION_PROMPT_LENGTH,
         )
 
+    retained_ids = [cid for cid, _ in retained_entries]
     recommendation_id = plan.selection.recommended_candidate_id
     recommendation_title = plan.editorial.recommendation_title
     recommendation_description = plan.editorial.recommendation_description
@@ -434,32 +568,28 @@ def _assemble_result(
             "Start here and use the copied prompt to define a focused cohort."
         )
 
-    insights: list[InsightInput] = []
-    for position, candidate_id in enumerate(retained_ids):
+    findings: list[InsightFinding] = []
+    finding_meta: dict[str, FindingMetadata] = {}
+    for position, (candidate_id, tier) in enumerate(retained_entries):
         candidate = by_id[candidate_id]
-        copy = copy_by_id[candidate_id]
+        copy = copy_by_id.get(candidate_id)
+        eyebrow = copy.eyebrow if copy is not None else candidate.eyebrow
+        description = (
+            copy.description if copy is not None else candidate.fallback_description
+        )
         contributing_ids, evidence, investigation_prompt = prepared[candidate_id]
         cta_label = _CTA_LABELS.get(candidate_id, DEFAULT_CTA_LABEL)
-        metadata = InsightCardMetadata(
-            eyebrow=copy.eyebrow,
-            check_first=candidate.caveat,
+        finding_meta[candidate_id] = FindingMetadata(
+            eyebrow=eyebrow,
             position=position,
             recommended=candidate_id == recommendation_id,
-            contributing_session_ids=contributing_ids,
-            evidence=evidence,
-            coverage=coverage,
-            investigation_prompt=investigation_prompt,
             cta_label=cta_label,
-            context=context,
-            generation=GenerationVersions(
-                analysis=profiling.analysis_version,
-                prompt=PROMPT_VERSION,
-            ),
         )
-        artifacts: list[Any] = [candidate.data]
-        if evidence:
+        artifacts: list[Any] = [candidate.data, *candidate.extra_artifacts]
+        if evidence and len(artifacts) < 12:
             artifacts.append(
                 EvidenceArtifact(
+                    title="Evidence",
                     presentation="table",
                     total_sessions=max(len(contributing_ids), len(evidence), 1),
                     rows=[
@@ -472,36 +602,34 @@ def _assemble_result(
                     ],
                 )
             )
-        finding = InsightFinding(
-            id=candidate.id,
-            title=candidate.title,
-            summary=copy.description[:320],
-            body=copy.description,
-            artifacts=artifacts,
-            contributing_session_ids=contributing_ids,
-            check_first=candidate.caveat,
-            action=InsightAction(label=cta_label, prompt=investigation_prompt),
-        )
-        insights.append(
-            InsightInput(
-                name=candidate.id,
+        findings.append(
+            InsightFinding(
+                id=candidate.id,
                 title=candidate.title,
-                summary=copy.description[:320],
-                source_provider=(
-                    context.source_import.provider
-                    if context.source_import is not None
-                    else None
-                ),
-                coverage=InsightCoverage(
-                    sessions_analyzed=coverage.sessions_analyzed,
-                    sessions_available=coverage.sessions_available,
-                    caveats=list(coverage.caveats),
-                ),
-                highlight=InsightHighlight(finding_id=candidate.id, artifact_index=0),
-                findings=[finding],
-                metadata={INSIGHT_METADATA_KEY: metadata.model_dump(mode="json")},
+                summary=description[:320],
+                body=description,
+                tier=tier,
+                kind=candidate.kind,
+                severity=candidate.severity,
+                artifacts=artifacts,
+                contributing_session_ids=contributing_ids,
+                check_first=candidate.caveat,
+                action=InsightAction(label=cta_label, prompt=investigation_prompt),
+                suggested_questions=candidate.suggested_questions,
             )
         )
+
+    omitted_titles = [by_id[cid].title for cid in plan.omitted_candidate_ids]
+    report = _assemble_report_from_findings(
+        findings=findings,
+        finding_meta=finding_meta,
+        recommended_id=recommendation_id,
+        omitted_titles=omitted_titles,
+        coverage=coverage,
+        context=context,
+        analysis_version=profiling.analysis_version,
+        mode=plan.mode,
+    )
 
     return InsightGenerationResult(
         context=context,
@@ -518,7 +646,7 @@ def _assemble_result(
             description=recommendation_description,
         ),
         diagnostics=plan.diagnostics,
-        insights=insights,
+        insights=[report],
     )
 
 
@@ -527,9 +655,9 @@ def _get_oversize_result(
     maximum: int,
     profiling: ProfilingResult,
 ) -> InsightGenerationResult | None:
-    """Retain the largest ordered card prefix that fits the result byte bound."""
+    """Trim findings from the tail of the report until the result fits maximum bytes."""
     available = len(result.model_dump_json().encode("utf-8"))
-    if available <= maximum:
+    if available <= maximum or not result.insights:
         return None
 
     truncation = CoverageTruncation(
@@ -537,105 +665,113 @@ def _get_oversize_result(
         available=available,
         analyzed=maximum,
     )
+    report = result.insights[0]
+    original_meta = result.report_metadata(report)
     candidates = {candidate.id: candidate for candidate in profiling.candidates}
     coverage = result.coverage.model_copy(
         update={
             "truncations": [*result.coverage.truncations, truncation],
             "caveats": _append_coverage_caveat(
                 result.coverage.caveats,
-                "Cards were omitted to fit the result byte limit.",
+                "Findings were omitted to fit the result byte limit.",
             ),
         }
     )
-    for retained_count in range(len(result.insights) - 1, 0, -1):
-        for retained_items in combinations(result.insights, retained_count):
-            retained = list(retained_items)
-            assert result.recommendation is not None
-            recommendation_id = result.recommendation.insight_name
-            recommendation = result.recommendation
-            if recommendation_id not in {insight.name for insight in retained}:
-                recommendation_id = retained[0].name
-                recommendation = PageRecommendation(
-                    insight_name=recommendation_id,
-                    title="Recommended next step",
-                    description=(
-                        "Start here and use the copied prompt to define a focused "
-                        "cohort."
-                    ),
-                )
 
-            bounded_insights: list[InsightInput] = []
-            prompts_fit = True
-            for position, insight in enumerate(retained):
-                original_metadata = result.card_metadata(insight)
-                card_description = insight.findings[0].body or insight.summary or ""
-                try:
-                    investigation_prompt = _build_investigation_prompt(
-                        candidates[insight.name],
-                        card_description=card_description,
-                        context=result.context,
-                        coverage=coverage,
-                        contributing_session_ids=(
-                            original_metadata.contributing_session_ids
-                        ),
-                        evidence=original_metadata.evidence,
-                    )
-                except _OutputBoundError:
-                    prompts_fit = False
-                    break
-                metadata = original_metadata.model_copy(
-                    update={
-                        "coverage": coverage,
-                        "position": position,
-                        "recommended": insight.name == recommendation_id,
-                        "investigation_prompt": investigation_prompt,
-                    }
+    candidate_subsets: list[list[InsightFinding]] = [
+        list(report.findings[:retained_count])
+        for retained_count in range(len(report.findings) - 1, 0, -1)
+    ]
+    candidate_subsets.extend([finding] for finding in report.findings[1:])
+    for retained in candidate_subsets:
+        retained_ids = {finding.id for finding in retained}
+        assert result.recommendation is not None
+        recommendation_id = result.recommendation.insight_name
+        recommendation = result.recommendation
+        if recommendation_id not in retained_ids:
+            recommendation_id = retained[0].id
+            recommendation = PageRecommendation(
+                insight_name=recommendation_id,
+                title="Recommended next step",
+                description=(
+                    "Start here and use the copied prompt to define a focused cohort."
+                ),
+            )
+
+        rebuilt_findings: list[InsightFinding] = []
+        rebuilt_meta: dict[str, FindingMetadata] = {}
+        prompts_fit = True
+        for position, finding in enumerate(retained):
+            candidate = candidates[finding.id]
+            prior_meta = original_meta.findings[finding.id]
+            evidence_rows = [
+                EvidenceLocator(
+                    session_id=row.session_id,
+                    node_id=row.node_id,
+                    signal=row.signal or "evidence",
                 )
-                updated_finding = insight.findings[0].model_copy(
+                for artifact in finding.artifacts
+                if isinstance(artifact, EvidenceArtifact)
+                for row in artifact.rows
+            ]
+            try:
+                prompt = _build_investigation_prompt(
+                    candidate,
+                    card_description=finding.body or finding.summary or "",
+                    context=result.context,
+                    coverage=coverage,
+                    contributing_session_ids=finding.contributing_session_ids,
+                    evidence=evidence_rows,
+                )
+            except _OutputBoundError:
+                prompts_fit = False
+                break
+            rebuilt_meta[finding.id] = prior_meta.model_copy(
+                update={
+                    "position": position,
+                    "recommended": finding.id == recommendation_id,
+                }
+            )
+            rebuilt_findings.append(
+                finding.model_copy(
                     update={
                         "action": InsightAction(
-                            label=original_metadata.cta_label or DEFAULT_CTA_LABEL,
-                            prompt=investigation_prompt,
+                            label=prior_meta.cta_label, prompt=prompt
                         )
                     }
                 )
-                bounded_insights.append(
-                    insight.model_copy(
-                        update={
-                            "coverage": InsightCoverage(
-                                sessions_analyzed=coverage.sessions_analyzed,
-                                sessions_available=coverage.sessions_available,
-                                caveats=list(coverage.caveats),
-                            ),
-                            "findings": [updated_finding],
-                            "metadata": {
-                                INSIGHT_METADATA_KEY: metadata.model_dump(mode="json")
-                            },
-                        }
-                    )
-                )
-
-            if not prompts_fit:
-                continue
-
-            bounded = InsightGenerationResult.model_validate(
-                result.model_copy(
-                    update={
-                        "coverage": coverage,
-                        "recommendation": recommendation,
-                        "insights": bounded_insights,
-                    }
-                ).model_dump()
             )
-            if len(bounded.model_dump_json().encode("utf-8")) <= maximum:
-                return bounded
+        if not prompts_fit:
+            continue
+
+        rebuilt_report = _assemble_report_from_findings(
+            findings=rebuilt_findings,
+            finding_meta=rebuilt_meta,
+            recommended_id=recommendation_id,
+            omitted_titles=original_meta.omitted_candidates,
+            coverage=coverage,
+            context=result.context,
+            analysis_version=original_meta.generation.analysis,
+            mode=result.mode,
+        )
+        bounded = InsightGenerationResult(
+            context=result.context,
+            coverage=coverage,
+            mode=result.mode,
+            page_intro=result.page_intro,
+            recommendation=recommendation,
+            diagnostics=result.diagnostics,
+            insights=[rebuilt_report],
+        )
+        if len(bounded.model_dump_json().encode("utf-8")) <= maximum:
+            return bounded
 
     coverage = result.coverage.model_copy(
         update={
             "truncations": [*result.coverage.truncations, truncation],
             "caveats": _append_coverage_caveat(
                 result.coverage.caveats,
-                "No generated card fit within the configured result byte limit.",
+                "No generated finding fit within the configured result byte limit.",
             ),
         }
     )
@@ -672,12 +808,11 @@ def _finalize_result(
     profiling: ProfilingResult,
     maximum: int,
 ) -> InsightGenerationResult:
-    """Apply the final byte bound to generated insight cards."""
+    """Apply the final byte bound to the generated insight report."""
     bounded = _get_oversize_result(result, maximum, profiling) or result
     result_bytes = len(bounded.model_dump_json().encode("utf-8"))
     if result_bytes > maximum:
         raise InsightResultSizeError(available=result_bytes, maximum=maximum)
-
     return bounded
 
 
@@ -689,7 +824,7 @@ async def generate_insights(
     generator: InsightModelGenerator | None = None,
     source_session_count: int | None = None,
 ) -> InsightGenerationResult:
-    """Generate frontend-ready Insights from caller-scoped normalized sessions."""
+    """Generate a structured Insight report from caller-scoped normalized sessions."""
     selected_config = config or InsightGenerationConfig()
     with SessionProfiler(config=selected_config.profiling) as profiler:
         for session in sessions:
@@ -712,7 +847,7 @@ async def generate_insights_from_profile(
     config: InsightGenerationConfig | None = None,
     generator: InsightModelGenerator | None = None,
 ) -> InsightGenerationResult:
-    """Generate bounded cards from a completed, caller-validated session profile."""
+    """Generate a bounded structured report from a completed session profile."""
     selected_config = config or InsightGenerationConfig()
     if not profiling.candidates:
         return _finalize_result(
@@ -727,7 +862,11 @@ async def generate_insights_from_profile(
         )
 
     if selected_config.model is None:
-        plan = generate_deterministic_plan(profiling)
+        plan = generate_deterministic_plan(
+            profiling,
+            max_findings=selected_config.max_findings,
+            focus=selected_config.focus,
+        )
     else:
         if generator is None:
             raise ValueError("model-backed generation requires a model generator")
@@ -735,6 +874,8 @@ async def generate_insights_from_profile(
             profiling,
             generator=generator,
             config=selected_config.model,
+            max_findings=selected_config.max_findings,
+            focus=selected_config.focus,
         )
 
     try:
@@ -757,7 +898,7 @@ async def generate_insights_from_profile(
                 ],
                 "caveats": _append_coverage_caveat(
                     profiling.coverage.caveats,
-                    "No selected card fit within the investigation prompt limit.",
+                    "No selected finding fit within the investigation prompt limit.",
                 ),
             }
         )

@@ -33,7 +33,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from kitaru.api_models.v1.insight import (
     CategoricalArtifact,
+    CycleStep,
+    InsightArtifact,
+    RateArtifact,
+    Severity,
     StatGridArtifact,
+    SuggestedQuestion,
+    Tone,
+    ToolCycleArtifact,
 )
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import (
@@ -42,12 +49,25 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeResponse,
     SessionWithNodesResponse,
 )
+from kitaru_post_import_insights.briefings import (
+    build_distribution_briefing as _build_distribution_briefing,
+)
+from kitaru_post_import_insights.briefings import (
+    build_model_mix_briefing as _build_model_mix_briefing,
+)
+from kitaru_post_import_insights.briefings import (
+    build_outcome_briefing as _build_outcome_briefing,
+)
+from kitaru_post_import_insights.briefings import (
+    build_signal_briefing as _build_signal_briefing,
+)
 from kitaru_post_import_insights.findings import (
     CandidateCoverage,
     CandidateFinding,
     DeterministicFact,
     build_binned,
     build_categorical,
+    build_split_bar,
     calculate_percent,
     format_briefing,
     pluralize,
@@ -355,6 +375,13 @@ class _State:
     ambiguous_tool_outputs: int = 0
     contribution_truncated: bool = False
     maximum_contributors_available: int = 0
+    min_started_at: datetime | None = None
+    max_started_at: datetime | None = None
+    cycle_max_repeats: dict[str, int] = field(default_factory=dict)
+    cycle_steps: dict[str, list[tuple[str, bool]]] = field(default_factory=dict)
+    cycle_session_sets: dict[str, set[uuid.UUID]] = field(
+        default_factory=lambda: defaultdict(set)
+    )
     resources: ResourceProfile = field(init=False)
 
     def __post_init__(self) -> None:
@@ -833,6 +860,16 @@ def _scan_session(
 
     started_at = session.session.started_at
     ended_at = session.session.ended_at
+    if (
+        started_at is not None
+        and started_at.tzinfo is not None
+        and started_at.utcoffset() is not None
+    ):
+        started_utc = started_at.astimezone(UTC)
+        if state.min_started_at is None or started_utc < state.min_started_at:
+            state.min_started_at = started_utc
+        if state.max_started_at is None or started_utc > state.max_started_at:
+            state.max_started_at = started_utc
     if started_at is not None and ended_at is not None:
         started_aware = (
             started_at.tzinfo is not None and started_at.utcoffset() is not None
@@ -911,13 +948,39 @@ def _scan_session(
                 node_id=first.id,
             )
 
-    for start, _, tools in _find_cycles(calls, identities):
+    for start, end, tools in _find_cycles(calls, identities):
         safe_tools = [sanitize_label(tool) or UNAVAILABLE_TOOL for tool in tools]
+        cycle_label = " -> ".join(safe_tools)
+        period = len(safe_tools)
+        repeats = max(2, (end - start + 1) // period)
+        state.cycle_max_repeats[cycle_label] = max(
+            state.cycle_max_repeats.get(cycle_label, 0), repeats
+        )
+        step_errors = [
+            any(
+                calls[idx].status is NodeStatus.FAILED
+                for idx in range(start + offset, end + 1, period)
+            )
+            for offset in range(period)
+        ]
+        existing_steps = state.cycle_steps.get(cycle_label)
+        if existing_steps is None:
+            state.cycle_steps[cycle_label] = list(
+                zip(safe_tools, step_errors, strict=True)
+            )
+        else:
+            state.cycle_steps[cycle_label] = [
+                (name, prev_err or cur_err)
+                for (name, prev_err), cur_err in zip(
+                    existing_steps, step_errors, strict=True
+                )
+            ]
+        state.cycle_session_sets[cycle_label].add(session_id)
         _record(
             state,
             "short-tool-cycles",
             session_id,
-            category=" -> ".join(safe_tools),
+            category=cycle_label,
             node_id=calls[start].id,
         )
 
@@ -1012,328 +1075,11 @@ def _get_contributions(
     )
 
 
-def _format_ratio(numerator: int, denominator: int) -> str:
-    """Format a per-session average with at most one decimal place."""
-    if not denominator:
-        return "0"
-    return f"{numerator / denominator:.1f}".removesuffix(".0")
-
-
-def _build_signal_briefing(
-    *,
-    family: str,
-    subject: str,
-    affected: int,
-    analyzed: int,
-    share: int | float,
-    occurrences: int,
-    chart_groups: int,
-    leading_category_count: int,
-    excluded_sessions: int,
-) -> str:
-    """Build the briefing for a trajectory, tool-health, or language signal."""
-    odd = (
-        f"{pluralize(occurrences, 'occurrence')} of {subject} across "
-        f"{pluralize(affected, 'session')}, which is {share}% of the "
-        f"{pluralize(analyzed, 'session')} analyzed for this marker."
-    )
-    if chart_groups > 1:
-        odd += (
-            f" The chart splits them into {chart_groups} groups; the leading group "
-            f"alone accounts for {leading_category_count} occurrences."
-        )
-    else:
-        odd += (
-            " All occurrences fall in one group, so the chart only compares "
-            "matching sessions with the other sessions."
-        )
-    if excluded_sessions:
-        odd += (
-            f" {pluralize(excluded_sessions, 'session was', 'sessions were')} left "
-            "out because their user text was missing or not fully inspected."
-        )
-    marker_look_first = (
-        "Open the sessions named in evidence_locators; each locator points at "
-        "the node where the marker was recorded. Compare them with analyzed "
-        "sessions that have no occurrence"
-    )
-    if family == "language":
-        look_first = (
-            "Open the sessions named in evidence_locators; when a locator's node_id "
-            "is null the matching text is in the session's recorded inputs, "
-            "otherwise it is in that node's inputs. First confirm that the matching "
-            "text is customer input rather than agent policy or harness instructions. "
-            "Compare them with analyzed sessions that have no occurrence, and "
-            "read the agent turn immediately before each flagged user message."
-        )
-        cohort = (
-            f"sessions with at least one user message matching this marker (the "
-            f"{affected} listed), versus sessions with fully inspected user text and "
-            "no match."
-        )
-        hypothesis = (
-            "Check whether the flagged messages follow one recognizable agent turn, "
-            "such as an unanswered question, a wrong tool result, or a repeated "
-            "clarification request. If they do, one agent change aimed at that turn "
-            "is the candidate to replay."
-        )
-        held = (
-            "the marker recurs in fewer replayed sessions than the "
-            f"{pluralize(affected, 'session')} it appears in now, and the "
-            "failed-session rate for the cohort does not rise."
-        )
-    elif family == "tool_health":
-        look_first = marker_look_first + (
-            ", starting with the chart's leading group when it dominates the count."
-            if chart_groups > 1
-            else "."
-        )
-        cohort = (
-            f"sessions with at least one recorded occurrence of {subject} (the "
-            f"{affected} listed)"
-        )
-        cohort += (
-            ", optionally narrowed to the chart's leading group."
-            if chart_groups > 1
-            else "."
-        )
-        hypothesis = (
-            "Check whether the affected calls fail or come back empty for the same "
-            "inputs every time. If they do, the tool contract or the way the agent "
-            "builds its arguments is the single factor to change and replay."
-        )
-        held = (
-            f"recorded occurrences per session fall below the current average of "
-            f"{_format_ratio(occurrences, affected)}, the affected share drops below "
-            f"{share}%, and the failed-session rate does not rise."
-        )
-    else:
-        look_first = (
-            marker_look_first
-            + ", and check what the agent saw between one call and its repeat."
-        )
-        cohort = (
-            f"sessions with at least one recorded occurrence of {subject} (the "
-            f"{affected} listed), versus sessions with tool calls and no repeat."
-        )
-        hypothesis = (
-            "Check whether the repeat follows a tool result the agent could not act "
-            "on, such as an error with no guidance or an unchanged answer. If it "
-            "does, the tool's error message or the agent's retry instruction is the "
-            "single factor to change and replay."
-        )
-        held = (
-            f"repeated calls per affected session fall below the current average of "
-            f"{_format_ratio(occurrences, affected)}, tool calls per session drop, "
-            "and the failed-session rate does not rise."
-        )
-    return format_briefing(
-        odd=odd,
-        look_first=look_first,
-        cohort=cohort,
-        hypothesis=hypothesis,
-        held=held,
-    )
-
-
-def _build_outcome_briefing(
-    *,
-    failed: int,
-    completed: int,
-    analyzed: int,
-    failed_percent: int | float,
-    statuses: int,
-) -> str:
-    """Build the briefing for the recorded session outcome finding."""
-    odd = (
-        f"{pluralize(failed, 'session')} out of {analyzed} analyzed "
-        f"({failed_percent}%) {'carries' if failed == 1 else 'carry'} the recorded "
-        "status failed."
-    )
-    if completed:
-        odd += f" {completed} are recorded completed."
-    if statuses > 2:
-        odd += f" The chart shows {statuses} distinct recorded statuses in total."
-    if completed:
-        look_first = (
-            "Open the failed sessions listed in contributing_session_ids and read "
-            "their last recorded node. Compare each with a completed analyzed "
-            "session that starts with a similar input."
-        )
-    else:
-        look_first = (
-            "Open the failed sessions listed in contributing_session_ids and read "
-            "their last recorded node. None of the analyzed sessions completed, so "
-            "pick the comparison set from other sessions of this agent or from "
-            "another agent version."
-        )
-    return format_briefing(
-        odd=odd,
-        look_first=look_first,
-        cohort=f"sessions whose recorded status is failed (the {failed} listed).",
-        hypothesis=(
-            "Check whether the failed sessions share the same final step, such as "
-            "one tool name and one error, right before the status flips to failed. "
-            "If they do, that step is the single factor to change and replay."
-        ),
-        held=(
-            f"the failed share of the replayed cohort falls below {failed_percent}% "
-            "without a rise in duration or cost per session."
-        ),
-    )
-
-
-def _build_distribution_briefing(
-    *,
-    family: str,
-    values: Histogram,
-    sessions_analyzed: int,
-    unit: str,
-) -> str:
-    """Build the briefing for an activity or timing distribution finding."""
-    quantity = "recorded duration" if family == "timing" else f"{unit} per session"
-    reading = "recorded duration" if family == "timing" else f"{unit} count"
-    observations = len(values)
-    minimum = f"{values.minimum:g}"
-    maximum = f"{values.maximum:g}"
-    tail_index = values.get_highest_occupied_bin()
-    assert tail_index is not None
-    tail_count = values.bins[tail_index]
-    tail_lower = f"{values.bounds[tail_index - 1]:g}" if tail_index else None
-    # Name the bin the way the chart labels it: the last bin is open-ended, a
-    # lower occupied bin has an upper bound and empty bins above it.
-    if tail_index == len(values.bounds):
-        bin_name, bin_adjective = "top bin", "top-bin"
-        bin_label = f"{tail_lower} or more {unit}"
-    else:
-        bin_name, bin_adjective = "highest occupied bin", "highest-bin"
-        bin_label = (
-            f"at least {tail_lower} and " if tail_lower is not None else ""
-        ) + f"less than {values.bounds[tail_index]:g} {unit}"
-    rest = observations - tail_count
-    odd = (
-        f"{observations} sessions range from {minimum} to {maximum} {unit}. "
-        f"{pluralize(tail_count, 'session sits', 'sessions sit')} in the "
-        f"{bin_name} ({bin_label})"
-        + (
-            f"; the other {rest} sit below it."
-            if rest
-            else "; all observations share this bin despite their different values."
-        )
-    )
-    if observations < sessions_analyzed:
-        odd += (
-            f" Of the {sessions_analyzed} sessions analyzed, "
-            f"{sessions_analyzed - observations} had no {reading}."
-        )
-    look_first = (
-        "Open evidence_locators in their listed order: they point to sessions with "
-        f"the highest recorded values in the {bin_name}, ranked by value descending "
-        "and session UUID ascending for ties. Check evidence_scope for available "
-        "versus retained counts and truncation. Other contributing_session_ids "
-        "describe the wider distribution; they are not guaranteed to belong to "
-        "this bin or form a comparison group. "
-        + (
-            "Compare them with sessions from lower occupied bins; read each "
-            f"comparison session's {reading} to place it."
-            if rest
-            else "All observations share one bin; compare their actual recorded values."
-        )
-    )
-    interval = f"at least {tail_lower}" if tail_lower is not None else ""
-    if tail_index < len(values.bounds):
-        interval += (" and " if interval else "") + (
-            f"less than {values.bounds[tail_index]:g}"
-        )
-    if family == "timing":
-        cohort = (
-            f"sessions whose recorded duration is {interval} seconds (the {bin_name})."
-        )
-        hypothesis = (
-            "Check whether the long sessions spend their time in a few slow nodes, "
-            "such as one tool wait or one model call, rather than in more steps. "
-            "If they do, that node is the single factor to change and replay."
-        )
-        held = (
-            f"the {bin_adjective} cohort's recorded duration falls below {tail_lower} "
-            "seconds for most sessions while the failed-session rate and cost per "
-            "session do not rise."
-        )
-    else:
-        cohort = f"sessions with {interval} {unit} (the {bin_name})."
-        hypothesis = (
-            f"Check whether the {bin_adjective} sessions reach the same outcome as the "
-            f"lower-value sessions or whether the extra {unit} are repeats and "
-            "retries. If they are repeats, the step that triggers them is the "
-            "single factor to change and replay."
-        )
-        held = (
-            f"the {bin_adjective} cohort's {unit} per session fall below {tail_lower} "
-            "for most sessions while the failed-session rate does not rise."
-        )
-    if not rest:
-        hypothesis = (
-            f"Check whether sessions with higher {quantity} contain avoidable waits "
-            "or repeated steps. If confirmed, change that one factor and replay "
-            "the cohort against its recorded baseline."
-        )
-        held = (
-            f"the cohort's {quantity} decreases against its recorded baseline while "
-            "the failed-session rate does not rise."
-        )
-    return format_briefing(
-        odd=odd,
-        look_first=look_first,
-        cohort=cohort,
-        hypothesis=hypothesis,
-        held=held,
-    )
-
-
-def _build_model_mix_briefing(
-    *,
-    models: int,
-    model_calls: int,
-    leading_model_calls: int,
-    affected: int,
-    analyzed: int,
-) -> str:
-    """Build the briefing for the recorded model mix finding."""
-    leading_share = calculate_percent(leading_model_calls, model_calls)
-    odd = (
-        f"{pluralize(models, 'distinct recorded model label')} across "
-        f"{pluralize(model_calls, 'model call')} in {affected} of {analyzed} "
-        f"sessions. The most frequent label accounts for "
-        f"{pluralize(leading_model_calls, 'call')} ({leading_share}%)."
-    )
-    look_first = (
-        "Open sessions from contributing_session_ids and group them by the model "
-        "label on their model-call nodes. Compare sessions with at least one "
-        "model-call node recording the chart's leading label against sessions "
-        "with none."
-    )
-    cohort = (
-        "sessions with at least one model-call node recording the chart's "
-        f"leading label ({leading_model_calls} of {model_calls} calls)."
-    )
-    return format_briefing(
-        odd=odd,
-        look_first=look_first,
-        cohort=cohort,
-        hypothesis=(
-            "Check whether swapping the leading model for one candidate changes "
-            "outcome or cost. Run one replay with a single model override and no "
-            "other change."
-        ),
-        held=(
-            "cost per session or the failed-session rate falls on the replayed "
-            "cohort while the other one does not rise."
-        ),
-    )
-
-
 def _build_categorical(
-    values: Counter[str] | LabelCounts, *, unit: str
+    values: Counter[str] | LabelCounts,
+    *,
+    unit: str,
+    highlight_top_tone: Tone | None = None,
 ) -> CategoricalArtifact | StatGridArtifact:
     """Build categorical data with deterministic count and label ordering."""
     ordered = (
@@ -1341,7 +1087,81 @@ def _build_categorical(
         if isinstance(values, LabelCounts)
         else sorted(values.items(), key=lambda item: (-item[1], item[0]))
     )
-    return build_categorical(ordered, unit=unit)
+    return build_categorical(ordered, unit=unit, highlight_top_tone=highlight_top_tone)
+
+
+def _build_signal_artifacts(
+    state: _State,
+    *,
+    signal: str,
+    family: str,
+    aggregate: _Aggregate,
+    affected: int,
+    eligible: int,
+) -> tuple[InsightArtifact, list[InsightArtifact]]:
+    """Choose the Zuri-aligned lead artifact and optional companion chart."""
+    rate_value = min(1.0, affected / eligible) if eligible else 0.0
+    if signal == "short-tool-cycles" and state.cycle_steps:
+        top_cycle = aggregate.categories.top(1)[0][0]
+        steps = state.cycle_steps.get(top_cycle)
+        if steps:
+            max_repeats = max(2, state.cycle_max_repeats.get(top_cycle, 3))
+            cycle_sessions = max(1, len(state.cycle_session_sets.get(top_cycle, ())))
+            has_multiple = len(aggregate.categories) > 1
+            lead: InsightArtifact = ToolCycleArtifact(
+                title="Most frequent tool loop" if has_multiple else None,
+                steps=[
+                    CycleStep(name=name[:120], status="error" if err else "ok")
+                    for name, err in steps[:6]
+                ],
+                repeat_count=max_repeats,
+                session_count=cycle_sessions,
+                note=(
+                    f"Repeated up to {max_repeats}x across "
+                    f"{pluralize(cycle_sessions, 'session')}"
+                ),
+            )
+            extras: list[InsightArtifact] = (
+                [
+                    _build_categorical(
+                        aggregate.categories, unit="occurrences"
+                    ).model_copy(update={"title": "Repeating cycles by sequence"})
+                ]
+                if has_multiple
+                else []
+            )
+            return lead, extras
+
+    if signal == "tool-errors" and len(aggregate.categories) > 1:
+        return (
+            _build_categorical(
+                aggregate.categories, unit="occurrences", highlight_top_tone="danger"
+            ),
+            [],
+        )
+
+    lead_rate: InsightArtifact = RateArtifact(
+        presentation="share_bar",
+        rate=round(rate_value, 4),
+        numerator=affected,
+        denominator=max(eligible, 1),
+        label=f"of {eligible} sessions",
+        basis=f"{affected} of {eligible} sessions",
+        tone="warn" if family == "language" else "risk",
+    )
+    extras = []
+    if len(aggregate.categories) > 1:
+        breakdown_title = (
+            "Breakdown by marker" if family == "language" else "Breakdown by tool"
+        )
+        extras.append(
+            _build_categorical(
+                aggregate.categories,
+                unit="occurrences",
+                highlight_top_tone="risk",
+            ).model_copy(update={"title": breakdown_title})
+        )
+    return lead_rate, extras
 
 
 def _build_signal_candidate(
@@ -1368,26 +1188,24 @@ def _build_signal_candidate(
         if family == "language"
         else state.node_session_ids
     )
-    share = calculate_percent(len(aggregate.sessions), len(eligible_session_ids))
-    values: Counter[str] | LabelCounts = aggregate.categories
-    unit = "occurrences"
-    if len(values) == 1:
-        values = Counter(
-            {
-                "Matching sessions": len(aggregate.sessions),
-                "Other sessions": max(
-                    len(eligible_session_ids) - len(aggregate.sessions), 0
-                ),
-            }
-        )
-        unit = "sessions"
+    affected = len(aggregate.sessions)
+    eligible = len(eligible_session_ids)
+    share = calculate_percent(affected, eligible)
+    lead_artifact, extra_artifacts = _build_signal_artifacts(
+        state,
+        signal=signal,
+        family=family,
+        aggregate=aggregate,
+        affected=affected,
+        eligible=eligible,
+    )
     candidate_caveat = caveat
-    if len(aggregate.categories) > 20:
+    if len(aggregate.categories) > 8:
         candidate_caveat += (
-            " The chart shows the 20 most frequent categories and combines the "
-            "remaining categories."
+            " The breakdown chart shows the top 7 categories and folds the "
+            "remaining categories into Other."
         )
-    excluded_sessions = len(state.analyzed_session_ids) - len(eligible_session_ids)
+    excluded_sessions = len(state.analyzed_session_ids) - eligible
     if family == "language" and excluded_sessions:
         noun = "session was" if excluded_sessions == 1 else "sessions were"
         candidate_caveat = (
@@ -1398,40 +1216,52 @@ def _build_signal_candidate(
     briefing = _build_signal_briefing(
         family=family,
         subject=subject,
-        affected=len(aggregate.sessions),
-        analyzed=len(eligible_session_ids),
+        affected=affected,
+        analyzed=eligible,
         share=share,
         occurrences=aggregate.count,
         chart_groups=len(aggregate.categories.top()),
         leading_category_count=leading[0][1] if leading else 0,
         excluded_sessions=excluded_sessions if family == "language" else 0,
     )
+    severity: Severity = (
+        "high"
+        if share >= 20 or (family in ("trajectory", "tool_health") and affected >= 10)
+        else ("medium" if share >= 5 else "low")
+    )
+    questions = [
+        SuggestedQuestion(label=f"Show example sessions for {eyebrow.lower()}"[:80]),
+        SuggestedQuestion(label="What happened right before this signal triggered?"),
+    ]
     return CandidateFinding(
         id=candidate_id,
         family=family,
         rank=rank,
+        tier="primary",
+        severity=severity,
         eyebrow=eyebrow,
-        title=title_pattern.format(share=share, affected=len(aggregate.sessions)),
+        title=title_pattern.format(share=share, affected=affected),
         fallback_description=description_pattern.format(
             count=aggregate.count,
-            affected=len(aggregate.sessions),
+            affected=affected,
         ),
         caveat=candidate_caveat,
-        data=_build_categorical(values, unit=unit),
+        data=lead_artifact,
+        extra_artifacts=extra_artifacts,
         facts=[
             DeterministicFact(name="occurrences", value=aggregate.count),
-            DeterministicFact(name="affected_sessions", value=len(aggregate.sessions)),
+            DeterministicFact(name="affected_sessions", value=affected),
             DeterministicFact(name="affected_share_percent", value=share),
         ],
         coverage=CandidateCoverage(
-            sessions_analyzed=len(eligible_session_ids),
-            affected_sessions=len(aggregate.sessions),
+            sessions_analyzed=eligible,
+            affected_sessions=affected,
             occurrences=aggregate.count,
             evidence_available=aggregate.count,
             evidence_retained=sum(
                 locator.session_id in contribution_ids for locator in aggregate.evidence
             ),
-            contributing_sessions_available=len(aggregate.sessions),
+            contributing_sessions_available=affected,
             contributing_sessions_retained=len(contributions),
         ),
         contributing_session_ids=contributions,
@@ -1441,6 +1271,7 @@ def _build_signal_candidate(
             if locator.session_id in contribution_ids
         ],
         investigation_prompt=briefing,
+        suggested_questions=questions,
     )
 
 
@@ -1599,14 +1430,21 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
 
     analyzed_sessions = len(state.analyzed_session_ids)
     failed_ids = state.status_sessions.get(SessionStatus.FAILED.value)
+    status_tones: dict[str, Tone] = {
+        SessionStatus.COMPLETED.value: "good",
+        SessionStatus.FAILED.value: "danger",
+        SessionStatus.IN_PROGRESS.value: "warn",
+    }
+    ordered_statuses = sorted(
+        state.statuses.items(), key=lambda item: (-item[1], item[0])
+    )
     if analyzed_sessions and failed_ids:
         affected_ids = failed_ids
         contributions = _get_contributions(state, affected_ids)
         contribution_ids = set(contributions)
         completed_sessions = state.statuses.get(SessionStatus.COMPLETED.value, 0)
-        failed_percent = calculate_percent(
-            state.statuses.get("failed", 0), analyzed_sessions
-        )
+        failed_count = state.statuses.get("failed", 0)
+        failed_percent = calculate_percent(failed_count, analyzed_sessions)
         outcome_description = (
             "Recorded session statuses show where to begin comparing failed and "
             "completed runs."
@@ -1624,11 +1462,21 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
             ]
             if session_id in contribution_ids
         ]
+        outcome_tier: Literal["primary", "secondary"] = (
+            "primary" if failed_percent >= 5 else "secondary"
+        )
+        outcome_severity: Severity = (
+            "high"
+            if failed_percent >= 20
+            else ("medium" if failed_percent >= 5 else "low")
+        )
         candidates.append(
             CandidateFinding(
                 id="session-outcomes",
                 family="outcome",
                 rank=55,
+                tier=outcome_tier,
+                severity=outcome_severity,
                 eyebrow="SESSION OUTCOMES",
                 title=(f"{failed_percent}% of sessions are recorded failed"),
                 fallback_description=outcome_description,
@@ -1636,11 +1484,13 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                     "Recorded status describes the session boundary, not the cause of "
                     "the outcome."
                 ),
-                data=_build_categorical(state.statuses, unit="sessions"),
+                data=build_split_bar(
+                    ordered_statuses, unit="sessions", tones=status_tones
+                ),
                 facts=[
                     DeterministicFact(
                         name="failed_sessions",
-                        value=state.statuses.get("failed", 0),
+                        value=failed_count,
                     ),
                     DeterministicFact(name="sessions", value=analyzed_sessions),
                 ],
@@ -1661,6 +1511,58 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                     analyzed=analyzed_sessions,
                     failed_percent=failed_percent,
                     statuses=len(state.statuses),
+                ),
+                suggested_questions=[
+                    SuggestedQuestion(
+                        label="What do the failed sessions have in common?"
+                    ),
+                    SuggestedQuestion(
+                        label="Compare failed sessions with completed ones"
+                    ),
+                ],
+            )
+        )
+    elif analyzed_sessions and len(ordered_statuses) >= 2:
+        all_contributions = _get_contributions(state, state.analyzed_session_ids)
+        candidates.append(
+            CandidateFinding(
+                id="session-outcomes",
+                family="outcome",
+                rank=118,
+                tier="secondary",
+                eyebrow="SESSION OUTCOMES",
+                title="How sessions ended",
+                fallback_description=(
+                    "Baseline breakdown of recorded session statuses across the "
+                    "analyzed run."
+                ),
+                caveat=(
+                    "Recorded status describes the session boundary, not the cause of "
+                    "the outcome."
+                ),
+                data=build_split_bar(
+                    ordered_statuses, unit="sessions", tones=status_tones
+                ),
+                facts=[DeterministicFact(name="sessions", value=analyzed_sessions)],
+                coverage=CandidateCoverage(
+                    sessions_analyzed=analyzed_sessions,
+                    affected_sessions=analyzed_sessions,
+                    occurrences=analyzed_sessions,
+                    evidence_available=0,
+                    evidence_retained=0,
+                    contributing_sessions_available=analyzed_sessions,
+                    contributing_sessions_retained=len(all_contributions),
+                ),
+                contributing_session_ids=all_contributions,
+                evidence=[],
+                investigation_prompt=format_briefing(
+                    odd=f"Sessions span {len(ordered_statuses)} recorded statuses.",
+                    look_first="Compare sessions across each recorded status.",
+                    cohort="sessions grouped by recorded status.",
+                    hypothesis=(
+                        "Check whether non-completed sessions share a stop point."
+                    ),
+                    held="non-completed sessions decline on replay.",
                 ),
             )
         )
@@ -1768,11 +1670,17 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 id=spec.candidate_id,
                 family=spec.family,
                 rank=spec.rank,
+                tier="secondary",
                 eyebrow=spec.eyebrow,
                 title=spec.title,
                 fallback_description=spec.description,
                 caveat=spec.caveat,
-                data=build_binned(spec.values, unit=spec.unit),
+                data=build_binned(
+                    spec.values,
+                    unit=spec.unit,
+                    presentation="micro",
+                    focus_top_bin=True,
+                ),
                 facts=[
                     DeterministicFact(name="observations", value=len(spec.values)),
                     DeterministicFact(name="minimum", value=spec.values.minimum),
@@ -1806,6 +1714,7 @@ def _build_candidates(state: _State) -> list[CandidateFinding]:
                 id="model-mix",
                 family="model",
                 rank=160,
+                tier="secondary",
                 eyebrow="MODEL MIX",
                 title=(
                     f"{len(state.models)} recorded model identifiers appear in "
@@ -2070,6 +1979,8 @@ def _finish_profile(state: _State, source_session_count: int | None) -> Profilin
         nodes_available=state.nodes_analyzed,
         nodes_analyzed=state.nodes_analyzed,
         inspected_text_bytes=state.inspected_text_bytes,
+        started_after=state.min_started_at,
+        started_before=state.max_started_at,
         truncations=truncations,
         caveats=caveats,
     )

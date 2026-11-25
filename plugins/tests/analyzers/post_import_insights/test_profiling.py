@@ -29,6 +29,7 @@ from pydantic import ValidationError
 from kitaru.api_models.v1.insight import (
     BinnedArtifact,
     CategoricalArtifact,
+    RateArtifact,
 )
 from kitaru.api_models.v1.session import (
     SessionDetailResponse,
@@ -562,14 +563,12 @@ def test_sparse_signal_percentages_match_title_fact_and_chart(
 
     candidate = _candidate(profile_sessions(sessions), "correction-language")
     facts = {fact.name: fact.value for fact in candidate.facts}
-    chart = {value.label: value.value for value in candidate.data.values}
 
     assert candidate.title.startswith(f"{expected_share}%")
     assert facts["affected_share_percent"] == expected_share
-    assert chart == {
-        "Matching sessions": affected,
-        "Other sessions": 250 - affected,
-    }
+    assert isinstance(candidate.data, RateArtifact)
+    assert candidate.data.numerator == affected
+    assert candidate.data.denominator == 250
 
 
 def test_profiles_literal_user_text_signals_without_retaining_text() -> None:
@@ -976,22 +975,19 @@ def test_binary_signal_chart_counts_sessions_not_occurrences() -> None:
     candidate = _candidate(profile_sessions([session]), "failed-identical-retries")
 
     assert candidate.coverage.occurrences == 2
-    assert candidate.data.unit == "sessions"
-    assert {value.label: value.value for value in candidate.data.values} == {
-        "Matching sessions": 1,
-        "Other sessions": 0,
-    }
+    assert isinstance(candidate.data, RateArtifact)
+    assert candidate.data.numerator == 1
+    assert candidate.data.denominator == 1
 
 
-def test_session_outcomes_requires_at_least_one_failed_session() -> None:
+def test_session_outcomes_without_failures_is_secondary_only() -> None:
     result = profile_sessions(
         [
             _session(1, status=SessionStatus.COMPLETED),
             _session(2, status=SessionStatus.IN_PROGRESS),
         ]
     )
-
-    assert "session-outcomes" not in {candidate.id for candidate in result.candidates}
+    assert _candidate(result, "session-outcomes").tier == "secondary"
 
 
 def test_all_failed_outcome_copy_does_not_claim_completed_comparison() -> None:
@@ -1066,16 +1062,20 @@ def test_imported_tool_labels_stay_in_chart_data(candidate_id: str) -> None:
         sessions.append(_calls(number, calls))
 
     candidate = _candidate(profile_sessions(sessions), candidate_id)
-    assert isinstance(candidate.data, CategoricalArtifact)
-    expected_labels = {malicious_label, other_label}
-    if candidate_id == "short-tool-cycles":
-        expected_labels = {f"{label} -> finish" for label in expected_labels}
-    assert {value.label for value in candidate.data.values} == expected_labels
+    artifacts = [candidate.data, *candidate.extra_artifacts]
+    cat = next(a for a in artifacts if isinstance(a, CategoricalArtifact))
+    expected_labels = (
+        {f"{malicious_label} -> finish", f"{other_label} -> finish"}
+        if candidate_id == "short-tool-cycles"
+        else {malicious_label, other_label}
+    )
+    assert {v.label for v in cat.values} == expected_labels
     for prose in (
         candidate.title,
         candidate.fallback_description,
-        candidate.caveat,
+        candidate.caveat or "",
         candidate.investigation_prompt,
+        *(q.label for q in candidate.suggested_questions),
     ):
         assert malicious_label not in prose
         assert other_label not in prose
@@ -1621,10 +1621,9 @@ def test_language_signal_uses_only_sessions_with_inspected_text() -> None:
         "100% of sessions with fully inspected selected text"
     )
     assert candidate.coverage.sessions_analyzed == 1
-    assert {value.label: value.value for value in candidate.data.values} == {
-        "Matching sessions": 1,
-        "Other sessions": 0,
-    }
+    assert isinstance(candidate.data, RateArtifact)
+    assert candidate.data.numerator == 1
+    assert candidate.data.denominator == 1
     assert "1 analyzed session was excluded" in candidate.caveat
     assert "excluded 1 analyzed session" in " ".join(result.coverage.caveats)
 
@@ -1653,10 +1652,9 @@ def test_partial_later_match_does_not_discard_complete_language_signal() -> None
     assert candidate.coverage.sessions_analyzed == 1
     assert candidate.coverage.affected_sessions == 1
     assert candidate.title.startswith("100%")
-    assert {value.label: value.value for value in candidate.data.values} == {
-        "Matching sessions": 1,
-        "Other sessions": 0,
-    }
+    assert isinstance(candidate.data, RateArtifact)
+    assert candidate.data.numerator == 1
+    assert candidate.data.denominator == 1
 
 
 def test_uninspected_language_signal_is_not_emitted() -> None:
@@ -1725,10 +1723,9 @@ def test_payload_truncated_text_session_is_excluded_from_language_coverage(
     assert candidate.coverage.sessions_analyzed == 1
     assert candidate.coverage.affected_sessions == 1
     assert candidate.title.startswith("100%")
-    assert {value.label: value.value for value in candidate.data.values} == {
-        "Matching sessions": 1,
-        "Other sessions": 0,
-    }
+    assert isinstance(candidate.data, RateArtifact)
+    assert candidate.data.numerator == 1
+    assert candidate.data.denominator == 1
 
 
 @pytest.mark.parametrize(

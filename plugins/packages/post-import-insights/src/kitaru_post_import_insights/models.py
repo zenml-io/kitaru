@@ -8,35 +8,42 @@
 #
 #  Unless required by applicable law or agreed to in writing, software
 #  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-#  or implied. See the License for the specific language governing
-#  permissions and limitations under the License.
-"""Typed output contract for post-import insight generation."""
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+"""Typed output contract for post-import insight report generation."""
 
 import re
 import uuid
 from enum import StrEnum
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
-from kitaru.api_models.v1.insight import (
-    BinnedArtifact,
-    CategoricalArtifact,
-    InsightInput,
-    StatGridArtifact,
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
 )
+
+from kitaru.api_models.v1.insight import InsightInput
 
 INSIGHT_METADATA_KEY = "kitaru.insights/v1"
 DISTRIBUTION_TOP_BIN_SIGNAL = "distribution-highest-occupied-bin"
-MAX_CTA_LABEL_LENGTH = 40
+MAX_CTA_LABEL_LENGTH = 60
 DEFAULT_CTA_LABEL = "Investigate this finding"
-MAX_INSIGHTS = 6
+DEFAULT_MAX_PRIMARY_FINDINGS = 8
+MAX_PRIMARY_FINDINGS = 15
+MAX_SECONDARY_FINDINGS = 6
+MAX_INSIGHTS = MAX_PRIMARY_FINDINGS
 MAX_EVIDENCE_LOCATORS = 20
 MAX_CONTRIBUTING_SESSIONS = 1000
 MAX_NAME_LENGTH = 255
 MAX_SERVER_URL_LENGTH = 2048
 MAX_INVESTIGATION_PROMPT_LENGTH = 16_000
+
+FocusArea = Literal["tools", "cost", "language", "latency", "outcomes"]
 
 _NAME_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$")
 
@@ -52,7 +59,7 @@ def _require_utf8(value: object) -> object:
 
 
 class _InsightGenerationModel(BaseModel):
-    """Base for generator-owned values embedded in arbitrary Insight metadata."""
+    """Base for generator-owned values embedded in Insight metadata."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -82,7 +89,7 @@ class SourceImportContext(_InsightGenerationModel):
 class InsightGenerationContext(_InsightGenerationModel):
     """Identity and source context for one generation run."""
 
-    agent_id: uuid.UUID = Field(description="Agent the generated Insights belong to.")
+    agent_id: uuid.UUID = Field(description="Agent the generated Insight belongs to.")
     agent_name: str | None = Field(
         default=None,
         min_length=1,
@@ -96,6 +103,12 @@ class InsightGenerationContext(_InsightGenerationModel):
             "were recorded live or came from more than one import."
         ),
     )
+    source_provider: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=80,
+        description="Trace provider label shared across analyzed sessions, when known.",
+    )
     server_url: str | None = Field(
         default=None,
         min_length=1,
@@ -104,7 +117,7 @@ class InsightGenerationContext(_InsightGenerationModel):
     )
 
     _validate_text_fields_utf8 = field_validator(
-        "agent_name", "server_url", mode="before"
+        "agent_name", "source_provider", "server_url", mode="before"
     )(_require_utf8)
 
 
@@ -131,6 +144,8 @@ class Coverage(_InsightGenerationModel):
     nodes_available: int = Field(default=0, ge=0)
     nodes_analyzed: int = Field(default=0, ge=0)
     inspected_text_bytes: int = Field(default=0, ge=0)
+    started_after: AwareDatetime | None = None
+    started_before: AwareDatetime | None = None
     truncations: list[CoverageTruncation] = Field(default_factory=list, max_length=10)
     caveats: list[str] = Field(default_factory=list, max_length=10)
 
@@ -166,54 +181,42 @@ class GenerationVersions(_InsightGenerationModel):
     prompt: str = Field(min_length=1, max_length=80)
 
 
-class InsightCardMetadata(_InsightGenerationModel):
-    """Validated renderer and investigation context for one generated card."""
+class FindingMetadata(_InsightGenerationModel):
+    """Validated per-finding provenance stored under report metadata."""
 
-    schema_version: Literal["1"] = "1"
     eyebrow: str = Field(min_length=1, max_length=80)
-    check_first: str | None = Field(min_length=1, max_length=1000)
-    position: int = Field(ge=0, lt=MAX_INSIGHTS)
+    position: int = Field(ge=0)
     recommended: bool = False
-    contributing_session_ids: list[uuid.UUID] = Field(
+    cta_label: str = Field(
+        default=DEFAULT_CTA_LABEL,
+        strict=True,
         min_length=1,
-        max_length=MAX_CONTRIBUTING_SESSIONS,
+        max_length=MAX_CTA_LABEL_LENGTH,
     )
-    evidence: list[EvidenceLocator] = Field(
-        default_factory=list,
-        max_length=MAX_EVIDENCE_LOCATORS,
-    )
-    coverage: Coverage
-    investigation_prompt: str = Field(
-        min_length=1, max_length=MAX_INVESTIGATION_PROMPT_LENGTH
-    )
-    cta_label: str | None = Field(
-        default=None, strict=True, min_length=1, max_length=MAX_CTA_LABEL_LENGTH
-    )
-    context: InsightGenerationContext
-    generation: GenerationVersions
 
     @field_validator("cta_label")
     @classmethod
-    def _validate_cta_label(cls, value: str | None) -> str | None:
-        if value is not None:
-            _require_utf8(value)
-            if not value.strip():
-                raise ValueError("CTA label must not be blank")
+    def _validate_cta_label(cls, value: str) -> str:
+        _require_utf8(value)
+        if not value.strip():
+            raise ValueError("CTA label must not be blank")
         return value
 
-    @model_validator(mode="after")
-    def _validate_contributions(self) -> Self:
-        """Keep contribution and evidence session references self-consistent."""
-        contributing = set(self.contributing_session_ids)
-        if len(contributing) != len(self.contributing_session_ids):
-            raise ValueError("contributing session IDs must be unique")
-        if any(item.session_id not in contributing for item in self.evidence):
-            raise ValueError("evidence session must be a contributing session")
-        return self
+
+class InsightReportMetadata(_InsightGenerationModel):
+    """Validated report-level provenance attached under `kitaru.insights/v1`."""
+
+    schema_version: Literal["2"] = "2"
+    recommended_finding_id: str = Field(min_length=1, max_length=120)
+    omitted_candidates: list[str] = Field(default_factory=list, max_length=30)
+    coverage: Coverage
+    context: InsightGenerationContext
+    generation: GenerationVersions
+    findings: dict[str, FindingMetadata] = Field(min_length=1)
 
 
 class PageIntro(_InsightGenerationModel):
-    """Editorial copy introducing the generated set of cards."""
+    """Editorial copy introducing the generated report."""
 
     eyebrow: str = Field(min_length=1, max_length=80)
     title: str = Field(min_length=1, max_length=MAX_NAME_LENGTH)
@@ -221,7 +224,7 @@ class PageIntro(_InsightGenerationModel):
 
 
 class PageRecommendation(_InsightGenerationModel):
-    """Page-level recommendation pointing to exactly one generated card."""
+    """Report-level recommendation pointing to the top finding."""
 
     insight_name: str = Field(min_length=1, max_length=MAX_NAME_LENGTH)
     title: str = Field(min_length=1, max_length=MAX_NAME_LENGTH)
@@ -273,22 +276,22 @@ class InsightGenerationResult(_InsightGenerationModel):
     recommendation: PageRecommendation | None = None
     diagnostics: GenerationDiagnostics = Field(default_factory=GenerationDiagnostics)
     empty_reason: str | None = Field(default=None, min_length=1, max_length=1000)
-    insights: list[InsightInput] = Field(default_factory=list, max_length=MAX_INSIGHTS)
+    insights: list[InsightInput] = Field(default_factory=list, max_length=1)
 
     @staticmethod
-    def card_metadata(insight: InsightInput) -> InsightCardMetadata:
-        """Parse the namespaced metadata attached to a generated Insight."""
+    def report_metadata(insight: InsightInput) -> InsightReportMetadata:
+        """Parse the namespaced provenance attached to a generated report."""
         if set(insight.metadata) != {INSIGHT_METADATA_KEY}:
             raise ValueError(
                 f"Insight metadata must contain only {INSIGHT_METADATA_KEY!r}"
             )
-        return InsightCardMetadata.model_validate(
+        return InsightReportMetadata.model_validate(
             insight.metadata[INSIGHT_METADATA_KEY]
         )
 
     @model_validator(mode="after")
     def _validate_result(self) -> Self:
-        """Validate card identity, ordering, and recommendation consistency."""
+        """Validate structured report identity, findings, and recommendation."""
         if not self.insights:
             if self.empty_reason is None:
                 raise ValueError("an empty result requires an empty reason")
@@ -303,44 +306,43 @@ class InsightGenerationResult(_InsightGenerationModel):
         if self.recommendation is None:
             raise ValueError("a non-empty result requires a recommendation")
 
-        names: list[str] = []
-        positions: list[int] = []
-        recommended_names: list[str] = []
-        for insight in self.insights:
-            if not 1 <= len(insight.name) <= MAX_NAME_LENGTH:
-                raise ValueError("Insight name violates domain name constraints")
-            if not _NAME_PATTERN.fullmatch(insight.name):
-                raise ValueError("Insight name violates domain name constraints")
-            if not 1 <= len(insight.title) <= MAX_NAME_LENGTH:
-                raise ValueError("Insight title violates domain title constraints")
-            if not insight.findings or not insight.findings[0].artifacts:
-                raise ValueError("generated Insight must contain at least one artifact")
-            primary_artifact = insight.findings[0].artifacts[0]
-            if not isinstance(
-                primary_artifact,
-                CategoricalArtifact | BinnedArtifact | StatGridArtifact,
-            ):
+        report = self.insights[0]
+        if not 1 <= len(report.name) <= MAX_NAME_LENGTH or not _NAME_PATTERN.fullmatch(
+            report.name
+        ):
+            raise ValueError("Insight name violates domain name constraints")
+        if not 1 <= len(report.title) <= MAX_NAME_LENGTH:
+            raise ValueError("Insight title violates domain title constraints")
+        if not report.findings:
+            raise ValueError("generated Insight report must contain findings")
+
+        metadata = self.report_metadata(report)
+        if metadata.context != self.context:
+            raise ValueError("report context must match generation context")
+        if metadata.coverage != self.coverage:
+            raise ValueError("report coverage must match result coverage")
+
+        finding_ids = [finding.id for finding in report.findings]
+        if set(metadata.findings) != set(finding_ids):
+            raise ValueError("report metadata findings must match report.findings")
+
+        positions = [metadata.findings[fid].position for fid in finding_ids]
+        if positions != list(range(len(finding_ids))):
+            raise ValueError("finding positions must match list order")
+
+        recommended_ids = [
+            fid for fid in finding_ids if metadata.findings[fid].recommended
+        ]
+        if len(recommended_ids) != 1:
+            raise ValueError("exactly one finding must be recommended")
+        if metadata.recommended_finding_id != recommended_ids[0]:
+            raise ValueError("recommended_finding_id must match recommended finding")
+        if self.recommendation.insight_name != recommended_ids[0]:
+            raise ValueError("page recommendation must match the recommended finding")
+
+        for finding in report.findings:
+            if not finding.artifacts:
                 raise ValueError(
-                    "generated Insight primary artifact must be categorical, binned, "
-                    "or stat_grid"
+                    "each generated finding must contain at least one artifact"
                 )
-
-            metadata = self.card_metadata(insight)
-            if metadata.context != self.context:
-                raise ValueError("card context must match generation context")
-            if metadata.coverage != self.coverage:
-                raise ValueError("card coverage must match result coverage")
-            names.append(insight.name)
-            positions.append(metadata.position)
-            if metadata.recommended:
-                recommended_names.append(insight.name)
-
-        if len(names) != len(set(names)):
-            raise ValueError("Insight names must be unique")
-        if positions != list(range(len(self.insights))):
-            raise ValueError("Insight positions must match list order")
-        if len(recommended_names) != 1:
-            raise ValueError("exactly one Insight must be recommended")
-        if self.recommendation.insight_name != recommended_names[0]:
-            raise ValueError("page recommendation must match the recommended card")
         return self

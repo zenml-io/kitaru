@@ -22,11 +22,13 @@ from kitaru.api_models.v1.session_node import (
 )
 from kitaru_post_import_insights.context_size import ContextSize
 from kitaru_post_import_insights.cost_concentration import CostConcentration
+from kitaru_post_import_insights.failure_transitions import FailureTransitions
 from kitaru_post_import_insights.findings import CandidateFinding, ContributionSelector
 from kitaru_post_import_insights.profiling_state import CountsStore, ObservationStore
 from kitaru_post_import_insights.prompt_cache import PromptCacheUse
 from kitaru_post_import_insights.resource_inputs import FindingLimits, SessionView
 from kitaru_post_import_insights.time_share import ComponentTimeShare
+from kitaru_post_import_insights.tool_health import ToolHealth
 from kitaru_post_import_insights.tool_paths import ToolPaths
 
 
@@ -52,6 +54,8 @@ class ResourceProfile:
         self._counts = CountsStore()
         self._observations = ObservationStore()
         self._families: tuple[_ResourceFamily, ...] = (
+            ToolHealth(limits),
+            FailureTransitions(limits),
             CostConcentration(self._observations, limits),
             ComponentTimeShare(self._counts, self._observations, limits),
             ContextSize(self._observations, limits),

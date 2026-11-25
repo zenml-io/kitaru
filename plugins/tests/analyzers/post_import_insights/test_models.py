@@ -8,10 +8,10 @@
 #
 #  Unless required by applicable law or agreed to in writing, software
 #  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-#  or implied. See the License for the specific language governing
-#  permissions and limitations under the License.
-"""Tests for the insight generation result contract."""
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+"""Tests for the structured insight report generation result contract."""
 
 import json
 import uuid
@@ -24,22 +24,27 @@ from kitaru.api_models.v1.insight import (
     BinnedArtifact,
     CategoricalArtifact,
     CategoryValue,
+    EvidenceArtifact,
+    EvidenceRow,
+    InsightAction,
     InsightBatchCreateRequest,
+    InsightCoverage,
     InsightFinding,
+    InsightHighlight,
     InsightInput,
-    TextArtifact,
+    RateArtifact,
 )
 from kitaru_post_import_insights import (
     INSIGHT_METADATA_KEY,
     Coverage,
     CoverageTruncation,
-    EvidenceLocator,
+    FindingMetadata,
     GenerationDiagnostics,
     GenerationMode,
     GenerationVersions,
-    InsightCardMetadata,
     InsightGenerationContext,
     InsightGenerationResult,
+    InsightReportMetadata,
     PageIntro,
     PageRecommendation,
     ProviderReceipt,
@@ -61,6 +66,7 @@ def _context() -> InsightGenerationContext:
             import_id=IMPORT_ID,
             provider="langfuse",
         ),
+        source_provider="langfuse",
     )
 
 
@@ -104,6 +110,7 @@ def test_context_preserves_valid_unicode() -> None:
             import_id=IMPORT_ID,
             provider="långfüse",
         ),
+        source_provider="långfüse",
     )
 
     restored = InsightGenerationContext.model_validate_json(context.model_dump_json())
@@ -156,91 +163,119 @@ def _coverage() -> Coverage:
     )
 
 
-def _metadata(
-    *,
-    position: int,
-    recommended: bool,
-    session_ids: list[uuid.UUID] | None = None,
-    evidence: list[EvidenceLocator] | None = None,
-) -> InsightCardMetadata:
-    contribution_ids = session_ids or [SESSION_A]
-    return InsightCardMetadata(
-        eyebrow="TOOL RELIABILITY",
-        check_first="A tool error may have been recovered later in the session.",
-        position=position,
-        recommended=recommended,
-        contributing_session_ids=contribution_ids,
-        evidence=evidence
-        or [
-            EvidenceLocator(
-                session_id=contribution_ids[0],
-                node_id=NODE_A,
-                signal="tool_error",
-            )
-        ],
+def _report_metadata() -> InsightReportMetadata:
+    return InsightReportMetadata(
+        recommended_finding_id="tool-error-rate",
         coverage=_coverage(),
-        investigation_prompt=(
-            "Investigate the tool-error pattern in these sessions, define or "
-            "refine a cohort, and propose one or more experiments."
-        ),
         context=_context(),
         generation=GenerationVersions(
-            analysis="2026-09-04.1",
-            prompt="2026-09-04.1",
+            analysis="2026-11-09.1",
+            prompt="2026-11-25.1",
         ),
-    )
-
-
-def _insight(
-    *,
-    name: str,
-    title: str,
-    data: CategoricalArtifact | BinnedArtifact | TextArtifact,
-    metadata: InsightCardMetadata,
-) -> InsightInput:
-    return InsightInput(
-        name=name,
-        title=title,
-        summary="A deterministic finding with editorial explanation.",
-        findings=[
-            InsightFinding(
-                id=name,
-                title=title,
-                summary="A deterministic finding with editorial explanation.",
-                artifacts=[data],
-                contributing_session_ids=metadata.contributing_session_ids,
-            )
-        ],
-        metadata={INSIGHT_METADATA_KEY: metadata.model_dump(mode="json")},
+        findings={
+            "tool-error-rate": FindingMetadata(
+                eyebrow="TOOL RELIABILITY",
+                position=0,
+                recommended=True,
+                cta_label="Investigate tool errors",
+            ),
+            "tool-call-tail": FindingMetadata(
+                eyebrow="TOOL CALLS",
+                position=1,
+                recommended=False,
+                cta_label="Investigate tool call counts",
+            ),
+        },
     )
 
 
 def _result() -> InsightGenerationResult:
-    categorical = _insight(
-        name="tool-error-rate",
+    metadata = _report_metadata()
+    findings = [
+        InsightFinding(
+            id="tool-error-rate",
+            title="Tool errors affect 2 of 3 sessions",
+            summary="A deterministic finding with editorial explanation.",
+            body="A deterministic finding with editorial explanation.",
+            tier="primary",
+            severity="high",
+            artifacts=[
+                RateArtifact(
+                    presentation="share_bar",
+                    rate=0.6667,
+                    numerator=2,
+                    denominator=3,
+                    tone="risk",
+                ),
+                CategoricalArtifact(
+                    presentation="ranked_bars",
+                    unit="sessions",
+                    values=[
+                        CategoryValue(label="tool error", value=2),
+                        CategoryValue(label="no tool error", value=1),
+                    ],
+                ),
+                EvidenceArtifact(
+                    presentation="table",
+                    total_sessions=2,
+                    rows=[
+                        EvidenceRow(
+                            session_id=SESSION_A,
+                            node_id=NODE_A,
+                            signal="tool_error",
+                        )
+                    ],
+                ),
+            ],
+            contributing_session_ids=[SESSION_A],
+            check_first="A tool error may have been recovered later in the session.",
+            action=InsightAction(
+                label="Investigate tool errors",
+                prompt="Investigate the tool-error pattern in these sessions.",
+            ),
+        ),
+        InsightFinding(
+            id="tool-call-tail",
+            title="One session makes 10 or more tool calls",
+            summary="Baseline distribution of tool calls per session.",
+            tier="secondary",
+            artifacts=[
+                BinnedArtifact(
+                    presentation="micro",
+                    unit="calls",
+                    bins=[
+                        Bin(lower_bound=0, upper_bound=5, count=2),
+                        Bin(lower_bound=5, upper_bound=None, count=1),
+                    ],
+                )
+            ],
+            contributing_session_ids=[SESSION_A],
+            action=InsightAction(
+                label="Investigate tool call counts",
+                prompt="Investigate high tool call counts.",
+            ),
+        ),
+    ]
+    report = InsightInput(
+        name="openai-post-import-insights",
         title="Tool errors affect 2 of 3 sessions",
-        data=CategoricalArtifact(
-            presentation="ranked_bars",
-            unit="sessions",
-            values=[
-                CategoryValue(label="tool error", value=2),
-                CategoryValue(label="no tool error", value=1),
-            ],
+        summary="A deterministic finding with editorial explanation.",
+        source_provider="langfuse",
+        coverage=InsightCoverage(
+            sessions_analyzed=2,
+            sessions_available=3,
+            skipped=1,
+            failed=0,
+            caveats=["One session was outside the configured limit."],
         ),
-        metadata=_metadata(position=0, recommended=True),
-    )
-    binned = _insight(
-        name="tool-call-tail",
-        title="One session makes 10 or more tool calls",
-        data=BinnedArtifact(
-            presentation="columns",
-            unit="calls",
-            bins=[
-                Bin(lower_bound=0, upper_bound=5, count=2),
-                Bin(lower_bound=5, upper_bound=None, count=1),
-            ],
+        highlight=InsightHighlight(finding_id="tool-error-rate", artifact_index=0),
+        next_step=InsightAction(
+            label="Investigate tool errors",
+            summary="A deterministic finding with editorial explanation.",
+            prompt="Investigate the tool-error pattern in these sessions.",
         ),
-        metadata=_metadata(position=1, recommended=False),
+        findings=findings,
+        metadata={INSIGHT_METADATA_KEY: metadata.model_dump(mode="json")},
     )
     return InsightGenerationResult(
         context=_context(),
@@ -269,16 +304,18 @@ def _result() -> InsightGenerationResult:
                 )
             ]
         ),
-        insights=[categorical, binned],
+        insights=[report],
     )
 
 
 def test_result_uses_canonical_insight_inputs_for_batch_creation() -> None:
-    """Pass generated categorical and binned inputs directly to batch creation."""
+    """Pass generated structured report directly to batch creation."""
     result = _result()
 
-    assert isinstance(result.insights[0].findings[0].artifacts[0], CategoricalArtifact)
-    assert isinstance(result.insights[1].findings[0].artifacts[0], BinnedArtifact)
+    assert len(result.insights) == 1
+    report = result.insights[0]
+    assert isinstance(report.findings[0].artifacts[0], RateArtifact)
+    assert isinstance(report.findings[1].artifacts[0], BinnedArtifact)
     request = InsightBatchCreateRequest(
         agent_id=result.context.agent_id,
         insights=result.insights,
@@ -301,46 +338,53 @@ def test_empty_result_is_valid_without_batch_request() -> None:
 
 
 def test_result_round_trips_through_json() -> None:
-    """Preserve UUIDs, order, metadata, coverage, and receipts through JSON."""
+    """Preserve UUIDs, order, findings, coverage, and receipts through JSON."""
     result = _result()
 
     restored = InsightGenerationResult.model_validate_json(result.model_dump_json())
 
     assert restored == result
     assert restored.context.agent_id == AGENT_ID
-    assert [insight.name for insight in restored.insights] == [
+    report = restored.insights[0]
+    assert [finding.id for finding in report.findings] == [
         "tool-error-rate",
         "tool-call-tail",
     ]
-    metadata = restored.card_metadata(restored.insights[0])
-    assert metadata.contributing_session_ids == [SESSION_A]
-    assert metadata.evidence[0].node_id == NODE_A
-    assert metadata.check_first == (
+    assert report.findings[0].contributing_session_ids == [SESSION_A]
+    evidence = report.findings[0].artifacts[2]
+    assert isinstance(evidence, EvidenceArtifact)
+    assert evidence.rows[0].node_id == NODE_A
+    assert report.findings[0].check_first == (
         "A tool error may have been recovered later in the session."
     )
+    metadata = restored.report_metadata(report)
+    assert metadata.recommended_finding_id == "tool-error-rate"
 
 
 def test_duplicate_positions_are_rejected() -> None:
-    """Reject cards that cannot be placed in one stable order."""
+    """Reject findings that cannot be placed in one stable order."""
     data = _result().model_dump()
-    data["insights"][1]["metadata"][INSIGHT_METADATA_KEY]["position"] = 0
+    data["insights"][0]["metadata"][INSIGHT_METADATA_KEY]["findings"]["tool-call-tail"][
+        "position"
+    ] = 0
 
     with pytest.raises(ValidationError, match="positions"):
         InsightGenerationResult.model_validate(data)
 
 
 def test_positions_must_match_serialized_list_order() -> None:
-    """Reject contiguous positions attached to the wrong list entries."""
+    """Reject contiguous positions attached to the wrong finding entries."""
     data = _result().model_dump()
-    data["insights"][0]["metadata"][INSIGHT_METADATA_KEY]["position"] = 1
-    data["insights"][1]["metadata"][INSIGHT_METADATA_KEY]["position"] = 0
+    findings_meta = data["insights"][0]["metadata"][INSIGHT_METADATA_KEY]["findings"]
+    findings_meta["tool-error-rate"]["position"] = 1
+    findings_meta["tool-call-tail"]["position"] = 0
 
     with pytest.raises(ValidationError, match="list order"):
         InsightGenerationResult.model_validate(data)
 
 
-def test_card_coverage_must_match_result_coverage() -> None:
-    """Reject a card whose coverage contradicts the result envelope."""
+def test_report_coverage_must_match_result_coverage() -> None:
+    """Reject a report whose coverage contradicts the result envelope."""
     data = _result().model_dump()
     data["insights"][0]["metadata"][INSIGHT_METADATA_KEY]["coverage"][
         "sessions_analyzed"
@@ -350,17 +394,19 @@ def test_card_coverage_must_match_result_coverage() -> None:
         InsightGenerationResult.model_validate(data)
 
 
-def test_multiple_recommended_cards_are_rejected() -> None:
-    """Reject more than one card marked as the recommendation."""
+def test_multiple_recommended_findings_are_rejected() -> None:
+    """Reject more than one finding marked as the recommendation."""
     data = _result().model_dump()
-    data["insights"][1]["metadata"][INSIGHT_METADATA_KEY]["recommended"] = True
+    data["insights"][0]["metadata"][INSIGHT_METADATA_KEY]["findings"]["tool-call-tail"][
+        "recommended"
+    ] = True
 
     with pytest.raises(ValidationError, match="recommended"):
         InsightGenerationResult.model_validate(data)
 
 
-def test_recommendation_must_match_recommended_card() -> None:
-    """Keep page-level and card-level recommendations consistent."""
+def test_recommendation_must_match_recommended_finding() -> None:
+    """Keep page-level and report-level recommendations consistent."""
     data = _result().model_dump()
     data["recommendation"]["insight_name"] = "tool-call-tail"
 
@@ -368,8 +414,8 @@ def test_recommendation_must_match_recommended_card() -> None:
         InsightGenerationResult.model_validate(data)
 
 
-def test_unknown_card_metadata_fields_are_rejected() -> None:
-    """Reject metadata that silently extends the card contract."""
+def test_unknown_report_metadata_fields_are_rejected() -> None:
+    """Reject metadata that silently extends the report contract."""
     data = _result().model_dump()
     data["insights"][0]["metadata"][INSIGHT_METADATA_KEY]["url"] = (
         "https://example.com/insights/created-id"
@@ -377,33 +423,6 @@ def test_unknown_card_metadata_fields_are_rejected() -> None:
 
     with pytest.raises(ValidationError, match="url"):
         InsightGenerationResult.model_validate(data)
-
-
-def test_oversized_evidence_is_rejected() -> None:
-    """Bound evidence retained on each card."""
-    data = _result().model_dump()
-    evidence = data["insights"][0]["metadata"][INSIGHT_METADATA_KEY]["evidence"]
-    data["insights"][0]["metadata"][INSIGHT_METADATA_KEY]["evidence"] = evidence * 21
-
-    with pytest.raises(ValidationError, match="evidence"):
-        InsightGenerationResult.model_validate(data)
-
-
-def test_evidence_sessions_must_contribute_to_card() -> None:
-    """Reject evidence referring to a session outside the contribution set."""
-    with pytest.raises(ValidationError, match="contributing"):
-        _metadata(
-            position=0,
-            recommended=True,
-            session_ids=[SESSION_A],
-            evidence=[
-                EvidenceLocator(
-                    session_id=SESSION_B,
-                    node_id=None,
-                    signal="long_session",
-                )
-            ],
-        )
 
 
 @pytest.mark.parametrize(
@@ -415,8 +434,8 @@ def test_evidence_sessions_must_contribute_to_card() -> None:
         ("title", "x" * 256),
     ],
 )
-def test_card_identity_respects_domain_constraints(field: str, value: str) -> None:
-    """Reject card names and titles the Insight domain cannot persist."""
+def test_report_identity_respects_domain_constraints(field: str, value: str) -> None:
+    """Reject report names and titles the Insight domain cannot persist."""
     data = _result().model_dump()
     data["insights"][0][field] = value
 
@@ -424,41 +443,30 @@ def test_card_identity_respects_domain_constraints(field: str, value: str) -> No
         InsightGenerationResult.model_validate(data)
 
 
-def test_text_insights_are_rejected() -> None:
-    """Keep generated cards chart-backed."""
+def test_findings_without_artifacts_are_rejected() -> None:
+    """Keep every generated finding backed by at least one artifact."""
     data = _result().model_dump()
-    data["insights"][0]["findings"][0]["artifacts"] = [
-        {"type": "text", "content": "Unsupported"}
-    ]
+    data["insights"][0]["findings"][0]["artifacts"] = []
 
-    with pytest.raises(ValidationError, match="categorical, binned, or stat_grid"):
+    with pytest.raises(ValidationError, match="artifact"):
         InsightGenerationResult.model_validate(data)
 
 
-@pytest.mark.parametrize("label", [None, "Copy tool retry prompt", "x" * 40])
-def test_cta_label_round_trip(label: str | None) -> None:
+@pytest.mark.parametrize("label", ["Copy tool retry prompt", "x" * 60])
+def test_cta_label_round_trip(label: str) -> None:
     payload = _result().model_dump(mode="json")
-    for insight in payload["insights"]:
-        insight["metadata"][INSIGHT_METADATA_KEY]["cta_label"] = label
+    for meta in payload["insights"][0]["metadata"][INSIGHT_METADATA_KEY][
+        "findings"
+    ].values():
+        meta["cta_label"] = label
     restored = InsightGenerationResult.model_validate_json(json.dumps(payload))
-    assert all(
-        restored.card_metadata(item).cta_label == label for item in restored.insights
-    )
+    report_meta = restored.report_metadata(restored.insights[0])
+    assert all(meta.cta_label == label for meta in report_meta.findings.values())
 
 
-def test_historical_results_without_cta_label_are_readable() -> None:
-    payload = _result().model_dump(mode="json")
-    for insight in payload["insights"]:
-        insight["metadata"][INSIGHT_METADATA_KEY].pop("cta_label", None)
-    restored = InsightGenerationResult.model_validate(payload)
-    assert all(
-        restored.card_metadata(item).cta_label is None for item in restored.insights
-    )
-
-
-@pytest.mark.parametrize("label", ["", "   ", "x" * 41, 123, "broken-\ud800"])
+@pytest.mark.parametrize("label", ["", "   ", "x" * 61, 123, "broken-\ud800"])
 def test_invalid_cta_label_is_rejected(label: object) -> None:
-    payload = _metadata(position=0, recommended=True).model_dump()
+    payload = FindingMetadata(eyebrow="TOOL", position=0, recommended=True).model_dump()
     payload["cta_label"] = label
     with pytest.raises(ValidationError):
-        InsightCardMetadata.model_validate(payload)
+        FindingMetadata.model_validate(payload)
