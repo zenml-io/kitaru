@@ -565,6 +565,40 @@ async def test_a_default_only_update_honors_a_supplied_expected_updated() -> Non
     assert len(sent) == 1
 
 
+_SECRET = "zq9x"
+_UPDATE = {"operation": "update", "connection_id": str(uuid.UUID(int=1))}
+_SEEN = {"expected_updated": "2026-04-01T12:00:00Z"}
+
+
+# A refused argument's error shows the start and the end of its input, so each
+# case puts the short secret at one of the two.
+@pytest.mark.parametrize(
+    "request_body",
+    [
+        {**_UPDATE, **_SEEN, "default": None, "secrets": {"K": _SECRET}},
+        {"secrets": {"K": _SECRET}, **_UPDATE, **_SEEN, "default": None},
+        {**_UPDATE, "env": None, "secrets": {"K": _SECRET}},
+        {"operation": "create", "name": "", "provider": "p", "secrets": {"K": _SECRET}},
+        {"operation": "create", "name": "n", "provider": "p", "secrets": {"K": 98761}},
+    ],
+    ids=["null-default", "secrets-first", "null-env", "blank-name", "int-secret"],
+)
+async def test_refused_arguments_never_echo_a_secret_value(
+    request_body: dict[str, object],
+) -> None:
+    server, context = build_server_context(
+        SimpleNamespace(), mode=CapabilityMode.STANDARD
+    )
+
+    with pytest.raises(ToolError) as refused:
+        await server.call_tool(
+            "kitaru_connections_manage", {"request": request_body}, context
+        )
+
+    assert _SECRET not in str(refused.value)
+    assert "98761" not in str(refused.value)
+
+
 # One rule decides both what `env` refuses on write and what reads mask.
 CREDENTIAL_NAMES = [
     ("OPENAI_API_KEY", True),

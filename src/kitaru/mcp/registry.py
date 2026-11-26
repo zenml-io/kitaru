@@ -12,7 +12,7 @@ from typing import Any, cast
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 from mcp.types import CallToolResult, ToolAnnotations
-from pydantic import ValidationError
+from pydantic import ConfigDict, ValidationError
 
 from kitaru.api_models.v1.base import JsonValue
 from kitaru.mcp.apps import FAILURE_MATRIX_URI, SESSION_VIEWER_URI, ui_meta
@@ -550,7 +550,7 @@ def get_tool_specs(mode: CapabilityMode) -> tuple[ToolSpec, ...]:
 
 
 def register_tools(server: MCPServer[Any], mode: CapabilityMode) -> None:
-    """Register the filtered public surface through SDK v2 public APIs."""
+    """Register the filtered public surface, hiding inputs in argument errors."""
     for spec in get_tool_specs(mode):
         server.add_tool(
             _get_tool_function(spec),
@@ -560,3 +560,12 @@ def register_tools(server: MCPServer[Any], mode: CapabilityMode) -> None:
             structured_output=True,
             meta=spec.meta,
         )
+    # An argument error shows each refused input, which can be a secret the
+    # caller sent. Its message comes from the arguments model the SDK builds,
+    # whose config no public API reaches, so it is set on that model here.
+    for tool in server._tool_manager.list_tools():  # noqa: SLF001
+        model = tool.fn_metadata.arg_model
+        model.model_config = ConfigDict(
+            **{**model.model_config, "hide_input_in_errors": True}
+        )
+        model.model_rebuild(force=True)

@@ -182,11 +182,17 @@ class ConnectionUpdate(MCPModel):
             )
         return value
 
+    @field_validator("env", "secrets", "default")
+    @classmethod
+    def _refuse_null(cls, value: object, info: ValidationInfo) -> object:
+        # A field error, run only for a sent field, carries that field's input;
+        # a model error would carry the whole request, secret values included.
+        if value is None:
+            raise ValueError(f"{info.field_name} cannot be null")
+        return value
+
     @model_validator(mode="after")
     def _validate_update(self) -> Self:
-        for field in ("env", "secrets", "default"):
-            if field in self.model_fields_set and getattr(self, field) is None:
-                raise ValueError(f"{field} cannot be null")
         if not {"env", "secrets", "default"} & self.model_fields_set:
             raise ValueError("connection update must change at least one field")
         removed = self.remove_secrets or []
