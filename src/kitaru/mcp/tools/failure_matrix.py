@@ -67,7 +67,7 @@ async def handle_failure_matrix(
     if not state.settings.stateless:
         snapshot_id = uuid.uuid4().hex
         state.matrix_snapshots.put(snapshot_id, records)
-    groups = _analyze(request, records)
+    groups = _analyze(state, request, records)
     base, compare = groups[0], groups[1] if len(groups) > 1 else None
     rows, cols, cells = build_cells(
         base.outcomes, compare.outcomes if compare else None, request.sources
@@ -116,7 +116,7 @@ async def handle_failure_cell(
                 "the cell.",
             )
         records = cached
-    groups = _analyze(request, records)
+    groups = _analyze(state, request, records)
     index = 1 if request.side == "compare" else 0
     if index >= len(groups):
         raise MCPToolError(
@@ -161,11 +161,18 @@ async def _fetch_groups(
 
 
 def _analyze(
-    request: FailureMatrixRequest, records: Sequence[GroupRecords]
+    state: MCPServerState,
+    request: FailureMatrixRequest,
+    records: Sequence[GroupRecords],
 ) -> list[_AnalyzedGroup]:
-    labeler = build_labeler(request.state_by, request.state_map)
+    label_key = state.settings.label_key
+    labeler = build_labeler(
+        request.state_by,
+        request.state_map,
+        label_key.get_secret_value().encode() if label_key else None,
+    )
     folded = fold_rare_states(
-        [analyze_group(group, labeler, request.state_map) for group in records],
+        [analyze_group(group, labeler) for group in records],
         request.sources,
     )
     return [

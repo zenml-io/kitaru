@@ -108,6 +108,19 @@ def test_settings_default_and_explicit_over_environment_precedence() -> None:
     )
 
 
+def test_hosting_settings_come_from_the_environment() -> None:
+    key = "k" * 32
+    settings = MCPSettings.from_environment(
+        {"KITARU_MCP_STATELESS": "true", "KITARU_MCP_LABEL_KEY": key}
+    )
+
+    assert settings.stateless is True
+    assert settings.label_key is not None
+    assert settings.label_key.get_secret_value() == key
+    with pytest.raises(ValueError, match="at least 32"):
+        MCPSettings.from_environment({"KITARU_MCP_LABEL_KEY": "short"})
+
+
 def test_settings_reject_nonfinite_and_invalid_bounds() -> None:
     with pytest.raises(ValueError, match="must not be blank"):
         MCPSettings(server_url="  \t")

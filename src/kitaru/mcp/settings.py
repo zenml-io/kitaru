@@ -9,7 +9,14 @@ from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 
 class CapabilityMode(StrEnum):
@@ -39,10 +46,15 @@ class MCPSettings(BaseModel):
     viewers_dir: Path | None = None
     debug: bool = False
     # Turn on for a server that runs as several copies behind one address: a
-    # follow-up call can reach another copy, so nothing is kept between calls.
-    # The failure matrix then returns no snapshot_id and each cell reads its
-    # sessions again.
+    # follow-up call can reach another copy, so no state is kept in memory
+    # between calls. The failure matrix then returns no snapshot_id and each
+    # cell reads its sessions again. Custom viewers are still read from each
+    # copy's own `viewers_dir`.
     stateless: bool = False
+    # Keys the digest that tells apart state labels redaction made equal. Copies
+    # that serve one matrix and its cells must share it; when unset, each
+    # process draws its own.
+    label_key: SecretStr | None = Field(default=None, min_length=32)
 
     @field_validator("server_url")
     @classmethod
@@ -81,6 +93,8 @@ class MCPSettings(BaseModel):
             "max_concurrency": "KITARU_MCP_MAX_CONCURRENCY",
             "viewers_dir": "KITARU_MCP_VIEWERS_DIR",
             "debug": "KITARU_MCP_DEBUG",
+            "stateless": "KITARU_MCP_STATELESS",
+            "label_key": "KITARU_MCP_LABEL_KEY",
         }
         for field, variable in mapping.items():
             value = env.get(variable)
