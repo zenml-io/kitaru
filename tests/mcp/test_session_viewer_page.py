@@ -106,3 +106,14 @@ def test_a_saved_verdict_shows_after_the_same_session_renders_again(
     shown = _drive_page(tmp_path)["verdictDuringRerender"]
 
     assert shown == {"shownVerdict": "problematic"}
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
+def test_a_draft_answer_stays_with_its_investigation(tmp_path: Path) -> None:
+    shown = _drive_page(tmp_path)["answerDraftAcrossInvestigations"]
+
+    assert shown == {
+        "keptOnRerender": "Draft for the first review",
+        "shownInSecond": "",
+        "keptOnReturn": "Draft for the first review",
+    }

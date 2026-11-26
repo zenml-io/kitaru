@@ -602,7 +602,9 @@
           h("button", { class: "kv-icon", text: "›", title: "Next session", "aria-label": "Next session", disabled: inv.position >= last, onclick: () => goTo(inv.position + 1).catch(fail) })));
         for (const q of inv.investigation_session.questions || []) {
           const existing = answerFor(q.key);
-          const key = `answer:${v.session.id}:${q.key}`;
+          // A session can sit in several investigations, so an answer draft
+          // belongs to this one's link to it, read with these host arguments.
+          const key = `answer:${JSON.stringify(state.viewArgs)}:${inv.investigation_session.id}:${q.key}`;
           const box = draftBox(key, existing ? annotationText(existing) : "", { placeholder: "Answer", disabled: !canWrite });
           const save = h("button", { class: "kv-btn kv-primary", text: existing ? "Update" : "Save", disabled: !canWrite, onclick: () => saving(save, async () => {
             if (!box.value.trim()) return null;
