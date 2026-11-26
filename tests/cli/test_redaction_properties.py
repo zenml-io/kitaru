@@ -243,6 +243,8 @@ def test_model_normalization_keeps_keys_and_supported_scalars() -> None:
             "reasoning_tokens": 4,
         },
         {"input_tokens": 120.5, "cached_input_tokens": 0.0, "output_tokens": 40.2},
+        # Counts read back from settings, as at the top level.
+        {"input_tokens": "4096", "output_tokens": 12},
     ],
 )
 def test_numeric_token_usage_is_preserved(usage: Any) -> None:

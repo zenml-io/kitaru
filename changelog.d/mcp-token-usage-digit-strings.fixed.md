@@ -1,1 +1,1 @@
-- MCP and CLI output now show a token usage count stored as a string of digits, such as a connection setting `input_tokens: "4096"`, instead of masking it. Any other string under those names is still masked.
+- MCP and CLI output now show a token usage count stored as a string of digits, such as a connection setting `input_tokens: "4096"`, at the top level or inside a `tokens` usage breakdown, instead of masking it. Any other string under those names is still masked.

@@ -211,19 +211,23 @@ def _redact_data(
 def _is_token_usage(value: Any, *, key: str) -> bool:
     """Recognize only numeric token usage fields, including per-call means."""
     if key in _TOKEN_USAGE_KEYS:
-        # A connection setting holds a count as a string, such as "4096".
-        return _is_token_count(value) or (
-            isinstance(value, str) and _DIGITS.fullmatch(value) is not None
-        )
+        return _is_usage_count(value)
     if key != "tokens":
         return False
     if isinstance(value, dict):
         return all(
-            field in _TOKEN_USAGE_KEYS and _is_token_count(count)
+            field in _TOKEN_USAGE_KEYS and _is_usage_count(count)
             for field, count in value.items()
         )
     # A bare `tokens` total is a raw API count, so a fractional one is suspect.
     return _is_token_count(value) and not isinstance(value, float)
+
+
+def _is_usage_count(value: Any) -> bool:
+    """Recognize a token usage field's count, which a setting holds as digits."""
+    return _is_token_count(value) or (
+        isinstance(value, str) and _DIGITS.fullmatch(value) is not None
+    )
 
 
 def _is_token_count(value: Any) -> bool:
