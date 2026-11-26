@@ -23,7 +23,7 @@ from kitaru.mcp.models.connections import (
     ConnectionsManageRequest,
     ConnectionUpdate,
 )
-from kitaru.mcp.redaction import MASKED, is_credential_name
+from kitaru.mcp.redaction import MASKED, is_credential_name, redact_data
 from kitaru.mcp.references import resolve_connection
 from kitaru.mcp.tools.params import build_list_params
 from kitaru.mcp.tools.registry import build_page_data
@@ -64,7 +64,7 @@ async def handle_connections_manage(
             include={"env", "secrets", "default"}, exclude_unset=True
         )
         if request.env:
-            values["env"] = await _keep_stored_credentials(
+            values["env"] = await _restore_shown_values(
                 state, request.connection_id, request.env
             )
         return await state.client.connections.update(
@@ -75,15 +75,17 @@ async def handle_connections_manage(
     )
 
 
-async def _keep_stored_credentials(
+async def _restore_shown_values(
     state: MCPServerState, connection_id: uuid.UUID, env: Mapping[str, str]
 ) -> dict[str, str]:
-    """Return `env` with each credential, sent masked, set to its stored value."""
-    kept = [key for key in env if is_credential_name(key)]
-    if not kept:
+    """Return `env` with each value sent as a read shows it set to the stored one."""
+    credentials = [key for key in env if is_credential_name(key)]
+    # Every masked display contains MASKED, so an update without one, and
+    # without a credential key, has nothing to restore.
+    if not credentials and not any(MASKED in value for value in env.values()):
         return dict(env)
-    stored = await state.client.connections.get(connection_id)
-    missing = sorted(key for key in kept if key not in stored.env)
+    stored = (await state.client.connections.get(connection_id)).env
+    missing = sorted(key for key in credentials if key not in stored)
     if missing:
         raise MCPToolError(
             "invalid_arguments",
@@ -92,4 +94,9 @@ async def _keep_stored_credentials(
             recovery="Put a new credential in `secrets`; on update, `secrets` "
             "replaces every stored secret.",
         )
-    return {**env, **{key: stored.env[key] for key in kept}}
+    return {
+        key: stored[key]
+        if key in stored and value == redact_data(stored[key], key=key)
+        else value
+        for key, value in env.items()
+    }

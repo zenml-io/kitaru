@@ -83,16 +83,7 @@ def _check_update_env(
     return env
 
 
-UpdateEnv = Annotated[
-    dict[str, str],
-    WrapValidator(_check_update_env),
-    Field(
-        description="Replaces every plain setting. A key that names a credential "
-        f"is accepted only as `{MASKED}`, as `kitaru_connection_read` shows it, "
-        "which keeps the value the connection stores; leaving it out deletes "
-        "that value. Put new credentials in `secrets`."
-    ),
-]
+UpdateEnv = Annotated[dict[str, str], WrapValidator(_check_update_env)]
 
 
 ConnectionReadRequest = Annotated[
@@ -121,7 +112,14 @@ class ConnectionUpdate(MCPModel):
 
     operation: Literal["update"]
     connection_id: uuid.UUID
-    env: UpdateEnv | None = None
+    env: UpdateEnv | None = Field(
+        default=None,
+        description="Replaces every plain setting. A value sent exactly as "
+        f"`kitaru_connection_read` shows it, such as `{MASKED}` or "
+        f"`Bearer {MASKED}`, keeps the value the connection stores; leaving a key "
+        "out deletes it. A key that names a credential is accepted only as "
+        f"`{MASKED}`: put new credentials in `secrets`.",
+    )
     secrets: dict[str, PlainSerializedSecretStr] | None = Field(
         default=None,
         description="Replaces every stored secret. Stored values cannot be read "

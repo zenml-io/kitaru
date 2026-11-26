@@ -284,9 +284,12 @@ def _get_legacy_client(
     sent: list[ConnectionUpdateRequest],
 ) -> tuple[ConnectionResponse, SimpleNamespace]:
     """A connection made before `env` refused credentials, holding one there."""
-    stored = _get_connection("legacy").model_copy(
-        update={"env": {"OPENAI_API_KEY": "sk-legacy", "AWS_REGION": "eu"}}
-    )
+    env = {
+        "OPENAI_API_KEY": "sk-legacy",
+        "OTEL_HEADERS": "Authorization=Bearer abc123def",
+        "AWS_REGION": "eu",
+    }
+    stored = _get_connection("legacy").model_copy(update={"env": env})
 
     async def get(_connection_id: uuid.UUID) -> Any:
         return stored
@@ -302,8 +305,8 @@ def _structured(result: object) -> dict[str, Any]:
     return cast(dict[str, Any], cast(CallToolResult, result).structured_content)
 
 
-async def test_update_sending_back_the_read_env_keeps_a_stored_credential() -> None:
-    """An agent edits the `env` it read; the masked credential stays stored."""
+async def test_update_sending_back_the_read_env_keeps_the_masked_values() -> None:
+    """An agent edits the `env` it read; every value the read masked stays stored."""
     sent: list[ConnectionUpdateRequest] = []
     stored, client = _get_legacy_client(sent)
     server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
@@ -313,24 +316,26 @@ async def test_update_sending_back_the_read_env_keeps_a_stored_credential() -> N
         context,
     )
     env = {**_structured(read)["data"]["env"], "AWS_REGION": "us"}
+    request = {"operation": "update", "connection_id": str(stored.id)}
 
     updated = await server.call_tool(
+        "kitaru_connections_manage", {"request": {**request, "env": env}}, context
+    )
+    # A masked form that is not what the read showed for this key is a new value.
+    await server.call_tool(
         "kitaru_connections_manage",
-        {
-            "request": {
-                "operation": "update",
-                "connection_id": str(stored.id),
-                "env": env,
-            }
-        },
+        {"request": {**request, "env": {**env, "OTEL_HEADERS": "KITKEY_***"}}},
         context,
     )
 
-    [update_request] = sent
+    kept, changed = sent
     assert env["OPENAI_API_KEY"] == "***"
+    assert env["OTEL_HEADERS"] == "Authorization=Bearer ***"
     assert _structured(updated)["ok"] is True
-    assert update_request.env == {"OPENAI_API_KEY": "sk-legacy", "AWS_REGION": "us"}
-    assert "secrets" not in update_request.model_fields_set
+    assert kept.env == {**stored.env, "AWS_REGION": "us"}
+    assert "secrets" not in kept.model_fields_set
+    assert changed.env is not None
+    assert changed.env["OTEL_HEADERS"] == "KITKEY_***"
 
 
 async def test_update_refuses_any_credential_value_but_the_masked_one() -> None:
