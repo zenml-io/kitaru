@@ -27,7 +27,10 @@ function viewData(request) {
     investigation: {
       id: request.investigation_id, name: "Review", position, status: "open",
       sessions: [{ position: 0, verdict: null }, { position: 1, verdict: null }],
-      investigation_session: { id: `link-${position}`, verdict: null, questions: [] },
+      investigation_session: {
+        id: `link-${request.investigation_id}-${position}`, verdict: null,
+        questions: [{ key: "cause", question: "What went wrong?" }],
+      },
     },
   };
 }
@@ -38,8 +41,8 @@ async function openPage(inputs, opening = { session_id: "first" }) {
   const listeners = {};
   let timers = [];
   let listener;
-  let holdNote = false;
-  let releaseNote = null;
+  let held = null;
+  let release = null;
   let selected = null;
   const receive = (data) => listener({ source: parent, data: { jsonrpc: "2.0", ...data } });
   const parent = {
@@ -54,11 +57,15 @@ async function openPage(inputs, opening = { session_id: "first" }) {
           view: viewData(request),
           nodes: { nodes: [], nodes_cursor: null },
           note: { id: `note-${calls.length}`, text: request.text },
+          verdict: {
+            investigation_session: { id: "link-saved", verdict: request.verdict, questions: [] },
+            investigation_status: "in_progress",
+          },
         }[request.operation];
         result = { structuredContent: { ok: true, data } };
-        if (request.operation === "note" && holdNote) {
-          holdNote = false;
-          releaseNote = () => receive({ id: message.id, result });
+        if (request.operation === held) {
+          held = null;
+          release = () => receive({ id: message.id, result });
           return;
         }
       }
@@ -81,7 +88,8 @@ async function openPage(inputs, opening = { session_id: "first" }) {
     createRange: () => ({ selectNodeContents() {}, setEnd() {}, toString: () => "" }),
     createElement(tag) {
       const element = {
-        tag, style: {}, handlers: {}, removed: false, append() {}, focus() {}, setAttribute() {},
+        tag, style: {}, handlers: {}, attributes: {}, removed: false, append() {}, focus() {},
+        setAttribute(name, value) { this.attributes[name] = value; },
         contains: () => false,
         addEventListener(name, handler) { this.handlers[name] = handler; },
         remove() { this.removed = true; },
@@ -118,12 +126,15 @@ async function openPage(inputs, opening = { session_id: "first" }) {
   };
   await settle(() => listener !== undefined);
   await show(opening);
-  const holdNextNote = async (save) => {
-    holdNote = true;
-    const saved = save();
-    await settle(() => releaseNote !== null);
-    return { saved, release: () => releaseNote() };
+  // Hold the next write of `operation` until the scenario releases it.
+  const holdNext = async (operation, write) => {
+    held = operation;
+    release = null;
+    const saved = write();
+    await settle(() => release !== null);
+    return { saved, release: () => release() };
   };
+  const holdNextNote = (save) => holdNext("note", save);
   const compose = (text) => {
     win.kitaru.ui.compose({ kind: "session", selector: null, quote: null }, { title: text });
     const box = elements.findLast((e) => e.tag === "textarea");
@@ -151,7 +162,16 @@ async function openPage(inputs, opening = { session_id: "first" }) {
     for (const callback of due) callback();
   };
   const notes = () => win.kitaru.allNotes().map((n) => n.text);
-  return { win, calls, elements, show, input, result, holdNextNote, compose, select, notes };
+  const panel = () => {
+    const container = {
+      classList: { add() {} }, contains: () => false, querySelector: () => null,
+      replaceChildren() {},
+    };
+    win.kitaru.ui.reviewPanel(container);
+  };
+  // The newest answer box the panel drew for `question`.
+  const answerBox = (question) => elements.findLast((e) => e.tag === "textarea" && e.attributes["data-draft"]?.endsWith(`:${question}`));
+  return { win, calls, elements, show, input, result, holdNext, holdNextNote, compose, select, notes, panel, answerBox };
 }
 
 const noteTargets = (calls) => calls.filter((c) => c.operation === "note").map((c) => c.session);
@@ -229,6 +249,33 @@ async function noteButtonAcrossSessions() {
   return { offered, removedWithFirst: button?.removed ?? false };
 }
 
+// The host renders the investigation position on screen again while a
+// verdict write is in flight.
+async function verdictDuringRerender() {
+  const { win, show, holdNext } = await openPage({}, { investigation_id: "review", position: 0 });
+  const pending = await holdNext("verdict", () => win.kitaru.setVerdict("problematic"));
+  await show({ investigation_id: "review", position: 0 });
+  pending.release();
+  await pending.saved;
+  return { shownVerdict: win.kitaru.view.investigation.investigation_session.verdict };
+}
+
+// One session belongs to two investigations; a draft answer typed in the
+// first stays there.
+async function answerDraftAcrossInvestigations() {
+  const { show, panel, answerBox } = await openPage({}, { investigation_id: "first-review", position: 0 });
+  panel();
+  const box = answerBox("cause");
+  box.value = "Draft for the first review";
+  box.handlers.input();
+  await show({ investigation_id: "first-review", position: 0 });
+  const keptOnRerender = answerBox("cause").value;
+  await show({ investigation_id: "second-review", position: 0 });
+  const shownInSecond = answerBox("cause").value;
+  await show({ investigation_id: "first-review", position: 0 });
+  return { keptOnRerender, shownInSecond, keptOnReturn: answerBox("cause").value };
+}
+
 console.log(JSON.stringify({
   hosted: await workspaces({ first: { workspace: "research" }, next: { workspace: "second" } }),
   local: await workspaces({ first: {}, next: {} }),
@@ -237,4 +284,6 @@ console.log(JSON.stringify({
   investigationPositions: await investigationPositions(),
   earlierSaveFinishesLater: await earlierSaveFinishesLater(),
   noteButtonAcrossSessions: await noteButtonAcrossSessions(),
+  verdictDuringRerender: await verdictDuringRerender(),
+  answerDraftAcrossInvestigations: await answerDraftAcrossInvestigations(),
 }));

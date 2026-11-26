@@ -97,3 +97,12 @@ def test_the_first_session_never_touches_the_next_sessions_edits(
         "offered": True,
         "removedWithFirst": True,
     }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
+def test_a_saved_verdict_shows_after_the_same_session_renders_again(
+    tmp_path: Path,
+) -> None:
+    shown = _drive_page(tmp_path)["verdictDuringRerender"]
+
+    assert shown == {"shownVerdict": "problematic"}

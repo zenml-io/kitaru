@@ -406,9 +406,14 @@
   }
   async function setVerdict(verdict) {
     requireWrite();
+    const asked = state.view.investigation;
+    if (!asked) throw new Error("Verdicts belong to an investigation; open the session through one.");
+    const key = state.viewKey;
+    const env = await callTool(WRITE_TOOL, { operation: "verdict", investigation_id: asked.id, session_id: state.view.session.id, verdict: verdict || null }, state.viewArgs);
+    // The view may have been read again meanwhile; show the verdict on the
+    // current one while it is still the same record.
+    if (state.viewKey !== key) return env.data.investigation_session;
     const inv = state.view.investigation;
-    if (!inv) throw new Error("Verdicts belong to an investigation; open the session through one.");
-    const env = await callTool(WRITE_TOOL, { operation: "verdict", investigation_id: inv.id, session_id: state.view.session.id, verdict: verdict || null }, state.viewArgs);
     inv.investigation_session = env.data.investigation_session;
     inv.status = env.data.investigation_status;
     const entry = inv.sessions.find((s) => s.position === inv.position);
