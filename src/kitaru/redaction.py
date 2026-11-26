@@ -27,7 +27,7 @@ from kitaru.api_models.v1.session import TokenUsage
 
 # A name holds a credential when the noun it ends in names one, as in
 # `OPENAI_API_KEY`, `HFToken`, or `PGPASSWORD`. The last word decides what the
-# value is, so `credential_status`, `secret_keys`, `MAX_TOKENS`, and
+# value is, so `credential_status`, `secret_keys`, and
 # `AWS_WEB_IDENTITY_TOKEN_FILE` hold none. Two-word nouns are matched glued.
 _CREDENTIAL_NOUNS = frozenset(
     {
@@ -38,6 +38,7 @@ _CREDENTIAL_NOUNS = frozenset(
         "apikeys",
         "apitokens",
         "authkey",
+        "authkeys",
         "authorization",
         "authtokens",
         "credential",
@@ -45,6 +46,7 @@ _CREDENTIAL_NOUNS = frozenset(
         "devicecode",
         "devicecodes",
         "encryptionkey",
+        "encryptionkeys",
         "privatekey",
         "privatekeys",
         "pwd",
@@ -52,16 +54,40 @@ _CREDENTIAL_NOUNS = frozenset(
         "secretenv",
         "secretkey",
         "signingkey",
+        "signingkeys",
     }
 )
 _CREDENTIAL_ENDINGS = (
     "passphrase",
+    "passphrases",
     "passwd",
     "password",
     "passwords",
     "secret",
     "secrets",
     "token",
+)
+# `tokens` after one of these words counts tokens, as in `MAX_TOKENS` or
+# `prompt_tokens`; after any other word it holds them, as in `GITHUB_TOKENS`.
+_TOKEN_COUNT_WORDS = frozenset(
+    {
+        "budget",
+        "cache",
+        "cached",
+        "completion",
+        "context",
+        "input",
+        "max",
+        "min",
+        "new",
+        "num",
+        "output",
+        "prompt",
+        "reasoning",
+        "remaining",
+        "total",
+        "used",
+    }
 )
 _SECRET_VALUE = re.compile(r"(?i)(bearer\s+|KITKEY_|ZENPROKEY_)[^\s,;\]\}\"']+")
 
@@ -82,8 +108,8 @@ def is_credential_name(name: str) -> bool:
     words = re.findall(r"[a-z]+", spaced.lower())
     if not words:
         return False
-    if words == ["tokens"]:
-        return True
+    if words[-1] == "tokens":
+        return len(words) == 1 or words[-2] not in _TOKEN_COUNT_WORDS
     tails = (words[-1], "".join(words[-2:]))
     return any(
         tail in _CREDENTIAL_NOUNS or tail.endswith(_CREDENTIAL_ENDINGS)
