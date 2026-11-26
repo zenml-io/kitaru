@@ -23,6 +23,7 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult
 from mcp_fakes import build_server_context
+from pydantic import ValidationError
 
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.connection import (
@@ -597,6 +598,17 @@ async def test_refused_arguments_never_echo_a_secret_value(
 
     assert _SECRET not in str(refused.value)
     assert "98761" not in str(refused.value)
+
+
+def test_an_update_without_expected_updated_never_echoes_its_secrets() -> None:
+    """Validated directly, as a host's secret page does, outside the tool."""
+    with pytest.raises(ValidationError) as refused:
+        ConnectionUpdate.model_validate(
+            {**_UPDATE, "secrets": {"K": _SECRET}, "default": True}
+        )
+
+    assert "expected_updated" in str(refused.value)
+    assert _SECRET not in str(refused.value)
 
 
 # One rule decides both what `env` refuses on write and what reads mask.

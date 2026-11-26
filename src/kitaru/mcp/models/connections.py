@@ -158,7 +158,6 @@ class ConnectionUpdate(MCPModel):
     default: bool | None = None
     expected_updated: datetime | None = Field(
         default=None,
-        validate_default=True,
         description="The connection's `updated` time as `kitaru_connection_read` "
         "shows it; required with `env` or `secrets`, and checked on any update "
         "that sends it. The server reads the connection just before writing and "
@@ -166,22 +165,6 @@ class ConnectionUpdate(MCPModel):
         "`default` makes it. Not detected: a change committed after that read, "
         "and a change to secrets alone, which leaves `updated` as it was.",
     )
-
-    @field_validator("expected_updated")
-    @classmethod
-    def _require_expected_updated(
-        cls, value: datetime | None, info: ValidationInfo
-    ) -> datetime | None:
-        # A field error, not a model one: the model's error would echo every
-        # input, secret values included.
-        if value is None and any(
-            info.data.get(field) is not None for field in ("env", "secrets")
-        ):
-            raise ValueError(
-                "an update of `env` or `secrets` needs the connection's `updated` "
-                "time from `kitaru_connection_read`"
-            )
-        return value
 
     @field_validator("env", "secrets", "default")
     @classmethod
@@ -196,6 +179,14 @@ class ConnectionUpdate(MCPModel):
     def _validate_update(self) -> Self:
         if not {"env", "secrets", "default"} & self.model_fields_set:
             raise ValueError("connection update must change at least one field")
+        if self.expected_updated is None and (
+            self.env is not None or self.secrets is not None
+        ):
+            _refuse_keys(
+                ["expected_updated"],
+                "is required with `env` or `secrets`: send the connection's "
+                "`updated` time from `kitaru_connection_read`.",
+            )
         removed = self.remove_secrets or []
         if removed and self.secrets is None:
             _refuse_keys(
