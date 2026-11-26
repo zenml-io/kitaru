@@ -20,6 +20,7 @@ from typing import Any, cast
 
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult
 from mcp_fakes import build_server_context
 
 from kitaru.api_models.v1.base import Page
@@ -285,15 +286,59 @@ async def test_credential_like_env_keys_are_refused_without_echoing_values(
     assert "planted" not in message
 
 
-async def test_plain_env_keys_that_only_resemble_credentials_are_kept() -> None:
-    """Settings such as token limits are not credentials."""
-    env = {
-        "MAX_TOKENS": "4096",
-        "HTTPMaxTokens": "4096",
-        "TOKENIZER_NAME": "cl100k",
-        "LANGFUSE_BASE_URL": "x",
-    }
+# One rule decides both what `env` refuses on write and what reads mask.
+CREDENTIAL_NAMES = [
+    ("OPENAI_API_KEY", True),
+    ("HF_TOKEN", True),
+    ("HFToken", True),
+    ("DB_PASSWORD", True),
+    ("PGPASSWORD", True),
+    ("PASSPHRASE", True),
+    ("AUTHORIZATION", True),
+    ("SIGNING_KEY", True),
+    ("ENCRYPTION_KEY", True),
+    ("SECRETS", True),
+    ("API_KEY1", True),
+    ("TOKEN1", True),
+    ("AWS_SECRET_ACCESS_KEY", True),
+    ("awsSecretAccessKey", True),
+    ("GOOGLE_APPLICATION_CREDENTIALS", True),
+    ("MAX_TOKENS", False),
+    ("HTTPMaxTokens", False),
+    ("TOKENIZER_NAME", False),
+    ("AWS_WEB_IDENTITY_TOKEN_FILE", False),
+    ("LANGFUSE_PUBLIC_KEY", False),
+    ("LANGFUSE_BASE_URL", False),
+]
 
-    created = ConnectionCreate(operation="create", name="n", provider="p", env=env)
 
-    assert created.env == env
+@pytest.mark.parametrize(("name", "credential"), CREDENTIAL_NAMES)
+async def test_env_refuses_on_write_exactly_what_reads_mask(
+    name: str, credential: bool
+) -> None:
+    stored = _get_connection("c").model_copy(update={"env": {name: "4096"}})
+    created: list[object] = []
+
+    async def create(request: object, idempotency_key: str | None = None) -> Any:
+        created.append(request)
+        return stored
+
+    async def get(_connection_id: uuid.UUID) -> Any:
+        return stored
+
+    client = SimpleNamespace(connections=SimpleNamespace(create=create, get=get))
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    write = {"operation": "create", "name": "c", "provider": "p", "env": {name: "4096"}}
+    read = {"operation": "get", "reference": str(stored.id)}
+
+    try:
+        await server.call_tool("kitaru_connections_manage", {"request": write}, context)
+    except ToolError as refused:
+        assert name in str(refused)
+    result = await server.call_tool(
+        "kitaru_connection_read", {"request": read}, context
+    )
+
+    assert bool(created) is not credential
+    body = cast(dict[str, Any], cast(CallToolResult, result).structured_content)
+    assert body["data"]["env"][name] == ("***" if credential else "4096")

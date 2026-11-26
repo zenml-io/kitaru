@@ -9,8 +9,8 @@ from typing import Annotated, Literal, Self
 from pydantic import AfterValidator, Field, model_validator
 
 from kitaru.api_models.v1.base import PlainSerializedSecretStr
-from kitaru.mcp.credentials import is_credential_like
 from kitaru.mcp.models.common import IDEMPOTENCY_KEY_DESCRIPTION, MCPModel, PageOptions
+from kitaru.mcp.redaction import is_credential_name
 
 
 class ConnectionListRequest(PageOptions):
@@ -30,7 +30,7 @@ class ConnectionGetRequest(MCPModel):
 def _refuse_credential_like(name: str) -> str:
     # Check keys, not the map: a refused map would echo its values, which may
     # be the very credential, in the validation error.
-    if is_credential_like(name):
+    if is_credential_name(name):
         raise ValueError(
             "looks like a credential; move it to `secrets`, which are stored "
             "encrypted and never returned"

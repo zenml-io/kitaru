@@ -25,16 +25,67 @@ from pydantic import BaseModel
 
 from kitaru.api_models.v1.session import TokenUsage
 
-_SECRET_KEY = re.compile(
-    r"(?:^|[_-])(?:api[_-]?keys?|access[_-]?tokens?|refresh[_-]?tokens?|tokens?|"
-    r"passwords?|secrets?)$|^(?:authorization|credentials?|device[_-]?codes?|"
-    r"client[_-]?secrets?|private[_-]?keys?|secret[_-]?env)$",
-    re.IGNORECASE,
+# A name holds a credential when the noun it ends in names one, as in
+# `OPENAI_API_KEY`, `HFToken`, or `PGPASSWORD`. The last word decides what the
+# value is, so `credential_status`, `secret_keys`, `MAX_TOKENS`, and
+# `AWS_WEB_IDENTITY_TOKEN_FILE` hold none. Two-word nouns are matched glued.
+_CREDENTIAL_NOUNS = frozenset(
+    {
+        "accesskey",
+        "accesskeys",
+        "accesstokens",
+        "apikey",
+        "apikeys",
+        "apitokens",
+        "authkey",
+        "authorization",
+        "authtokens",
+        "credential",
+        "credentials",
+        "devicecode",
+        "devicecodes",
+        "encryptionkey",
+        "privatekey",
+        "privatekeys",
+        "pwd",
+        "refreshtokens",
+        "secretenv",
+        "secretkey",
+        "signingkey",
+    }
+)
+_CREDENTIAL_ENDINGS = (
+    "passphrase",
+    "passwd",
+    "password",
+    "passwords",
+    "secret",
+    "secrets",
+    "token",
 )
 _SECRET_VALUE = re.compile(r"(?i)(bearer\s+|KITKEY_|ZENPROKEY_)[^\s,;\]\}\"']+")
 
 _TOKEN_USAGE_KEYS = frozenset(TokenUsage.model_fields)
 _MAX_DEPTH = 64
+
+
+def is_credential_name(name: str) -> bool:
+    """Return whether a setting or field name says its value is a credential."""
+    # One capital before the word, not `[A-Z]+`: the same split, without
+    # backtracking that grows with the square of a long all-caps name.
+    spaced = re.sub(r"([A-Z])([A-Z][a-z])", r"\1_\2", name)
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", spaced)
+    # Digits drop out, so `API_KEY1` and `TOKEN2` end in their nouns.
+    words = re.findall(r"[a-z]+", spaced.lower())
+    if not words:
+        return False
+    if words == ["tokens"]:
+        return True
+    tails = (words[-1], "".join(words[-2:]))
+    return any(
+        tail in _CREDENTIAL_NOUNS or tail.endswith(_CREDENTIAL_ENDINGS)
+        for tail in tails
+    )
 
 
 def redact(value: str) -> str:
@@ -57,7 +108,7 @@ def _redact_data(
     """Normalize one value while retaining key context and active ancestors."""
     if (
         key is not None
-        and _SECRET_KEY.search(key)
+        and is_credential_name(key)
         and not _is_token_usage(value, key=key)
     ):
         return "***"
@@ -111,9 +162,7 @@ def _redact_data(
 
 
 def _is_token_usage(value: Any, *, key: str) -> bool:
-    """Recognize only numeric token usage fields, including per-call means."""
-    if key in _TOKEN_USAGE_KEYS:
-        return _is_token_count(value)
+    """Recognize a numeric `tokens` usage total or usage breakdown."""
     if key != "tokens":
         return False
     if isinstance(value, dict):
