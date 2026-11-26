@@ -13,7 +13,7 @@ from typing import Any, cast
 import pytest
 from jsonschema import Draft202012Validator
 from mcp.types import TextContent
-from pydantic import TypeAdapter
+from pydantic import Field, TypeAdapter
 from scripts.report_mcp_schema import (
     MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES,
     MAX_MODEL_TOOLS,
@@ -38,6 +38,7 @@ from kitaru.mcp.models.common import (
     PageMetadata,
     RegistryReadResult,
     ToolResult,
+    ToolSuccessPayload,
 )
 from kitaru.mcp.registry import TOOL_SPECS, ToolSpec, invoke_tool
 from kitaru.mcp.server import create_server
@@ -174,6 +175,40 @@ async def test_invoke_tool_returns_viewer_source_unchanged(tmp_path: Path) -> No
 
     assert cast(dict[str, Any], result.structured_content)["data"]["html"] == source
     assert source in cast(TextContent, result.content[0]).text
+
+
+class _LinkedResult(ToolResult):
+    links: dict[str, str] = Field(default_factory=dict)
+
+
+@pytest.mark.parametrize("text", [None, "Summary with Bearer leak-text"])
+async def test_unredacted_data_keeps_warnings_links_and_text_masked(
+    text: str | None,
+) -> None:
+    source = "<script>const label = `Bearer ${token}`;</script>"
+
+    async def viewer_file(_state: MCPServerState, _request: object) -> object:
+        return ToolSuccessPayload(
+            data={"html": source},
+            warnings=["retry with Bearer leak-warning"],
+            links={"open": "https://example.test/?key=KITKEY_leaklink"},
+            text=text,
+            redact=False,
+        )
+
+    spec = replace(
+        _get_spec("kitaru_docs_search"), run=viewer_file, result_type=_LinkedResult
+    )
+    request = _get_request(spec, {"query": "viewer"})
+
+    result = await invoke_tool(spec, MCPServerState(MCPSettings()), request)
+
+    structured = cast(dict[str, Any], result.structured_content)
+    shown = json.dumps(structured) + cast(TextContent, result.content[0]).text
+    assert structured["data"]["html"] == source
+    assert structured["warnings"] == ["retry with Bearer ***"]
+    assert structured["links"] == {"open": "https://example.test/?key=KITKEY_***"}
+    assert not any(leak in shown for leak in ("leak-warning", "leaklink", "leak-text"))
 
 
 async def test_invoke_tool_bounds_the_handler_with_the_state_settings() -> None:

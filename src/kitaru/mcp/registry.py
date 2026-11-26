@@ -74,7 +74,7 @@ from kitaru.mcp.models.workflows import (
     WorkflowCancelRequest,
     WorkflowStartRequest,
 )
-from kitaru.mcp.redaction import redact_data
+from kitaru.mcp.redaction import redact, redact_data
 from kitaru.mcp.settings import CapabilityMode
 from kitaru.mcp.tools.activity import handle_activity_read
 from kitaru.mcp.tools.analyzers import handle_analyzers_manage
@@ -150,10 +150,11 @@ async def invoke_tool(
     `spec.run` runs through `state.execute`, so the state's settings bound its
     time and concurrency. Its data is redacted, unless it returns a
     `ToolSuccessPayload` with `redact=False`, and wrapped in the tool's result
-    envelope. A failure becomes an error envelope, and its message is never
-    logged, since a backend's message can echo a secret in a shape no
-    redaction pattern knows: the log has the failure's type, or, for a result
-    that fails validation, the locations of the invalid fields.
+    envelope; warnings, links, and text are redacted either way. A failure
+    becomes an error envelope, and its message is never logged, since a
+    backend's message can echo a secret in a shape no redaction pattern knows:
+    the log has the failure's type, or, for a result that fails validation, the
+    locations of the invalid fields.
 
     Args:
         spec: The tool.
@@ -174,11 +175,13 @@ async def invoke_tool(
             json_data = (
                 redact_data(data.data) if redacting else cast(JsonValue, data.data)
             )
+            # `redact=False` covers the data alone: warnings and links come
+            # from Kitaru, not from the user's own files.
             envelope = success_result(
                 spec.result_type,
                 json_data,
-                warnings=data.warnings,
-                links=data.links,
+                warnings=[redact(warning) for warning in data.warnings],
+                links=cast(dict[str, str], redact_data(data.links)),
             )
             text = data.text
         else:
