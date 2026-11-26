@@ -271,6 +271,8 @@ def test_secret_bearing_tokens_are_masked(secret: Any) -> None:
 @given(count=st.none() | st.integers() | st.floats(allow_nan=False))
 def test_numeric_usage_fields_are_preserved(key: str, count: Any) -> None:
     assert cli_redact({key: count}) == {key: count}
+    assert cli_redact({key: "credential-value"}) == {key: "***"}
+    assert cli_redact({key: True}) == {key: "***"}
 
 
 def test_mean_token_usage_survives_beside_masked_credentials() -> None:

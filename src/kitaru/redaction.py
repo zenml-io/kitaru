@@ -108,7 +108,9 @@ def _redact_data(
     """Normalize one value while retaining key context and active ancestors."""
     if (
         key is not None
-        and is_credential_name(key)
+        # A token usage field holds a count, so anything else under it is
+        # masked like a credential.
+        and (is_credential_name(key) or key in _TOKEN_USAGE_KEYS)
         and not _is_token_usage(value, key=key)
     ):
         return "***"
@@ -162,7 +164,9 @@ def _redact_data(
 
 
 def _is_token_usage(value: Any, *, key: str) -> bool:
-    """Recognize a numeric `tokens` usage total or usage breakdown."""
+    """Recognize only numeric token usage fields, including per-call means."""
+    if key in _TOKEN_USAGE_KEYS:
+        return _is_token_count(value)
     if key != "tokens":
         return False
     if isinstance(value, dict):
