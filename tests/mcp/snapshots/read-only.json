@@ -9633,7 +9633,7 @@
       "required": [
         "request"
       ],
-      "title": "failure_cell_toolArguments",
+      "title": "failure_matrix_cell_toolArguments",
       "type": "object"
     },
     "name": "kitaru_failure_matrix_cell",

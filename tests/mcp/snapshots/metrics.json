@@ -6,7 +6,7 @@
   },
   "modes": {
     "destructive": {
-      "discovery_response_bytes": 266012,
+      "discovery_response_bytes": 266019,
       "model_discovery_response_bytes": 244640,
       "model_tool_count": 19,
       "tool_count": 22,
@@ -83,8 +83,8 @@
         },
         "kitaru_failure_matrix_cell": {
           "$defs_count": 10,
-          "combined_bytes": 7227,
-          "input_bytes": 4529,
+          "combined_bytes": 7234,
+          "input_bytes": 4536,
           "maximum_nesting_depth": 8,
           "output_bytes": 2698
         },
@@ -168,7 +168,7 @@
       }
     },
     "read-only": {
-      "discovery_response_bytes": 146140,
+      "discovery_response_bytes": 146147,
       "model_discovery_response_bytes": 131245,
       "model_tool_count": 9,
       "tool_count": 11,
@@ -203,8 +203,8 @@
         },
         "kitaru_failure_matrix_cell": {
           "$defs_count": 10,
-          "combined_bytes": 7227,
-          "input_bytes": 4529,
+          "combined_bytes": 7234,
+          "input_bytes": 4536,
           "maximum_nesting_depth": 8,
           "output_bytes": 2698
         },
@@ -253,7 +253,7 @@
       }
     },
     "standard": {
-      "discovery_response_bytes": 254179,
+      "discovery_response_bytes": 254186,
       "model_discovery_response_bytes": 232807,
       "model_tool_count": 17,
       "tool_count": 20,
@@ -323,8 +323,8 @@
         },
         "kitaru_failure_matrix_cell": {
           "$defs_count": 10,
-          "combined_bytes": 7227,
-          "input_bytes": 4529,
+          "combined_bytes": 7234,
+          "input_bytes": 4536,
           "maximum_nesting_depth": 8,
           "output_bytes": 2698
         },

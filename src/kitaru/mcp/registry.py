@@ -6,13 +6,13 @@
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, cast
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 from mcp.types import CallToolResult, ToolAnnotations
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from kitaru.api_models.v1.base import JsonValue
 from kitaru.mcp.apps import FAILURE_MATRIX_URI, SESSION_VIEWER_URI, ui_meta
@@ -74,7 +74,7 @@ from kitaru.mcp.models.workflows import (
     WorkflowCancelRequest,
     WorkflowStartRequest,
 )
-from kitaru.mcp.redaction import redact, redact_data
+from kitaru.mcp.redaction import redact_data
 from kitaru.mcp.settings import CapabilityMode
 from kitaru.mcp.tools.activity import handle_activity_read
 from kitaru.mcp.tools.analyzers import handle_analyzers_manage
@@ -105,7 +105,7 @@ logger = logging.getLogger("kitaru.mcp.registry")
 ToolHandler = Callable[[MCPServerState, Any], Awaitable[object]]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ToolSpec:
     """One public tool and its minimum cumulative capability.
 
@@ -114,13 +114,15 @@ class ToolSpec:
         minimum_mode: Lowest capability mode that lists the tool.
         description: Tool description.
         annotations: MCP tool annotations.
-        handler: MCP tool function taking the request and the MCP context.
-        meta: MCP `_meta` for the tool, if any.
+        request_type: The tool's `request` argument: a request model, or an
+            annotated union of them.
+        result_type: The tool's result envelope model.
         run: The tool's work, taking server state and the validated request
             model, whose validation holds the input checks. It returns
             the tool's data, or a `ToolSuccessPayload`, unredacted and without
             a result envelope, timeout, or concurrency bound, and raises on
-            failure.
+            failure. `invoke_tool` adds those.
+        meta: MCP `_meta` for the tool, if any.
         needs_server: Whether `run` uses the state's Kitaru client. A tool
             that does not runs without a server connection or sign-in.
     """
@@ -129,16 +131,77 @@ class ToolSpec:
     minimum_mode: CapabilityMode
     description: str
     annotations: ToolAnnotations
-    handler: Callable[..., Awaitable[BaseModel]]
+    request_type: Any
+    result_type: type[ToolResult]
+    run: ToolHandler
     meta: dict[str, Any] | None = None
-    run: ToolHandler = field(kw_only=True)
-    needs_server: bool = field(default=True, kw_only=True)
+    needs_server: bool = True
 
 
-def _describe(tool: Callable[..., Awaitable[BaseModel]]) -> str:
-    # Python 3.13 strips docstring indentation at compile time and older versions
-    # keep it, so clean it here to publish the same description on every version.
-    return inspect.cleandoc(tool.__doc__ or "")
+async def invoke_tool(
+    spec: ToolSpec,
+    state: MCPServerState,
+    request: object,
+    *,
+    passthrough: tuple[type[Exception], ...] = (),
+) -> CallToolResult:
+    """Run one tool and render its result as the Kitaru MCP server does.
+
+    `spec.run` runs through `state.execute`, so the state's settings bound its
+    time and concurrency. Its data is redacted, unless it returns a
+    `ToolSuccessPayload` with `redact=False`, and wrapped in the tool's result
+    envelope. A failure becomes an error envelope, and only its type is
+    logged: a backend's message can echo a secret in a shape no redaction
+    pattern knows.
+
+    Args:
+        spec: The tool.
+        state: Server state the tool runs with.
+        request: The validated request, an instance of `spec.request_type`.
+        passthrough: Exception types raised to the caller instead of being
+            returned as an error envelope.
+
+    Returns:
+        The tool's structured result and its text.
+    """
+    text: str | None = None
+    redacting = True
+    try:
+        data = await state.execute(lambda: spec.run(state, request))
+        if isinstance(data, ToolSuccessPayload):
+            redacting = data.redact
+            json_data = (
+                redact_data(data.data) if redacting else cast(JsonValue, data.data)
+            )
+            envelope = success_result(
+                spec.result_type,
+                json_data,
+                warnings=data.warnings,
+                links=data.links,
+            )
+            text = data.text
+        else:
+            envelope = success_result(spec.result_type, redact_data(data))
+    except passthrough:
+        raise
+    # Handlers marshal their own request payloads and raise `MCPToolError` when a
+    # payload is invalid, so a `ValidationError` here comes from the remote
+    # response or from the result envelope.
+    except ValidationError as error:
+        # Log only locations: error inputs can carry unredacted response data.
+        logger.debug(
+            "Tool result failed output validation: %s",
+            [detail["loc"] for detail in error.errors(include_url=False)],
+        )
+        envelope = error_result(spec.result_type, MCPOutputValidationError(error))
+    except Exception as error:
+        logger.debug("Tool handler raised %s", type(error).__name__)
+        envelope = error_result(spec.result_type, error)
+    return protocol_result(envelope, text, mask_credentials=redacting)
+
+
+def _describe(text: str) -> str:
+    return inspect.cleandoc(text)
 
 
 def _annotations(
@@ -152,499 +215,326 @@ def _annotations(
     )
 
 
-async def registry_read_tool(
-    request: RegistryReadRequest, context: Context
-) -> RegistryReadResult:
-    """Read registry parents, versions, tags, and workers with bounded operations."""
-    return cast(
-        RegistryReadResult,
-        await _invoke(context, request, RegistryReadResult, handle_registry_read),
+def _get_tool_function(spec: ToolSpec) -> Callable[..., Awaitable[CallToolResult]]:
+    """Build the MCP tool function that runs `spec` with the server's state."""
+
+    async def call_tool(request: object, context: Context) -> CallToolResult:
+        state = cast(MCPServerState, context.request_context.lifespan_context)
+        return await invoke_tool(spec, state, request)
+
+    # The MCP SDK builds the tool's schemas from the signature and finds the
+    # context argument through the annotations.
+    kind = inspect.Parameter.POSITIONAL_OR_KEYWORD
+    parameters = [
+        inspect.Parameter("request", kind, annotation=spec.request_type),
+        inspect.Parameter("context", kind, annotation=Context),
+    ]
+    call_tool.__signature__ = inspect.Signature(  # ty: ignore[missing-attribute]
+        parameters, return_annotation=spec.result_type
     )
-
-
-async def activity_read_tool(
-    request: ActivityReadRequest, context: Context
-) -> ActivityReadResult:
-    """Read Kitaru sessions, runs, jobs, and bounded child pages.
-
-    To read whole sessions as text rather than node pages, use
-    `kitaru_session_read`.
-    """
-    return cast(
-        ActivityReadResult,
-        await _invoke(context, request, ActivityReadResult, handle_activity_read),
-    )
-
-
-async def session_read_tool(
-    request: SessionReadRequest, context: Context
-) -> SessionReadResult:
-    """Read whole sessions as compact transcripts, one node per line.
-
-    Prefer this over paging `kitaru_activity_read` session nodes with payloads.
-
-    Each model call shows only its new text, tool calls show short arguments and
-    results, errors are never cut, and every cut ends in `[+N chars]`. Step
-    numbers are node positions; pass `node` with `full` to read one node whole.
-    """
-    return cast(
-        SessionReadResult,
-        await _invoke(context, request, SessionReadResult, handle_session_read),
-    )
-
-
-async def review_read_tool(
-    request: ReviewReadRequest, context: Context
-) -> ReviewReadResult:
-    """Read investigations, annotations, insights, and investigation sessions."""
-    return cast(
-        ReviewReadResult,
-        await _invoke(context, request, ReviewReadResult, handle_review_read),
-    )
-
-
-async def connection_read_tool(
-    request: ConnectionReadRequest, context: Context
-) -> ConnectionReadResult:
-    """Read provider connections without their secret values."""
-    return cast(
-        ConnectionReadResult,
-        await _invoke(context, request, ConnectionReadResult, handle_connection_read),
-    )
-
-
-async def docs_search_tool(
-    request: DocsSearchRequest, context: Context
-) -> DocsSearchResult:
-    """Search bundled Kitaru guides; return short excerpts and published source URLs."""
-    return cast(
-        DocsSearchResult,
-        await _invoke(context, request, DocsSearchResult, handle_docs_search),
-    )
-
-
-async def feedback_draft_tool(
-    request: FeedbackDraftRequest, context: Context
-) -> FeedbackDraftResult:
-    """Draft a GitHub issue about a Kitaru bug or confusing tool; send nothing.
-
-    Use this when a Kitaru tool fails, returns something surprising, or its
-    description misled you. Nothing is sent: show the user `issue_url` so they
-    can review the prefilled issue and submit it themselves. Describe the tool,
-    arguments, and result; leave out session content the user has not agreed
-    to share.
-    """
-    return cast(
-        FeedbackDraftResult,
-        await _invoke(context, request, FeedbackDraftResult, handle_feedback_draft),
-    )
-
-
-async def failure_matrix_tool(
-    request: FailureMatrixRequest, context: Context
-) -> FailureMatrixResult:
-    """Show where sessions first go wrong as an interactive transition matrix.
-
-    Rows are the last step that went right and columns the first step that went
-    wrong, counted over the sessions `filter` selects (for example an agent_id or
-    cohort_version_id). Pass `compare_filter`, such as a replay's
-    experiment_run_id, to compare two groups. A reviewer places a failure that
-    raised no error by annotating the failing node with the value
-    `{"first_failure": true, "note": "..."}`.
-
-    The result's snapshot_id lets a cell drill into exactly these sessions; it
-    is null on a server that keeps no matrix in memory.
-    """
-    return cast(
-        FailureMatrixResult,
-        await _invoke(context, request, FailureMatrixResult, handle_failure_matrix),
-    )
-
-
-async def failure_cell_tool(
-    request: FailureCellRequest, context: Context
-) -> FailureCellResult:
-    """List the sessions and repeated notes behind one transition matrix cell.
-
-    On a server that keeps no matrix in memory, the matrix has no snapshot_id
-    and the cell reads the sessions again.
-    """
-    return cast(
-        FailureCellResult,
-        await _invoke(context, request, FailureCellResult, handle_failure_cell),
-    )
-
-
-async def session_view_tool(
-    request: SessionViewRequest, context: Context
-) -> SessionViewResult:
-    """Open one session in an interactive trace viewer where a reviewer annotates it.
-
-    Pass `session_id`, or `investigation_id` with `position` to review an
-    investigation's sessions with its questions and verdicts. `viewer` picks the
-    page: `default`, or a custom viewer saved as `<name>.html` in the viewers
-    folder. The result names the session; the viewer page reads its payloads
-    itself. Notes, answers, and verdicts the reviewer saves in the viewer go to
-    Kitaru; read them back with `kitaru_review_read`.
-    """
-    return cast(
-        SessionViewResult,
-        await _invoke(context, request, SessionViewResult, handle_session_view),
-    )
-
-
-async def viewer_read_tool(
-    request: ViewerReadRequest, context: Context
-) -> ViewerReadResult:
-    """Read a session for a viewer page, a viewer's HTML, or more of its nodes."""
-    return cast(
-        ViewerReadResult,
-        await _invoke(context, request, ViewerReadResult, handle_viewer_read),
-    )
-
-
-async def viewer_write_tool(
-    request: ViewerWriteRequest, context: Context
-) -> ViewerWriteResult:
-    """Save a reviewer's note, investigation answer, edit, or session verdict."""
-    return cast(
-        ViewerWriteResult,
-        await _invoke(context, request, ViewerWriteResult, handle_viewer_write),
-    )
-
-
-async def cohorts_manage_tool(
-    request: CohortsManageRequest, context: Context
-) -> CohortsManageResult:
-    """Create or update cohorts and cohort versions by exact identifiers."""
-    return cast(
-        CohortsManageResult,
-        await _invoke(context, request, CohortsManageResult, handle_cohorts_manage),
-    )
-
-
-async def experiments_manage_tool(
-    request: ExperimentsManageRequest, context: Context
-) -> ExperimentsManageResult:
-    """Create or update experiments with exact evaluator versions."""
-    return cast(
-        ExperimentsManageResult,
-        await _invoke(
-            context, request, ExperimentsManageResult, handle_experiments_manage
-        ),
-    )
-
-
-async def session_import_tool(
-    request: SessionImportRequest, context: Context
-) -> SessionImportResult:
-    """Import sessions from one existing blob and return the queued job."""
-    return cast(
-        SessionImportResult,
-        await _invoke(context, request, SessionImportResult, handle_session_import),
-    )
-
-
-async def review_manage_tool(
-    request: ReviewManageRequest, context: Context
-) -> ReviewManageResult:
-    """Create or update investigations, annotations, insights, tags, and tag links."""
-    return cast(
-        ReviewManageResult,
-        await _invoke(context, request, ReviewManageResult, handle_review_manage),
-    )
-
-
-async def workflow_start_tool(
-    request: WorkflowStartRequest, context: Context
-) -> WorkflowStartResult:
-    """Start an evaluation batch, an analysis, or an experiment run; return at once."""
-    return cast(
-        WorkflowStartResult,
-        await _invoke(context, request, WorkflowStartResult, handle_workflow_start),
-    )
-
-
-async def evaluators_manage_tool(
-    request: EvaluatorsManageRequest, context: Context
-) -> EvaluatorsManageResult:
-    """Create or update evaluator parents and blob- or package-backed versions."""
-    return cast(
-        EvaluatorsManageResult,
-        await _invoke(
-            context, request, EvaluatorsManageResult, handle_evaluators_manage
-        ),
-    )
-
-
-async def analyzers_manage_tool(
-    request: AnalyzersManageRequest, context: Context
-) -> AnalyzersManageResult:
-    """Create or update analyzer parents and blob- or package-backed versions."""
-    return cast(
-        AnalyzersManageResult,
-        await _invoke(context, request, AnalyzersManageResult, handle_analyzers_manage),
-    )
-
-
-async def connections_manage_tool(
-    request: ConnectionsManageRequest, context: Context
-) -> ConnectionsManageResult:
-    """Create or update provider connections and select provider defaults."""
-    return cast(
-        ConnectionsManageResult,
-        await _invoke(
-            context, request, ConnectionsManageResult, handle_connections_manage
-        ),
-    )
-
-
-async def workflow_cancel_tool(
-    request: WorkflowCancelRequest, context: Context
-) -> WorkflowCancelResult:
-    """Request cancellation of one exact job or experiment run."""
-    return cast(
-        WorkflowCancelResult,
-        await _invoke(context, request, WorkflowCancelResult, handle_workflow_cancel),
-    )
-
-
-async def delete_tool(request: DeleteRequest, context: Context) -> DeleteResult:
-    """Delete one exact allowlisted resource or tag link."""
-    return cast(
-        DeleteResult, await _invoke(context, request, DeleteResult, handle_delete)
-    )
-
-
-async def _invoke(
-    context: Context,
-    request: object,
-    result_type: type[ToolResult],
-    handler: ToolHandler,
-) -> CallToolResult:
-    state = cast(MCPServerState, context.request_context.lifespan_context)
-    text: str | None = None
-    redacting = True
-    try:
-        data = await state.execute(lambda: handler(state, request))
-        if isinstance(data, ToolSuccessPayload):
-            redacting = data.redact
-            json_data = (
-                redact_data(data.data) if redacting else cast(JsonValue, data.data)
-            )
-            envelope = success_result(
-                result_type,
-                json_data,
-                warnings=data.warnings,
-                links=data.links,
-            )
-            text = data.text
-        else:
-            json_data = redact_data(data)
-            envelope = success_result(result_type, json_data)
-    # Handlers marshal their own request payloads and raise `MCPToolError` when a
-    # payload is invalid, so a `ValidationError` here comes from the remote
-    # response or from the result envelope.
-    except ValidationError as error:
-        # Log only locations: error inputs can carry unredacted response data.
-        logger.debug(
-            "Tool result failed output validation: %s",
-            [detail["loc"] for detail in error.errors(include_url=False)],
-        )
-        envelope = error_result(result_type, MCPOutputValidationError(error))
-    except Exception as error:
-        logger.debug(
-            "Tool handler raised %s: %s", type(error).__name__, redact(str(error))
-        )
-        envelope = error_result(result_type, error)
-    return protocol_result(envelope, text, mask_credentials=redacting)
+    call_tool.__annotations__ = {
+        "request": spec.request_type,
+        "context": Context,
+        "return": spec.result_type,
+    }
+    # The SDK names the input schema after the function.
+    call_tool.__name__ = f"{spec.name.removeprefix('kitaru_')}_tool"
+    return call_tool
 
 
 TOOL_SPECS = (
     ToolSpec(
-        "kitaru_registry_read",
-        CapabilityMode.READ_ONLY,
-        _describe(registry_read_tool),
-        _annotations(read_only=True, destructive=False, idempotent=True),
-        registry_read_tool,
+        name="kitaru_registry_read",
+        minimum_mode=CapabilityMode.READ_ONLY,
+        description=(
+            "Read registry parents, versions, tags, and workers with bounded "
+            "operations."
+        ),
+        annotations=_annotations(read_only=True, destructive=False, idempotent=True),
+        request_type=RegistryReadRequest,
+        result_type=RegistryReadResult,
         run=handle_registry_read,
     ),
     ToolSpec(
-        "kitaru_activity_read",
-        CapabilityMode.READ_ONLY,
-        _describe(activity_read_tool),
-        _annotations(read_only=True, destructive=False, idempotent=True),
-        activity_read_tool,
+        name="kitaru_activity_read",
+        minimum_mode=CapabilityMode.READ_ONLY,
+        description=_describe(
+            """
+        Read Kitaru sessions, runs, jobs, and bounded child pages.
+
+        To read whole sessions as text rather than node pages, use
+        `kitaru_session_read`.
+        """
+        ),
+        annotations=_annotations(read_only=True, destructive=False, idempotent=True),
+        request_type=ActivityReadRequest,
+        result_type=ActivityReadResult,
         run=handle_activity_read,
     ),
     ToolSpec(
-        "kitaru_session_read",
-        CapabilityMode.READ_ONLY,
-        _describe(session_read_tool),
-        _annotations(read_only=True, destructive=False, idempotent=True),
-        session_read_tool,
+        name="kitaru_session_read",
+        minimum_mode=CapabilityMode.READ_ONLY,
+        description=_describe(
+            """
+        Read whole sessions as compact transcripts, one node per line.
+
+        Prefer this over paging `kitaru_activity_read` session nodes with payloads.
+
+        Each model call shows only its new text, tool calls show short arguments and
+        results, errors are never cut, and every cut ends in `[+N chars]`. Step
+        numbers are node positions; pass `node` with `full` to read one node whole.
+        """
+        ),
+        annotations=_annotations(read_only=True, destructive=False, idempotent=True),
+        request_type=SessionReadRequest,
+        result_type=SessionReadResult,
         run=handle_session_read,
     ),
     ToolSpec(
-        "kitaru_review_read",
-        CapabilityMode.READ_ONLY,
-        _describe(review_read_tool),
-        _annotations(read_only=True, destructive=False, idempotent=True),
-        review_read_tool,
+        name="kitaru_review_read",
+        minimum_mode=CapabilityMode.READ_ONLY,
+        description=(
+            "Read investigations, annotations, insights, and investigation sessions."
+        ),
+        annotations=_annotations(read_only=True, destructive=False, idempotent=True),
+        request_type=ReviewReadRequest,
+        result_type=ReviewReadResult,
         run=handle_review_read,
     ),
     ToolSpec(
-        "kitaru_connection_read",
-        CapabilityMode.READ_ONLY,
-        _describe(connection_read_tool),
-        _annotations(read_only=True, destructive=False, idempotent=True),
-        connection_read_tool,
+        name="kitaru_connection_read",
+        minimum_mode=CapabilityMode.READ_ONLY,
+        description="Read provider connections without their secret values.",
+        annotations=_annotations(read_only=True, destructive=False, idempotent=True),
+        request_type=ConnectionReadRequest,
+        result_type=ConnectionReadResult,
         run=handle_connection_read,
     ),
     ToolSpec(
-        "kitaru_docs_search",
-        CapabilityMode.READ_ONLY,
-        _describe(docs_search_tool),
-        _annotations(read_only=True, destructive=False, idempotent=True),
-        docs_search_tool,
+        name="kitaru_docs_search",
+        minimum_mode=CapabilityMode.READ_ONLY,
+        description=(
+            "Search bundled Kitaru guides; return short excerpts and published "
+            "source URLs."
+        ),
+        annotations=_annotations(read_only=True, destructive=False, idempotent=True),
+        request_type=DocsSearchRequest,
+        result_type=DocsSearchResult,
         run=handle_docs_search,
         needs_server=False,
     ),
     ToolSpec(
-        "kitaru_feedback_draft",
-        CapabilityMode.READ_ONLY,
-        _describe(feedback_draft_tool),
-        _annotations(read_only=True, destructive=False, idempotent=True),
-        feedback_draft_tool,
+        name="kitaru_feedback_draft",
+        minimum_mode=CapabilityMode.READ_ONLY,
+        description=_describe(
+            """
+        Draft a GitHub issue about a Kitaru bug or confusing tool; send nothing.
+
+        Use this when a Kitaru tool fails, returns something surprising, or its
+        description misled you. Nothing is sent: show the user `issue_url` so they
+        can review the prefilled issue and submit it themselves. Describe the tool,
+        arguments, and result; leave out session content the user has not agreed
+        to share.
+        """
+        ),
+        annotations=_annotations(read_only=True, destructive=False, idempotent=True),
+        request_type=FeedbackDraftRequest,
+        result_type=FeedbackDraftResult,
         run=handle_feedback_draft,
         needs_server=False,
     ),
     ToolSpec(
-        "kitaru_failure_matrix",
-        CapabilityMode.READ_ONLY,
-        _describe(failure_matrix_tool),
-        _annotations(read_only=True, destructive=False, idempotent=True),
-        failure_matrix_tool,
+        name="kitaru_failure_matrix",
+        minimum_mode=CapabilityMode.READ_ONLY,
+        description=_describe(
+            """
+        Show where sessions first go wrong as an interactive transition matrix.
+
+        Rows are the last step that went right and columns the first step that went
+        wrong, counted over the sessions `filter` selects (for example an agent_id or
+        cohort_version_id). Pass `compare_filter`, such as a replay's
+        experiment_run_id, to compare two groups. A reviewer places a failure that
+        raised no error by annotating the failing node with the value
+        `{"first_failure": true, "note": "..."}`.
+
+        The result's snapshot_id lets a cell drill into exactly these sessions; it
+        is null on a server that keeps no matrix in memory.
+        """
+        ),
+        annotations=_annotations(read_only=True, destructive=False, idempotent=True),
+        request_type=FailureMatrixRequest,
+        result_type=FailureMatrixResult,
         run=handle_failure_matrix,
         meta=ui_meta(FAILURE_MATRIX_URI),
     ),
     ToolSpec(
-        "kitaru_failure_matrix_cell",
-        CapabilityMode.READ_ONLY,
-        _describe(failure_cell_tool),
-        _annotations(read_only=True, destructive=False, idempotent=True),
-        failure_cell_tool,
+        name="kitaru_failure_matrix_cell",
+        minimum_mode=CapabilityMode.READ_ONLY,
+        description=_describe(
+            """
+        List the sessions and repeated notes behind one transition matrix cell.
+
+        On a server that keeps no matrix in memory, the matrix has no snapshot_id
+        and the cell reads the sessions again.
+        """
+        ),
+        annotations=_annotations(read_only=True, destructive=False, idempotent=True),
+        request_type=FailureCellRequest,
+        result_type=FailureCellResult,
         run=handle_failure_cell,
         # Only the matrix view calls this; hosts keep it out of the model's tools.
         meta=ui_meta(FAILURE_MATRIX_URI, visibility=["app"]),
     ),
     ToolSpec(
-        "kitaru_session_view",
-        CapabilityMode.READ_ONLY,
-        _describe(session_view_tool),
-        _annotations(read_only=True, destructive=False, idempotent=True),
-        session_view_tool,
+        name="kitaru_session_view",
+        minimum_mode=CapabilityMode.READ_ONLY,
+        description=_describe(
+            """
+        Open one session in an interactive trace viewer where a reviewer annotates it.
+
+        Pass `session_id`, or `investigation_id` with `position` to review an
+        investigation's sessions with its questions and verdicts. `viewer` picks the
+        page: `default`, or a custom viewer saved as `<name>.html` in the viewers
+        folder. The result names the session; the viewer page reads its payloads
+        itself. Notes, answers, and verdicts the reviewer saves in the viewer go to
+        Kitaru; read them back with `kitaru_review_read`.
+        """
+        ),
+        annotations=_annotations(read_only=True, destructive=False, idempotent=True),
+        request_type=SessionViewRequest,
+        result_type=SessionViewResult,
         run=handle_session_view,
         meta=ui_meta(SESSION_VIEWER_URI),
     ),
     ToolSpec(
-        "kitaru_viewer_read",
-        CapabilityMode.READ_ONLY,
-        _describe(viewer_read_tool),
-        _annotations(read_only=True, destructive=False, idempotent=True),
-        viewer_read_tool,
+        name="kitaru_viewer_read",
+        minimum_mode=CapabilityMode.READ_ONLY,
+        description=(
+            "Read a session for a viewer page, a viewer's HTML, or more of its nodes."
+        ),
+        annotations=_annotations(read_only=True, destructive=False, idempotent=True),
+        request_type=ViewerReadRequest,
+        result_type=ViewerReadResult,
         run=handle_viewer_read,
-        # Only viewer pages call these two; hosts keep them out of the model's
-        # tools so a saved note is one the reviewer wrote in the page.
+        # Only viewer pages call this and `kitaru_viewer_write`; hosts keep them
+        # out of the model's tools so a saved note is one the reviewer wrote in
+        # the page.
         meta=ui_meta(SESSION_VIEWER_URI, visibility=["app"]),
     ),
     ToolSpec(
-        "kitaru_cohorts_manage",
-        CapabilityMode.STANDARD,
-        _describe(cohorts_manage_tool),
-        _annotations(read_only=False, destructive=False, idempotent=False),
-        cohorts_manage_tool,
+        name="kitaru_cohorts_manage",
+        minimum_mode=CapabilityMode.STANDARD,
+        description=(
+            "Create or update cohorts and cohort versions by exact identifiers."
+        ),
+        annotations=_annotations(read_only=False, destructive=False, idempotent=False),
+        request_type=CohortsManageRequest,
+        result_type=CohortsManageResult,
         run=handle_cohorts_manage,
     ),
     ToolSpec(
-        "kitaru_experiments_manage",
-        CapabilityMode.STANDARD,
-        _describe(experiments_manage_tool),
-        _annotations(read_only=False, destructive=False, idempotent=False),
-        experiments_manage_tool,
+        name="kitaru_experiments_manage",
+        minimum_mode=CapabilityMode.STANDARD,
+        description="Create or update experiments with exact evaluator versions.",
+        annotations=_annotations(read_only=False, destructive=False, idempotent=False),
+        request_type=ExperimentsManageRequest,
+        result_type=ExperimentsManageResult,
         run=handle_experiments_manage,
     ),
     ToolSpec(
-        "kitaru_session_import",
-        CapabilityMode.STANDARD,
-        _describe(session_import_tool),
-        _annotations(read_only=False, destructive=False, idempotent=False),
-        session_import_tool,
+        name="kitaru_session_import",
+        minimum_mode=CapabilityMode.STANDARD,
+        description="Import sessions from one existing blob and return the queued job.",
+        annotations=_annotations(read_only=False, destructive=False, idempotent=False),
+        request_type=SessionImportRequest,
+        result_type=SessionImportResult,
         run=handle_session_import,
     ),
     ToolSpec(
-        "kitaru_review_manage",
-        CapabilityMode.STANDARD,
-        _describe(review_manage_tool),
-        _annotations(read_only=False, destructive=False, idempotent=False),
-        review_manage_tool,
+        name="kitaru_review_manage",
+        minimum_mode=CapabilityMode.STANDARD,
+        description=(
+            "Create or update investigations, annotations, insights, tags, and tag "
+            "links."
+        ),
+        annotations=_annotations(read_only=False, destructive=False, idempotent=False),
+        request_type=ReviewManageRequest,
+        result_type=ReviewManageResult,
         run=handle_review_manage,
     ),
     ToolSpec(
-        "kitaru_workflow_start",
-        CapabilityMode.STANDARD,
-        _describe(workflow_start_tool),
-        _annotations(read_only=False, destructive=False, idempotent=False),
-        workflow_start_tool,
+        name="kitaru_workflow_start",
+        minimum_mode=CapabilityMode.STANDARD,
+        description=(
+            "Start an evaluation batch, an analysis, or an experiment run; return "
+            "at once."
+        ),
+        annotations=_annotations(read_only=False, destructive=False, idempotent=False),
+        request_type=WorkflowStartRequest,
+        result_type=WorkflowStartResult,
         run=handle_workflow_start,
     ),
     ToolSpec(
-        "kitaru_evaluators_manage",
-        CapabilityMode.STANDARD,
-        _describe(evaluators_manage_tool),
-        _annotations(read_only=False, destructive=False, idempotent=False),
-        evaluators_manage_tool,
+        name="kitaru_evaluators_manage",
+        minimum_mode=CapabilityMode.STANDARD,
+        description=(
+            "Create or update evaluator parents and blob- or package-backed versions."
+        ),
+        annotations=_annotations(read_only=False, destructive=False, idempotent=False),
+        request_type=EvaluatorsManageRequest,
+        result_type=EvaluatorsManageResult,
         run=handle_evaluators_manage,
     ),
     ToolSpec(
-        "kitaru_analyzers_manage",
-        CapabilityMode.STANDARD,
-        _describe(analyzers_manage_tool),
-        _annotations(read_only=False, destructive=False, idempotent=False),
-        analyzers_manage_tool,
+        name="kitaru_analyzers_manage",
+        minimum_mode=CapabilityMode.STANDARD,
+        description=(
+            "Create or update analyzer parents and blob- or package-backed versions."
+        ),
+        annotations=_annotations(read_only=False, destructive=False, idempotent=False),
+        request_type=AnalyzersManageRequest,
+        result_type=AnalyzersManageResult,
         run=handle_analyzers_manage,
     ),
     ToolSpec(
-        "kitaru_connections_manage",
-        CapabilityMode.STANDARD,
-        _describe(connections_manage_tool),
-        _annotations(read_only=False, destructive=False, idempotent=False),
-        connections_manage_tool,
+        name="kitaru_connections_manage",
+        minimum_mode=CapabilityMode.STANDARD,
+        description=(
+            "Create or update provider connections and select provider defaults."
+        ),
+        annotations=_annotations(read_only=False, destructive=False, idempotent=False),
+        request_type=ConnectionsManageRequest,
+        result_type=ConnectionsManageResult,
         run=handle_connections_manage,
     ),
     ToolSpec(
-        "kitaru_viewer_write",
-        CapabilityMode.STANDARD,
-        _describe(viewer_write_tool),
-        _annotations(read_only=False, destructive=False, idempotent=False),
-        viewer_write_tool,
+        name="kitaru_viewer_write",
+        minimum_mode=CapabilityMode.STANDARD,
+        description=(
+            "Save a reviewer's note, investigation answer, edit, or session verdict."
+        ),
+        annotations=_annotations(read_only=False, destructive=False, idempotent=False),
+        request_type=ViewerWriteRequest,
+        result_type=ViewerWriteResult,
         run=handle_viewer_write,
         meta=ui_meta(SESSION_VIEWER_URI, visibility=["app"]),
     ),
     ToolSpec(
-        "kitaru_workflow_cancel",
-        CapabilityMode.DESTRUCTIVE,
-        _describe(workflow_cancel_tool),
-        _annotations(read_only=False, destructive=True, idempotent=False),
-        workflow_cancel_tool,
+        name="kitaru_workflow_cancel",
+        minimum_mode=CapabilityMode.DESTRUCTIVE,
+        description="Request cancellation of one exact job or experiment run.",
+        annotations=_annotations(read_only=False, destructive=True, idempotent=False),
+        request_type=WorkflowCancelRequest,
+        result_type=WorkflowCancelResult,
         run=handle_workflow_cancel,
     ),
     ToolSpec(
-        "kitaru_delete",
-        CapabilityMode.DESTRUCTIVE,
-        _describe(delete_tool),
-        _annotations(read_only=False, destructive=True, idempotent=False),
-        delete_tool,
+        name="kitaru_delete",
+        minimum_mode=CapabilityMode.DESTRUCTIVE,
+        description="Delete one exact allowlisted resource or tag link.",
+        annotations=_annotations(read_only=False, destructive=True, idempotent=False),
+        request_type=DeleteRequest,
+        result_type=DeleteResult,
         run=handle_delete,
     ),
 )
@@ -659,7 +549,7 @@ def register_tools(server: MCPServer[Any], mode: CapabilityMode) -> None:
     """Register the filtered public surface through SDK v2 public APIs."""
     for spec in get_tool_specs(mode):
         server.add_tool(
-            spec.handler,
+            _get_tool_function(spec),
             name=spec.name,
             description=spec.description,
             annotations=spec.annotations,

@@ -1,15 +1,19 @@
 #  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
 """Capability inventories, SDK schemas, and protocol result contracts."""
 
-import inspect
+import asyncio
 import json
+import logging
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 from jsonschema import Draft202012Validator
 from mcp.types import TextContent
+from pydantic import TypeAdapter
 from scripts.report_mcp_schema import (
     MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES,
     MAX_MODEL_TOOLS,
@@ -19,7 +23,6 @@ from scripts.report_mcp_schema import (
 from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.session import SessionDetailResponse, SessionResponse
 from kitaru.api_models.v1.tag import TagResponse
-from kitaru.mcp import registry
 from kitaru.mcp.apps import is_model_visible
 from kitaru.mcp.errors import (
     MCPToolError,
@@ -36,7 +39,7 @@ from kitaru.mcp.models.common import (
     RegistryReadResult,
     ToolResult,
 )
-from kitaru.mcp.registry import TOOL_SPECS
+from kitaru.mcp.registry import TOOL_SPECS, ToolSpec, invoke_tool
 from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
 
@@ -132,23 +135,85 @@ async def test_exact_capability_filtered_inventories_and_annotations() -> None:
             )
 
 
-async def test_each_tool_runs_the_handler_its_spec_names(
-    monkeypatch: pytest.MonkeyPatch,
+class _HostError(Exception):
+    """A failure a host handles itself."""
+
+
+def _get_spec(name: str) -> ToolSpec:
+    return next(spec for spec in TOOL_SPECS if spec.name == name)
+
+
+def _get_request(spec: ToolSpec, payload: object) -> object:
+    return TypeAdapter(spec.request_type).validate_python(payload)
+
+
+async def test_invoke_tool_masks_credentials_in_tool_data() -> None:
+    async def leak(_state: MCPServerState, _request: object) -> object:
+        return {"OPENAI_API_KEY": "sk-leak-value", "note": "Bearer leak-bearer"}
+
+    spec = replace(_get_spec("kitaru_registry_read"), run=leak, result_type=ToolResult)
+    request = _get_request(spec, {"operation": "list", "kind": "agent"})
+
+    result = await invoke_tool(spec, MCPServerState(MCPSettings()), request)
+
+    serialized = json.dumps(result.structured_content)
+    assert result.is_error is False
+    assert "sk-leak-value" not in serialized
+    assert "leak-bearer" not in serialized
+
+
+async def test_invoke_tool_returns_viewer_source_unchanged(tmp_path: Path) -> None:
+    source = "<script>const label = `Bearer ${token}`;</script>"
+    (tmp_path / "auth.html").write_text(source)
+    spec = _get_spec("kitaru_viewer_read")
+    request = _get_request(spec, {"operation": "viewer_source", "viewer": "auth"})
+
+    result = await invoke_tool(
+        spec, MCPServerState(MCPSettings(viewers_dir=tmp_path)), request
+    )
+
+    assert cast(dict[str, Any], result.structured_content)["data"]["html"] == source
+    assert source in cast(TextContent, result.content[0]).text
+
+
+async def test_invoke_tool_bounds_the_handler_with_the_state_settings() -> None:
+    async def never_finish(_state: MCPServerState, _request: object) -> object:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    spec = replace(_get_spec("kitaru_docs_search"), run=never_finish)
+    request = _get_request(spec, {"query": "matrix"})
+    state = MCPServerState(MCPSettings(handler_timeout=0.01))
+
+    result = await invoke_tool(spec, state, request)
+
+    assert cast(dict[str, Any], result.structured_content)["error"]["code"] == (
+        "timeout"
+    )
+
+
+async def test_invoke_tool_raises_host_errors_and_logs_others_by_type_only(
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    calls: list[tuple[object, object]] = []
+    raised: list[Exception] = []
 
-    async def record(
-        _context: object, _request: object, result_type: object, handler: object
-    ) -> None:
-        calls.append((result_type, handler))
+    async def fail(_state: MCPServerState, _request: object) -> object:
+        raise raised[-1]
 
-    monkeypatch.setattr(registry, "_invoke", record)
-    for spec in TOOL_SPECS:
-        await spec.handler(cast(Any, None), cast(Any, None))
-        [(result_type, handler)] = calls
-        calls.clear()
-        assert handler is spec.run, spec.name
-        assert result_type is inspect.signature(spec.handler).return_annotation
+    spec = replace(_get_spec("kitaru_docs_search"), run=fail)
+    request = _get_request(spec, {"query": "matrix"})
+    state = MCPServerState(MCPSettings())
+    caplog.set_level(logging.DEBUG, logger="kitaru.mcp.registry")
+
+    raised.append(_HostError("handled by the host"))
+    with pytest.raises(_HostError):
+        await invoke_tool(spec, state, request, passthrough=(_HostError,))
+    raised.append(RuntimeError("backend echoed sk-unmasked-secret"))
+    result = await invoke_tool(spec, state, request, passthrough=(_HostError,))
+
+    assert result.is_error is True
+    assert "RuntimeError" in caplog.text
+    assert "sk-unmasked-secret" not in caplog.text
 
 
 SERVERLESS_REQUESTS = {
@@ -167,8 +232,7 @@ async def test_tools_marked_as_needing_no_server_run_without_a_client() -> None:
 
     assert {spec.name for spec in serverless} == set(SERVERLESS_REQUESTS)
     for spec in serverless:
-        request_type = inspect.signature(spec.handler).parameters["request"]
-        request = request_type.annotation.model_validate(SERVERLESS_REQUESTS[spec.name])
+        request = _get_request(spec, SERVERLESS_REQUESTS[spec.name])
         assert await spec.run(state, request) is not None
 
 

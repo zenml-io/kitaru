@@ -59,7 +59,12 @@ def server_context_for(
 def request_adapter_for(name: str) -> TypeAdapter[Any]:
     """Return a validator for the request payload a named tool accepts."""
     spec = next(candidate for candidate in TOOL_SPECS if candidate.name == name)
-    return TypeAdapter(typing.get_type_hints(spec.handler)["request"])
+    # Validate and draw from the bare union, without the discriminator the
+    # request annotation adds.
+    request_type = spec.request_type
+    if typing.get_origin(request_type) is typing.Annotated:
+        request_type = typing.get_args(request_type)[0]
+    return TypeAdapter(request_type)
 
 
 def call(server: Any, context: Any, name: str, request: object) -> CallToolResult:
