@@ -1,0 +1,1 @@
+- `kitaru.mcp.registry.register_tools` is deprecated and warns; tools it adds show refused inputs in their argument errors. Create the server with `MCPServer(tools=build_tools(mode))` instead.

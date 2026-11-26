@@ -13,8 +13,9 @@
 #  permissions and limitations under the License.
 """Connection read and management tool contracts."""
 
+import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -22,6 +23,7 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult
 from mcp_fakes import build_server_context
+from pydantic import ValidationError
 
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.connection import (
@@ -199,8 +201,15 @@ async def test_connection_management_uses_only_typed_sdk_mutations() -> None:
         calls.append(("update", request))
         return SimpleNamespace()
 
+    existing = _get_connection("langfuse-prod", connection_id=connection_id)
+
+    async def get(_connection_id: uuid.UUID) -> object:
+        return existing
+
     state = _get_state(
-        SimpleNamespace(connections=SimpleNamespace(create=create, update=update))
+        SimpleNamespace(
+            connections=SimpleNamespace(create=create, update=update, get=get)
+        )
     )
     await handle_connections_manage(
         state,
@@ -220,6 +229,7 @@ async def test_connection_management_uses_only_typed_sdk_mutations() -> None:
             operation="update",
             connection_id=connection_id,
             secrets={"LANGFUSE_SECRET_KEY": "sk-rotated"},
+            expected_updated=existing.updated,
         ),
     )
     await handle_connections_manage(
@@ -291,15 +301,18 @@ def _get_legacy_client(
         "AWS_REGION": "eu",
     }
     stored = _get_connection("legacy").model_copy(update={"env": env})
+    # Tests replace `client.stored` to change the connection behind a caller.
+    client = SimpleNamespace(stored=stored)
 
     async def get(_connection_id: uuid.UUID) -> Any:
-        return stored
+        return client.stored
 
     async def update(_connection_id: uuid.UUID, request: Any) -> Any:
         sent.append(request)
-        return stored
+        return client.stored
 
-    return stored, SimpleNamespace(connections=SimpleNamespace(get=get, update=update))
+    client.connections = SimpleNamespace(get=get, update=update)
+    return stored, client
 
 
 def _structured(result: object) -> dict[str, Any]:
@@ -317,7 +330,11 @@ async def test_update_sending_back_the_read_env_keeps_the_masked_values() -> Non
         context,
     )
     env = {**_structured(read)["data"]["env"], "AWS_REGION": "us"}
-    request = {"operation": "update", "connection_id": str(stored.id)}
+    request = {
+        "operation": "update",
+        "connection_id": str(stored.id),
+        "expected_updated": _structured(read)["data"]["updated"],
+    }
 
     updated = await server.call_tool(
         "kitaru_connections_manage", {"request": {**request, "env": env}}, context
@@ -344,7 +361,11 @@ async def test_update_refuses_any_credential_value_but_the_masked_one() -> None:
     sent: list[ConnectionUpdateRequest] = []
     stored, client = _get_legacy_client(sent)
     server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
-    request = {"operation": "update", "connection_id": str(stored.id)}
+    request = {
+        "operation": "update",
+        "connection_id": str(stored.id),
+        "expected_updated": stored.updated.isoformat(),
+    }
 
     with pytest.raises(ToolError) as plaintext:
         await server.call_tool(
@@ -373,7 +394,11 @@ async def test_update_refuses_a_masked_secret_value() -> None:
     stored, client = _get_legacy_client(sent)
     server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
     secrets = {"LANGFUSE_SECRET_KEY": "***", "HF_TOKEN": "hf-planted"}
-    request = {"operation": "update", "connection_id": str(stored.id)}
+    request = {
+        "operation": "update",
+        "connection_id": str(stored.id),
+        "expected_updated": stored.updated.isoformat(),
+    }
 
     with pytest.raises(ToolError) as refused:
         await server.call_tool(
@@ -408,6 +433,193 @@ async def test_update_built_without_validation_still_refuses_a_credential() -> N
     assert "OPENAI_API_KEY" in error["message"]
 
 
+@pytest.mark.parametrize(
+    ("secrets", "remove", "refused"),
+    [
+        # `secrets` replaces every stored secret, so leaving one out deletes it.
+        ({"NEW_KEY": "new-planted"}, None, "LANGFUSE_SECRET_KEY"),
+        ({"NEW_KEY": "new-planted"}, ["LANGFUSE_SECRET_KEY"], None),
+        ({}, ["LANGFUSE_SECRET_KEY"], None),
+        # A retried removal names a secret already gone; it changes nothing.
+        ({"LANGFUSE_SECRET_KEY": "kept-planted"}, ["GONE_KEY"], None),
+        # A mistyped removal leaves the stored secret uncovered.
+        ({"NEW_KEY": "new-planted"}, ["LANGFUSE_SECRET_KY"], "LANGFUSE_SECRET_KEY"),
+    ],
+    ids=[
+        "drops-a-stored-secret",
+        "removes-on-purpose",
+        "deletes-all",
+        "already-gone",
+        "typo",
+    ],
+)
+async def test_update_deletes_a_stored_secret_only_when_asked(
+    secrets: dict[str, str], remove: list[str] | None, refused: str | None
+) -> None:
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    request: dict[str, object] = {
+        "operation": "update",
+        "connection_id": str(stored.id),
+        "secrets": secrets,
+        "expected_updated": stored.updated.isoformat(),
+    }
+    if remove is not None:
+        request["remove_secrets"] = remove
+
+    result = await server.call_tool(
+        "kitaru_connections_manage", {"request": request}, context
+    )
+
+    body = _structured(result)
+    if refused is None:
+        [update_request] = sent
+        assert body["ok"] is True
+        assert update_request.secrets is not None
+        assert set(update_request.secrets) == set(secrets)
+        return
+    assert sent == []
+    assert body["error"]["code"] == "invalid_arguments"
+    assert refused in body["error"]["message"]
+    assert "planted" not in json.dumps(body)
+
+
+@pytest.mark.parametrize(
+    "request_body",
+    [
+        {"secrets": {"HF_TOKEN": "hf-planted"}, "remove_secrets": ["HF_TOKEN"]},
+        {"remove_secrets": ["HF_TOKEN"], "default": True},
+    ],
+    ids=["sent-and-removed", "removed-without-secrets"],
+)
+async def test_update_refuses_contradictory_secret_removals(
+    request_body: dict[str, object],
+) -> None:
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    request = {
+        "operation": "update",
+        "connection_id": str(stored.id),
+        "expected_updated": stored.updated.isoformat(),
+    }
+
+    with pytest.raises(ToolError) as refused:
+        await server.call_tool(
+            "kitaru_connections_manage",
+            {"request": {**request, **request_body}},
+            context,
+        )
+
+    assert sent == []
+    assert "HF_TOKEN" in str(refused.value)
+    assert "hf-planted" not in str(refused.value)
+
+
+async def test_update_refuses_a_connection_changed_since_it_was_read() -> None:
+    """An update built on a read older than an `env` change is refused."""
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    read = await server.call_tool(
+        "kitaru_connection_read",
+        {"request": {"operation": "get", "reference": str(stored.id)}},
+        context,
+    )
+    shown = _structured(read)["data"]
+    client.stored = stored.model_copy(
+        update={"updated": stored.updated + timedelta(seconds=1)}
+    )
+    request = {
+        "operation": "update",
+        "connection_id": str(stored.id),
+        "env": {**shown["env"], "AWS_REGION": "us"},
+    }
+
+    stale = await server.call_tool(
+        "kitaru_connections_manage",
+        {"request": {**request, "expected_updated": shown["updated"]}},
+        context,
+    )
+    with pytest.raises(ToolError) as unguarded:
+        await server.call_tool(
+            "kitaru_connections_manage", {"request": request}, context
+        )
+
+    assert sent == []
+    error = _structured(stale)["error"]
+    assert error["code"] == "conflict"
+    assert "kitaru_connection_read" in error["recovery"]
+    assert "expected_updated" in str(unguarded.value)
+
+
+async def test_a_default_only_update_honors_a_supplied_expected_updated() -> None:
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    stale = (stored.updated - timedelta(seconds=1)).isoformat()
+    request = {"operation": "update", "connection_id": str(stored.id), "default": True}
+
+    refused = await server.call_tool(
+        "kitaru_connections_manage",
+        {"request": {**request, "expected_updated": stale}},
+        context,
+    )
+    unguarded = await server.call_tool(
+        "kitaru_connections_manage", {"request": request}, context
+    )
+
+    assert _structured(refused)["error"]["code"] == "conflict"
+    assert _structured(unguarded)["ok"] is True
+    assert len(sent) == 1
+
+
+_SECRET = "zq9x"
+_UPDATE = {"operation": "update", "connection_id": str(uuid.UUID(int=1))}
+_SEEN = {"expected_updated": "2026-04-01T12:00:00Z"}
+
+
+# A refused argument's error shows the start and the end of its input, so each
+# case puts the short secret at one of the two.
+@pytest.mark.parametrize(
+    "request_body",
+    [
+        {**_UPDATE, **_SEEN, "default": None, "secrets": {"K": _SECRET}},
+        {"secrets": {"K": _SECRET}, **_UPDATE, **_SEEN, "default": None},
+        {**_UPDATE, "env": None, "secrets": {"K": _SECRET}},
+        {"operation": "create", "name": "", "provider": "p", "secrets": {"K": _SECRET}},
+        {"operation": "create", "name": "n", "provider": "p", "secrets": {"K": 98761}},
+    ],
+    ids=["null-default", "secrets-first", "null-env", "blank-name", "int-secret"],
+)
+async def test_refused_arguments_never_echo_a_secret_value(
+    request_body: dict[str, object],
+) -> None:
+    server, context = build_server_context(
+        SimpleNamespace(), mode=CapabilityMode.STANDARD
+    )
+
+    with pytest.raises(ToolError) as refused:
+        await server.call_tool(
+            "kitaru_connections_manage", {"request": request_body}, context
+        )
+
+    assert _SECRET not in str(refused.value)
+    assert "98761" not in str(refused.value)
+
+
+def test_an_update_without_expected_updated_never_echoes_its_secrets() -> None:
+    """Validated directly, as a host's secret page does, outside the tool."""
+    with pytest.raises(ValidationError) as refused:
+        ConnectionUpdate.model_validate(
+            {**_UPDATE, "secrets": {"K": _SECRET}, "default": True}
+        )
+
+    assert "expected_updated" in str(refused.value)
+    assert _SECRET not in str(refused.value)
+
+
 # One rule decides both what `env` refuses on write and what reads mask.
 CREDENTIAL_NAMES = [
     ("OPENAI_API_KEY", True),
@@ -439,6 +651,12 @@ CREDENTIAL_NAMES = [
     ("MAX_COMPLETION_TOKENS", False),
     ("max_new_tokens", False),
     ("prompt_tokens", False),
+    # Token usage fields: a stored count is a string of digits, shown like a number.
+    ("input_tokens", False),
+    ("output_tokens", False),
+    ("cached_input_tokens", False),
+    ("cache_write_input_tokens", False),
+    ("reasoning_tokens", False),
     ("secret_keys", False),
     ("TOKENIZER_NAME", False),
     ("AWS_WEB_IDENTITY_TOKEN_FILE", False),

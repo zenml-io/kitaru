@@ -5,16 +5,18 @@
 
 import inspect
 import logging
+import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import cache
 from typing import Any, cast
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
+from mcp.server.mcpserver.tools import Tool
 from mcp.types import CallToolResult, ToolAnnotations
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, create_model
 
-from kitaru.api_models.v1.base import JsonValue
 from kitaru.mcp.apps import FAILURE_MATRIX_URI, SESSION_VIEWER_URI, ui_meta
 from kitaru.mcp.errors import (
     MCPOutputValidationError,
@@ -74,7 +76,7 @@ from kitaru.mcp.models.workflows import (
     WorkflowCancelRequest,
     WorkflowStartRequest,
 )
-from kitaru.mcp.redaction import redact_data
+from kitaru.mcp.redaction import to_json_data
 from kitaru.mcp.settings import CapabilityMode
 from kitaru.mcp.tools.activity import handle_activity_read
 from kitaru.mcp.tools.analyzers import handle_analyzers_manage
@@ -137,6 +139,40 @@ class ToolSpec:
     meta: dict[str, Any] | None = None
     needs_server: bool = True
 
+    def validate_request(self, request: object) -> Any:
+        """Validate a raw `request` argument into `request_type`.
+
+        Validation is the same as the MCP server's: its errors name each
+        refused field, under `request`, and never show the refused input.
+
+        Args:
+            request: The tool call's `request` argument, as sent.
+
+        Returns:
+            The request, an instance of `request_type`.
+
+        Raises:
+            ValidationError: The request is invalid.
+        """
+        arguments = _get_arguments_model(self.request_type)
+        return arguments.model_validate({"request": request}).request
+
+
+# Argument errors never show the refused input, which can be a secret the
+# caller sent; each error still names its field.
+_HIDDEN_INPUT = ConfigDict(hide_input_in_errors=True)
+
+
+class _ToolArguments(BaseModel):
+    model_config = _HIDDEN_INPUT
+
+    request: Any
+
+
+@cache
+def _get_arguments_model(request_type: Any) -> type[_ToolArguments]:
+    return create_model("ToolArguments", __base__=_ToolArguments, request=request_type)
+
 
 async def invoke_tool(
     spec: ToolSpec,
@@ -150,10 +186,11 @@ async def invoke_tool(
     `spec.run` runs through `state.execute`, so the state's settings bound its
     time and concurrency. Its data is redacted, unless it returns a
     `ToolSuccessPayload` with `redact=False`, and wrapped in the tool's result
-    envelope. A failure becomes an error envelope, and its message is never
-    logged, since a backend's message can echo a secret in a shape no
-    redaction pattern knows: the log has the failure's type, or, for a result
-    that fails validation, the locations of the invalid fields.
+    envelope; warnings, links, and text are redacted either way. A failure
+    becomes an error envelope, and its message is never logged, since a
+    backend's message can echo a secret in a shape no redaction pattern knows:
+    the log has the failure's type, or, for a result that fails validation, the
+    locations of the invalid fields.
 
     Args:
         spec: The tool.
@@ -171,18 +208,15 @@ async def invoke_tool(
         data = await state.execute(lambda: spec.run(state, request))
         if isinstance(data, ToolSuccessPayload):
             redacting = data.redact
-            json_data = (
-                redact_data(data.data) if redacting else cast(JsonValue, data.data)
-            )
             envelope = success_result(
                 spec.result_type,
-                json_data,
+                to_json_data(data.data),
                 warnings=data.warnings,
                 links=data.links,
             )
             text = data.text
         else:
-            envelope = success_result(spec.result_type, redact_data(data))
+            envelope = success_result(spec.result_type, to_json_data(data))
     except passthrough:
         raise
     # Handlers marshal their own request payloads and raise `MCPToolError` when a
@@ -546,8 +580,44 @@ def get_tool_specs(mode: CapabilityMode) -> tuple[ToolSpec, ...]:
     return tuple(spec for spec in TOOL_SPECS if spec.minimum_mode.rank <= mode.rank)
 
 
+def build_tools(mode: CapabilityMode) -> list[Tool]:
+    """Build the public tools the mode permits, through SDK v2 public APIs.
+
+    Their argument errors never show the refused input, which can be a secret
+    the caller sent; each still names its field.
+    """
+    tools = []
+    for spec in get_tool_specs(mode):
+        tool = Tool.from_function(
+            _get_tool_function(spec),
+            name=spec.name,
+            description=spec.description,
+            annotations=spec.annotations,
+            structured_output=True,
+            meta=spec.meta,
+        )
+        # The SDK validates arguments, and renders their errors, with the
+        # arguments model it builds for the tool; no public API configures that
+        # model, so the setting `ToolSpec.validate_request` uses goes on it here.
+        model = tool.fn_metadata.arg_model
+        model.model_config = ConfigDict(**{**model.model_config, **_HIDDEN_INPUT})
+        model.model_rebuild(force=True)
+        tools.append(tool)
+    return tools
+
+
 def register_tools(server: MCPServer[Any], mode: CapabilityMode) -> None:
-    """Register the filtered public surface through SDK v2 public APIs."""
+    """Add the public tools the mode permits to an existing server.
+
+    Deprecated: tools added this way show refused inputs in their argument
+    errors. Create the server with `MCPServer(tools=build_tools(mode))`.
+    """
+    warnings.warn(
+        "register_tools is deprecated; create the server with "
+        "MCPServer(tools=build_tools(mode)), whose tools hide refused inputs.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     for spec in get_tool_specs(mode):
         server.add_tool(
             _get_tool_function(spec),
