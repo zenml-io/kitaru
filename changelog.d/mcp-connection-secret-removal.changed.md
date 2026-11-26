@@ -1,0 +1,1 @@
+- `kitaru_connections_manage` now refuses a connection update whose `secrets` leaves out a stored secret, which the update would have deleted. Name each stored secret to delete in the new `remove_secrets` field; `secrets: {}` with every stored name there deletes them all.

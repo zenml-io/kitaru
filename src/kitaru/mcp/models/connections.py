@@ -143,7 +143,14 @@ class ConnectionUpdate(MCPModel):
         default=None,
         description="Replaces every stored secret. Stored values cannot be read "
         "back, so send every secret the connection should keep, not only new "
-        "ones.",
+        "ones, and name each stored secret to delete in `remove_secrets`; an "
+        "update that would drop a stored secret otherwise is refused.",
+    )
+    remove_secrets: list[str] | None = Field(
+        default=None,
+        description="Names of stored secrets this update deletes on purpose; "
+        "goes with `secrets`. `secrets: {}` with every stored name here deletes "
+        "them all.",
     )
     default: bool | None = None
 
@@ -154,6 +161,17 @@ class ConnectionUpdate(MCPModel):
                 raise ValueError(f"{field} cannot be null")
         if not {"env", "secrets", "default"} & self.model_fields_set:
             raise ValueError("connection update must change at least one field")
+        removed = self.remove_secrets or []
+        if removed and self.secrets is None:
+            _refuse_keys(
+                removed,
+                "is listed in `remove_secrets`, which goes with `secrets`: send "
+                "every stored secret to keep in `secrets`.",
+            )
+        if both := sorted(set(removed) & set(self.secrets or {})):
+            _refuse_keys(
+                both, "is both sent in `secrets` and listed in `remove_secrets`."
+            )
         return self
 
 

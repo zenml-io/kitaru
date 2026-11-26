@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Connection read and management tool contracts."""
 
+import json
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -199,8 +200,13 @@ async def test_connection_management_uses_only_typed_sdk_mutations() -> None:
         calls.append(("update", request))
         return SimpleNamespace()
 
+    async def get(_connection_id: uuid.UUID) -> object:
+        return _get_connection("langfuse-prod", connection_id=connection_id)
+
     state = _get_state(
-        SimpleNamespace(connections=SimpleNamespace(create=create, update=update))
+        SimpleNamespace(
+            connections=SimpleNamespace(create=create, update=update, get=get)
+        )
     )
     await handle_connections_manage(
         state,
@@ -406,6 +412,76 @@ async def test_update_built_without_validation_still_refuses_a_credential() -> N
     error = _structured(result)["error"]
     assert error["code"] == "invalid_arguments"
     assert "OPENAI_API_KEY" in error["message"]
+
+
+@pytest.mark.parametrize(
+    ("secrets", "remove", "refused"),
+    [
+        # `secrets` replaces every stored secret, so leaving one out deletes it.
+        ({"NEW_KEY": "new-planted"}, None, "LANGFUSE_SECRET_KEY"),
+        ({"NEW_KEY": "new-planted"}, ["LANGFUSE_SECRET_KEY"], None),
+        ({}, ["LANGFUSE_SECRET_KEY"], None),
+        ({"LANGFUSE_SECRET_KEY": "kept-planted"}, ["GONE_KEY"], "GONE_KEY"),
+    ],
+    ids=["drops-a-stored-secret", "removes-on-purpose", "deletes-all", "unknown"],
+)
+async def test_update_deletes_a_stored_secret_only_when_asked(
+    secrets: dict[str, str], remove: list[str] | None, refused: str | None
+) -> None:
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    request: dict[str, object] = {
+        "operation": "update",
+        "connection_id": str(stored.id),
+        "secrets": secrets,
+    }
+    if remove is not None:
+        request["remove_secrets"] = remove
+
+    result = await server.call_tool(
+        "kitaru_connections_manage", {"request": request}, context
+    )
+
+    body = _structured(result)
+    if refused is None:
+        [update_request] = sent
+        assert body["ok"] is True
+        assert update_request.secrets is not None
+        assert set(update_request.secrets) == set(secrets)
+        return
+    assert sent == []
+    assert body["error"]["code"] == "invalid_arguments"
+    assert refused in body["error"]["message"]
+    assert "planted" not in json.dumps(body)
+
+
+@pytest.mark.parametrize(
+    "request_body",
+    [
+        {"secrets": {"HF_TOKEN": "hf-planted"}, "remove_secrets": ["HF_TOKEN"]},
+        {"remove_secrets": ["HF_TOKEN"], "default": True},
+    ],
+    ids=["sent-and-removed", "removed-without-secrets"],
+)
+async def test_update_refuses_contradictory_secret_removals(
+    request_body: dict[str, object],
+) -> None:
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    request = {"operation": "update", "connection_id": str(stored.id)}
+
+    with pytest.raises(ToolError) as refused:
+        await server.call_tool(
+            "kitaru_connections_manage",
+            {"request": {**request, **request_body}},
+            context,
+        )
+
+    assert sent == []
+    assert "HF_TOKEN" in str(refused.value)
+    assert "hf-planted" not in str(refused.value)
 
 
 # One rule decides both what `env` refuses on write and what reads mask.

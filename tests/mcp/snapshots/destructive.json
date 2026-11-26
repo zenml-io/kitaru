@@ -17603,6 +17603,22 @@
               "title": "Operation",
               "type": "string"
             },
+            "remove_secrets": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Names of stored secrets this update deletes on purpose; goes with `secrets`. `secrets: {}` with every stored name here deletes them all.",
+              "title": "Remove Secrets"
+            },
             "secrets": {
               "anyOf": [
                 {
@@ -17618,7 +17634,7 @@
                 }
               ],
               "default": null,
-              "description": "Replaces every stored secret. Stored values cannot be read back, so send every secret the connection should keep, not only new ones.",
+              "description": "Replaces every stored secret. Stored values cannot be read back, so send every secret the connection should keep, not only new ones, and name each stored secret to delete in `remove_secrets`; an update that would drop a stored secret otherwise is refused.",
               "title": "Secrets"
             }
           },

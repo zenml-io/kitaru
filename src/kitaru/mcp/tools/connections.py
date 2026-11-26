@@ -4,7 +4,7 @@
 """Connection read and management handlers."""
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 from kitaru.api_models.v1.connection import (
     ConnectionCreateRequest,
@@ -67,12 +67,40 @@ async def handle_connections_manage(
             values["env"] = await _restore_shown_values(
                 state, request.connection_id, request.env
             )
+        if request.secrets is not None:
+            stored = await state.client.connections.get(request.connection_id)
+            _check_dropped_secrets(
+                stored.secret_keys, request.secrets, request.remove_secrets or []
+            )
         return await state.client.connections.update(
             request.connection_id, ConnectionUpdateRequest.model_validate(values)
         )
     return await state.client.connections.update(
         request.connection_id, ConnectionUpdateRequest(default=True)
     )
+
+
+def _check_dropped_secrets(
+    stored: Iterable[str], sent: Mapping[str, object], removed: Iterable[str]
+) -> None:
+    """Refuse an update whose `secrets` would delete a stored secret unasked."""
+    stored, removed = set(stored), set(removed)
+    if unknown := sorted(removed - stored):
+        raise MCPToolError(
+            "invalid_arguments",
+            f"`remove_secrets` names {', '.join(unknown)}, which the connection "
+            "does not store.",
+            details={"secret_keys": sorted(stored)},
+        )
+    if dropped := sorted(stored - set(sent) - removed):
+        raise MCPToolError(
+            "invalid_arguments",
+            "`secrets` replaces every stored secret, so this update would delete "
+            f"{', '.join(dropped)}.",
+            details={"secret_keys": sorted(stored)},
+            recovery="Send each of them with its value in `secrets`, or list it "
+            "in `remove_secrets` to delete it on purpose.",
+        )
 
 
 async def _restore_shown_values(
