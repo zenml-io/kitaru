@@ -19,9 +19,16 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult
+from mcp_fakes import build_server_context
 
 from kitaru.api_models.v1.base import Page
-from kitaru.api_models.v1.connection import ConnectionListParams, ConnectionResponse
+from kitaru.api_models.v1.connection import (
+    ConnectionListParams,
+    ConnectionResponse,
+    ConnectionUpdateRequest,
+)
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.common import PageData
@@ -33,7 +40,8 @@ from kitaru.mcp.models.connections import (
     ConnectionUpdate,
 )
 from kitaru.mcp.references import ReferenceResolutionError
-from kitaru.mcp.settings import MCPSettings
+from kitaru.mcp.registry import TOOL_SPECS, invoke_tool
+from kitaru.mcp.settings import CapabilityMode, MCPSettings
 from kitaru.mcp.tools.connections import (
     handle_connection_read,
     handle_connections_manage,
@@ -245,3 +253,226 @@ async def test_connection_update_rejects_explicit_nulls() -> None:
         ConnectionUpdate(
             operation="update", connection_id=uuid.uuid4(), env=cast(Any, None)
         )
+
+
+async def test_credential_env_keys_are_refused_without_echoing_values() -> None:
+    """A key that names a credential belongs in `secrets`, never in `env`."""
+    server, context = build_server_context(
+        SimpleNamespace(), mode=CapabilityMode.STANDARD
+    )
+    env = {
+        "OPENAI_API_KEY": "sk-planted-value",
+        "awsSecretAccessKey": "planted-camel-value",
+        "HFToken": "planted-acronym-value",
+        "MAX_TOKENS": "4096",
+    }
+    request = {"operation": "create", "name": "openai", "provider": "openai"}
+
+    with pytest.raises(ToolError) as refused:
+        await server.call_tool(
+            "kitaru_connections_manage", {"request": {**request, "env": env}}, context
+        )
+
+    message = str(refused.value)
+    for name in ("OPENAI_API_KEY", "awsSecretAccessKey", "HFToken"):
+        assert name in message
+    assert "MAX_TOKENS" not in message
+    assert "secrets" in message
+    assert "planted" not in message
+
+
+def _get_legacy_client(
+    sent: list[ConnectionUpdateRequest],
+) -> tuple[ConnectionResponse, SimpleNamespace]:
+    """A connection made before `env` refused credentials, holding one there."""
+    env = {
+        "OPENAI_API_KEY": "sk-legacy",
+        "OTEL_HEADERS": "Authorization=Bearer abc123def",
+        "AWS_REGION": "eu",
+    }
+    stored = _get_connection("legacy").model_copy(update={"env": env})
+
+    async def get(_connection_id: uuid.UUID) -> Any:
+        return stored
+
+    async def update(_connection_id: uuid.UUID, request: Any) -> Any:
+        sent.append(request)
+        return stored
+
+    return stored, SimpleNamespace(connections=SimpleNamespace(get=get, update=update))
+
+
+def _structured(result: object) -> dict[str, Any]:
+    return cast(dict[str, Any], cast(CallToolResult, result).structured_content)
+
+
+async def test_update_sending_back_the_read_env_keeps_the_masked_values() -> None:
+    """An agent edits the `env` it read; every value the read masked stays stored."""
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    read = await server.call_tool(
+        "kitaru_connection_read",
+        {"request": {"operation": "get", "reference": str(stored.id)}},
+        context,
+    )
+    env = {**_structured(read)["data"]["env"], "AWS_REGION": "us"}
+    request = {"operation": "update", "connection_id": str(stored.id)}
+
+    updated = await server.call_tool(
+        "kitaru_connections_manage", {"request": {**request, "env": env}}, context
+    )
+    # A masked form that is not what the read showed for this key is a new value.
+    await server.call_tool(
+        "kitaru_connections_manage",
+        {"request": {**request, "env": {**env, "OTEL_HEADERS": "KITKEY_***"}}},
+        context,
+    )
+
+    kept, changed = sent
+    assert env["OPENAI_API_KEY"] == "***"
+    assert env["OTEL_HEADERS"] == "Authorization=Bearer ***"
+    assert _structured(updated)["ok"] is True
+    assert kept.env == {**stored.env, "AWS_REGION": "us"}
+    assert "secrets" not in kept.model_fields_set
+    assert changed.env is not None
+    assert changed.env["OTEL_HEADERS"] == "KITKEY_***"
+
+
+async def test_update_refuses_any_credential_value_but_the_masked_one() -> None:
+    """A plaintext credential never enters `env`, even the stored one."""
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    request = {"operation": "update", "connection_id": str(stored.id)}
+
+    with pytest.raises(ToolError) as plaintext:
+        await server.call_tool(
+            "kitaru_connections_manage",
+            {"request": {**request, "env": {"OPENAI_API_KEY": "sk-legacy"}}},
+            context,
+        )
+    unknown = await server.call_tool(
+        "kitaru_connections_manage",
+        {"request": {**request, "env": {"HF_TOKEN": "***"}}},
+        context,
+    )
+
+    assert sent == []
+    assert "OPENAI_API_KEY" in str(plaintext.value)
+    assert "sk-legacy" not in str(plaintext.value)
+    assert "replaces every stored secret" in str(plaintext.value)
+    refusal = _structured(unknown)["error"]
+    assert refusal["code"] == "invalid_arguments"
+    assert "HF_TOKEN" in refusal["message"]
+
+
+async def test_update_refuses_a_masked_secret_value() -> None:
+    """`***` cannot keep a stored secret: `secrets` replaces all of them."""
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    secrets = {"LANGFUSE_SECRET_KEY": "***", "HF_TOKEN": "hf-planted"}
+    request = {"operation": "update", "connection_id": str(stored.id)}
+
+    with pytest.raises(ToolError) as refused:
+        await server.call_tool(
+            "kitaru_connections_manage",
+            {"request": {**request, "secrets": secrets}},
+            context,
+        )
+
+    assert sent == []
+    assert "LANGFUSE_SECRET_KEY" in str(refused.value)
+    assert "send every value" in str(refused.value)
+    assert "hf-planted" not in str(refused.value)
+
+
+async def test_update_built_without_validation_still_refuses_a_credential() -> None:
+    """A host that skips validation gets a refusal, not a silent keep."""
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    spec = next(spec for spec in TOOL_SPECS if spec.name == "kitaru_connections_manage")
+    request = ConnectionUpdate.model_construct(
+        operation="update",
+        connection_id=stored.id,
+        env={"OPENAI_API_KEY": "sk-new-value"},
+    )
+    state = MCPServerState(MCPSettings(), cast(Any, client))
+
+    result = await invoke_tool(spec, state, request)
+
+    assert sent == []
+    error = _structured(result)["error"]
+    assert error["code"] == "invalid_arguments"
+    assert "OPENAI_API_KEY" in error["message"]
+
+
+# One rule decides both what `env` refuses on write and what reads mask.
+CREDENTIAL_NAMES = [
+    ("OPENAI_API_KEY", True),
+    ("HF_TOKEN", True),
+    ("HFToken", True),
+    ("DB_PASSWORD", True),
+    ("PGPASSWORD", True),
+    ("PASSPHRASE", True),
+    ("AUTHORIZATION", True),
+    ("SIGNING_KEY", True),
+    ("ENCRYPTION_KEY", True),
+    ("SECRETS", True),
+    ("API_KEY1", True),
+    ("TOKEN1", True),
+    ("AWS_SECRET_ACCESS_KEY", True),
+    ("awsSecretAccessKey", True),
+    ("GOOGLE_APPLICATION_CREDENTIALS", True),
+    ("GITHUB_TOKENS", True),
+    ("oauth_tokens", True),
+    ("session_tokens", True),
+    ("new_tokens", True),
+    ("SIGNING_KEYS", True),
+    ("ENCRYPTION_KEYS", True),
+    ("AUTH_KEYS", True),
+    ("PASSPHRASES", True),
+    ("MAX_TOKENS", False),
+    ("HTTPMaxTokens", False),
+    ("MAX_NEW_TOKENS", False),
+    ("MAX_COMPLETION_TOKENS", False),
+    ("max_new_tokens", False),
+    ("prompt_tokens", False),
+    ("secret_keys", False),
+    ("TOKENIZER_NAME", False),
+    ("AWS_WEB_IDENTITY_TOKEN_FILE", False),
+    ("LANGFUSE_PUBLIC_KEY", False),
+    ("LANGFUSE_BASE_URL", False),
+]
+
+
+@pytest.mark.parametrize(("name", "credential"), CREDENTIAL_NAMES)
+async def test_env_refuses_on_write_exactly_what_reads_mask(
+    name: str, credential: bool
+) -> None:
+    stored = _get_connection("c").model_copy(update={"env": {name: "4096"}})
+    created: list[object] = []
+
+    async def create(request: object, idempotency_key: str | None = None) -> Any:
+        created.append(request)
+        return stored
+
+    async def get(_connection_id: uuid.UUID) -> Any:
+        return stored
+
+    client = SimpleNamespace(connections=SimpleNamespace(create=create, get=get))
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    write = {"operation": "create", "name": "c", "provider": "p", "env": {name: "4096"}}
+    read = {"operation": "get", "reference": str(stored.id)}
+
+    try:
+        await server.call_tool("kitaru_connections_manage", {"request": write}, context)
+    except ToolError as refused:
+        assert name in str(refused)
+    result = await server.call_tool(
+        "kitaru_connection_read", {"request": read}, context
+    )
+
+    assert bool(created) is not credential
+    assert _structured(result)["data"]["env"][name] == ("***" if credential else "4096")

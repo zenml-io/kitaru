@@ -8666,7 +8666,7 @@
       "openWorldHint": true,
       "readOnlyHint": true
     },
-    "description": "Show where sessions first go wrong as an interactive transition matrix.\n\nRows are the last step that went right and columns the first step that went\nwrong, counted over the sessions `filter` selects (for example an agent_id or\ncohort_version_id). Pass `compare_filter`, such as a replay's\nexperiment_run_id, to compare two groups. A reviewer places a failure that\nraised no error by annotating the failing node with the value\n`{\"first_failure\": true, \"note\": \"...\"}`.",
+    "description": "Show where sessions first go wrong as an interactive transition matrix.\n\nRows are the last step that went right and columns the first step that went\nwrong, counted over the sessions `filter` selects (for example an agent_id or\ncohort_version_id). Pass `compare_filter`, such as a replay's\nexperiment_run_id, to compare two groups. A reviewer places a failure that\nraised no error by annotating the failing node with the value\n`{\"first_failure\": true, \"note\": \"...\"}`.\n\nThe result's snapshot_id lets a cell drill into exactly these sessions; it\nis null on a server that keeps no matrix in memory.",
     "inputSchema": {
       "$defs": {
         "AndFilter": {
@@ -9018,9 +9018,16 @@
               "type": "array"
             },
             "snapshot_id": {
-              "description": "Identifies the records behind this matrix.",
-              "title": "Snapshot Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Identifies the records behind this matrix. Null on a server that keeps no matrix in memory; a cell then reads the sessions again.",
+              "title": "Snapshot Id"
             },
             "state_by": {
               "enum": [
@@ -9293,7 +9300,7 @@
       "openWorldHint": true,
       "readOnlyHint": true
     },
-    "description": "List the sessions and repeated notes behind one transition matrix cell.",
+    "description": "List the sessions and repeated notes behind one transition matrix cell.\n\nOn a server that keeps no matrix in memory, the matrix has no snapshot_id\nand the cell reads the sessions again.",
     "inputSchema": {
       "$defs": {
         "AndFilter": {
@@ -9447,7 +9454,7 @@
                 }
               ],
               "default": null,
-              "description": "snapshot_id of the matrix being drilled into; without it the sessions are read again.",
+              "description": "snapshot_id of the matrix being drilled into. Without it, or on a server that keeps no matrix in memory, the sessions are read again and the counts can differ from the matrix if sessions changed since.",
               "title": "Snapshot Id"
             },
             "sources": {
@@ -9626,7 +9633,7 @@
       "required": [
         "request"
       ],
-      "title": "failure_cell_toolArguments",
+      "title": "failure_matrix_cell_toolArguments",
       "type": "object"
     },
     "name": "kitaru_failure_matrix_cell",
@@ -9881,7 +9888,7 @@
       "openWorldHint": true,
       "readOnlyHint": true
     },
-    "description": "Open one session in an interactive trace viewer where a reviewer annotates it.\n\nPass `session_id`, or `investigation_id` with `position` to review an\ninvestigation's sessions with its questions and verdicts. `viewer` picks the\npage: `default`, or a custom viewer saved as `<name>.html` in the viewers\nfolder. The result names the session; the viewer page reads its payloads\nitself. Notes, answers, and verdicts the reviewer saves in the viewer go to\nKitaru; read them back with `kitaru_review_read`.",
+    "description": "Open one session in an interactive trace viewer where a reviewer annotates it.\n\nPass `session_id`, or `investigation_id` with `position` to review an\ninvestigation's sessions with its questions and verdicts. `viewer` picks the\npage: `default`, or a named custom viewer if this server enables custom\nviewers. The result names the session; the viewer page reads its payloads\nitself. Notes, answers, and verdicts the reviewer saves in the viewer go to\nKitaru; read them back with `kitaru_review_read`.",
     "inputSchema": {
       "$defs": {
         "SessionViewRequest": {
@@ -9925,7 +9932,7 @@
             },
             "viewer": {
               "default": "default",
-              "description": "Viewer to open: `default`, or the file name without `.html` of a viewer in the viewers folder.",
+              "description": "Viewer to open: `default`, or the name of a custom viewer if this server enables custom viewers.",
               "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
               "title": "Viewer",
               "type": "string"
@@ -10239,7 +10246,7 @@
               "type": "string"
             },
             "viewer": {
-              "description": "Viewer to open: `default`, or the file name without `.html` of a viewer in the viewers folder.",
+              "description": "Viewer to open: `default`, or the name of a custom viewer if this server enables custom viewers.",
               "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
               "title": "Viewer",
               "type": "string"
@@ -10298,7 +10305,7 @@
             },
             "viewer": {
               "default": "default",
-              "description": "Viewer to open: `default`, or the file name without `.html` of a viewer in the viewers folder.",
+              "description": "Viewer to open: `default`, or the name of a custom viewer if this server enables custom viewers.",
               "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
               "title": "Viewer",
               "type": "string"
@@ -17482,6 +17489,7 @@
               "additionalProperties": {
                 "type": "string"
               },
+              "description": "Plain settings, stored unencrypted and readable by anyone who can read the connection. Keys that name credentials are refused: put those in `secrets`.",
               "title": "Env",
               "type": "object"
             },
@@ -17587,6 +17595,7 @@
                 }
               ],
               "default": null,
+              "description": "Replaces every plain setting. A value sent exactly as `kitaru_connection_read` shows it, such as `***` or `Bearer ***`, keeps the value the connection stores; leaving a key out deletes it. A key that names a credential is accepted only as `***`: put new credentials in `secrets`.",
               "title": "Env"
             },
             "operation": {
@@ -17609,6 +17618,7 @@
                 }
               ],
               "default": null,
+              "description": "Replaces every stored secret. Stored values cannot be read back, so send every secret the connection should keep, not only new ones.",
               "title": "Secrets"
             }
           },
