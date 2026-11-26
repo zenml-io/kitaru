@@ -9,8 +9,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
-from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
+from mcp.server.mcpserver.tools import Tool
 from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import ConfigDict, ValidationError
 
@@ -549,10 +549,15 @@ def get_tool_specs(mode: CapabilityMode) -> tuple[ToolSpec, ...]:
     return tuple(spec for spec in TOOL_SPECS if spec.minimum_mode.rank <= mode.rank)
 
 
-def register_tools(server: MCPServer[Any], mode: CapabilityMode) -> None:
-    """Register the filtered public surface, hiding inputs in argument errors."""
+def build_tools(mode: CapabilityMode) -> list[Tool]:
+    """Build the public tools the mode permits, through SDK v2 public APIs.
+
+    Their argument errors never show the refused input, which can be a secret
+    the caller sent; each still names its field.
+    """
+    tools = []
     for spec in get_tool_specs(mode):
-        server.add_tool(
+        tool = Tool.from_function(
             _get_tool_function(spec),
             name=spec.name,
             description=spec.description,
@@ -560,12 +565,12 @@ def register_tools(server: MCPServer[Any], mode: CapabilityMode) -> None:
             structured_output=True,
             meta=spec.meta,
         )
-    # An argument error shows each refused input, which can be a secret the
-    # caller sent. Its message comes from the arguments model the SDK builds,
-    # whose config no public API reaches, so it is set on that model here.
-    for tool in server._tool_manager.list_tools():  # noqa: SLF001
+        # The SDK renders argument errors from the arguments model it builds
+        # for the tool, so the setting goes on that model.
         model = tool.fn_metadata.arg_model
         model.model_config = ConfigDict(
             **{**model.model_config, "hide_input_in_errors": True}
         )
         model.model_rebuild(force=True)
+        tools.append(tool)
+    return tools

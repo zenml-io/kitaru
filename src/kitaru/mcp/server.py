@@ -20,7 +20,7 @@ from kitaru.mcp.connection import MCPConnection
 from kitaru.mcp.connection import resolve_connection as resolve_fixed_connection
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.redaction import redact
-from kitaru.mcp.registry import register_tools
+from kitaru.mcp.registry import build_tools
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
 
 ClientFactory = Callable[[], KitaruAPIClient]
@@ -54,16 +54,15 @@ def create_server(
         finally:
             await state.close()
 
-    server = MCPServer[MCPServerState](
+    return MCPServer[MCPServerState](
         "kitaru",
         description="Bounded typed access to Kitaru v2.",
         debug=settings.debug,
         log_level="DEBUG" if settings.debug else "WARNING",
         lifespan=lifespan,
         extensions=[build_apps_extension()],
+        tools=build_tools(settings.mode),
     )
-    register_tools(server, settings.mode)
-    return server
 
 
 async def run_stdio(settings: MCPSettings) -> None:
