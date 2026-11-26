@@ -125,17 +125,23 @@ async def handle_failure_cell(
             recovery="Pass the same compare_filter the matrix was built with.",
         )
     # A matrix built before a key rotation tagged its redacted labels with an
-    # earlier key, so an empty cell is looked up again with each of those.
-    for label_key in _get_label_keys(state.settings):
-        cell = cell_details(
+    # earlier key, so a cell no session matched is looked up again with each of
+    # those; a cell matches when it has sessions or counts attempts.
+    cells = (
+        cell_details(
             _analyze(request, records, label_key)[index].outcomes,
             (request.from_state, request.to_state),
             request.sources,
             request.limit,
         )
-        if cell.total:
-            break
-    return cell
+        for label_key in _get_label_keys(state.settings)
+    )
+    current = next(cells)
+    if current.total or current.attempts is not None:
+        return current
+    return next(
+        (cell for cell in cells if cell.total or cell.attempts is not None), current
+    )
 
 
 @dataclass(frozen=True, slots=True)
