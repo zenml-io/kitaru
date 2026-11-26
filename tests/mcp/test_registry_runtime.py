@@ -12,8 +12,9 @@ from typing import Any, cast
 
 import pytest
 from jsonschema import Draft202012Validator
+from mcp.server import MCPServer
 from mcp.types import TextContent
-from pydantic import Field, TypeAdapter
+from pydantic import Field, TypeAdapter, ValidationError
 from scripts.report_mcp_schema import (
     MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES,
     MAX_MODEL_TOOLS,
@@ -23,6 +24,7 @@ from scripts.report_mcp_schema import (
 from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.session import SessionDetailResponse, SessionResponse
 from kitaru.api_models.v1.tag import TagResponse
+from kitaru.mcp import registry
 from kitaru.mcp.apps import is_model_visible
 from kitaru.mcp.errors import (
     MCPToolError,
@@ -40,7 +42,7 @@ from kitaru.mcp.models.common import (
     ToolResult,
     ToolSuccessPayload,
 )
-from kitaru.mcp.registry import TOOL_SPECS, ToolSpec, invoke_tool
+from kitaru.mcp.registry import TOOL_SPECS, ToolSpec, get_tool_specs, invoke_tool
 from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
 
@@ -209,6 +211,34 @@ async def test_unredacted_data_keeps_warnings_links_and_text_masked(
     assert structured["warnings"] == ["retry with Bearer ***"]
     assert structured["links"] == {"open": "https://example.test/?key=KITKEY_***"}
     assert not any(leak in shown for leak in ("leak-warning", "leaklink", "leak-text"))
+
+
+def test_validate_request_types_a_request_and_never_shows_its_input() -> None:
+    spec = _get_spec("kitaru_connections_manage")
+    secrets = {"OPENAI_API_KEY": 98761}
+
+    with pytest.raises(ValidationError) as refused:
+        spec.validate_request(
+            {"operation": "create", "name": "n", "provider": "p", "secrets": secrets}
+        )
+    valid = spec.validate_request(
+        {"operation": "create", "name": "n", "provider": "p", "env": {"REGION": "eu"}}
+    )
+
+    assert "98761" not in str(refused.value)
+    assert "request.create.secrets.OPENAI_API_KEY" in str(refused.value)
+    assert valid.env == {"REGION": "eu"}
+
+
+def test_register_tools_still_registers_the_tools_but_is_deprecated() -> None:
+    server = MCPServer("kitaru")
+
+    with pytest.warns(DeprecationWarning, match="build_tools"):
+        registry.register_tools(server, CapabilityMode.READ_ONLY)
+
+    assert len(asyncio.run(server.list_tools())) == len(
+        get_tool_specs(CapabilityMode.READ_ONLY)
+    )
 
 
 async def test_invoke_tool_bounds_the_handler_with_the_state_settings() -> None:
