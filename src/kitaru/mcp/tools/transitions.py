@@ -39,6 +39,8 @@ MAX_PATH = 8
 MAX_NOTE = 300
 MAX_LABEL = 80
 MAX_UNLOCATED_EVALUATIONS = 10
+# Marks where a label too long for the matrix was cut.
+SHORTENED = "…"
 
 _PROCESS_LABEL_KEY = secrets.token_bytes(32)
 
@@ -138,7 +140,7 @@ def _bounded(label: str) -> str:
     # The shortened label is also the grouping key, so the digest must be long
     # enough that two long names sharing a prefix never collide.
     digest = hashlib.sha256(label.encode()).hexdigest()[:24]
-    return f"{label[: MAX_LABEL - 26]}…{digest}"
+    return f"{label[: MAX_LABEL - 26]}{SHORTENED}{digest}"
 
 
 def map_state(name: str, patterns: Sequence[tuple[str, str]]) -> str:

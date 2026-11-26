@@ -243,6 +243,8 @@ def test_model_normalization_keeps_keys_and_supported_scalars() -> None:
             "reasoning_tokens": 4,
         },
         {"input_tokens": 120.5, "cached_input_tokens": 0.0, "output_tokens": 40.2},
+        # Counts read back from settings, as at the top level.
+        {"input_tokens": "4096", "output_tokens": 12},
     ],
 )
 def test_numeric_token_usage_is_preserved(usage: Any) -> None:
@@ -271,8 +273,9 @@ def test_secret_bearing_tokens_are_masked(secret: Any) -> None:
 @given(count=st.none() | st.integers() | st.floats(allow_nan=False))
 def test_numeric_usage_fields_are_preserved(key: str, count: Any) -> None:
     assert cli_redact({key: count}) == {key: count}
-    assert cli_redact({key: "credential-value"}) == {key: "***"}
-    assert cli_redact({key: True}) == {key: "***"}
+    assert cli_redact({key: "4096"}) == {key: "4096"}
+    for other in ("credential-value", "4096 ", "12.5", "\u0664\u0660", True):
+        assert cli_redact({key: other}) == {key: "***"}
 
 
 def test_mean_token_usage_survives_beside_masked_credentials() -> None:

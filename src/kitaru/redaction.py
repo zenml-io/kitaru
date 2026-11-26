@@ -95,6 +95,7 @@ MASKED = "***"
 """The text that stands in for a masked value."""
 
 _TOKEN_USAGE_KEYS = frozenset(TokenUsage.model_fields)
+_DIGITS = re.compile(r"[0-9]+")
 _MAX_DEPTH = 64
 
 
@@ -125,18 +126,27 @@ def redact(value: str) -> str:
 def redact_data(value: Any, *, key: str | None = None) -> Any:
     """Return bounded JSON-safe output with recognizable credentials masked."""
     try:
-        return _redact_data(value, key=key, depth=0, active_ids=set())
+        return _redact_data(value, key=key, depth=0, active_ids=set(), mask=True)
     except Exception:
         # Normalization errors can include credentials in their messages.
         return "[unavailable]"
 
 
+def to_json_data(value: Any) -> Any:
+    """Return bounded JSON-safe output, normalized as `redact_data` does, unmasked."""
+    try:
+        return _redact_data(value, key=None, depth=0, active_ids=set(), mask=False)
+    except Exception:
+        return "[unavailable]"
+
+
 def _redact_data(
-    value: Any, *, key: str | None, depth: int, active_ids: set[int]
+    value: Any, *, key: str | None, depth: int, active_ids: set[int], mask: bool
 ) -> Any:
     """Normalize one value while retaining key context and active ancestors."""
     if (
-        key is not None
+        mask
+        and key is not None
         # A token usage field holds a count, so anything else under it is
         # masked like a credential.
         and (is_credential_name(key) or key in _TOKEN_USAGE_KEYS)
@@ -166,27 +176,33 @@ def _redact_data(
                             output_key = f"{original_key} [{suffix}]"
                             suffix += 1
                     result[output_key] = _redact_data(
-                        item, key=original_key, depth=depth + 1, active_ids=active_ids
+                        item,
+                        key=original_key,
+                        depth=depth + 1,
+                        active_ids=active_ids,
+                        mask=mask,
                     )
                 return result
             return [
-                _redact_data(item, key=None, depth=depth + 1, active_ids=active_ids)
+                _redact_data(
+                    item, key=None, depth=depth + 1, active_ids=active_ids, mask=mask
+                )
                 for item in value
             ]
         finally:
             active_ids.remove(identity)
     if isinstance(value, Enum):
         return _redact_data(
-            value.value, key=key, depth=depth + 1, active_ids=active_ids
+            value.value, key=key, depth=depth + 1, active_ids=active_ids, mask=mask
         )
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     if isinstance(value, (UUID, Path)):
-        return redact(str(value))
+        return redact(str(value)) if mask else str(value)
     if isinstance(value, Decimal):
         return str(value)
     if isinstance(value, str):
-        return redact(value)
+        return redact(value) if mask else value
     if value is None or isinstance(value, (bool, int, float)):
         return value
     return "[unavailable]"
@@ -195,16 +211,23 @@ def _redact_data(
 def _is_token_usage(value: Any, *, key: str) -> bool:
     """Recognize only numeric token usage fields, including per-call means."""
     if key in _TOKEN_USAGE_KEYS:
-        return _is_token_count(value)
+        return _is_usage_count(value)
     if key != "tokens":
         return False
     if isinstance(value, dict):
         return all(
-            field in _TOKEN_USAGE_KEYS and _is_token_count(count)
+            field in _TOKEN_USAGE_KEYS and _is_usage_count(count)
             for field, count in value.items()
         )
     # A bare `tokens` total is a raw API count, so a fractional one is suspect.
     return _is_token_count(value) and not isinstance(value, float)
+
+
+def _is_usage_count(value: Any) -> bool:
+    """Recognize a token usage field's count, which a setting holds as digits."""
+    return _is_token_count(value) or (
+        isinstance(value, str) and _DIGITS.fullmatch(value) is not None
+    )
 
 
 def _is_token_count(value: Any) -> bool:

@@ -355,12 +355,14 @@ def _session_import_strategy(
     return imports()
 
 
-def _draw_plain_env_keys(defs: dict[str, Any]) -> None:
-    """Draw connection `env` keys that cannot spell a credential name.
+def _apply_connection_rules(defs: dict[str, Any]) -> None:
+    """Draw connection requests that pass the rules their schema cannot express.
 
-    Model validation refuses such keys (on update, unless sent masked), and the
-    JSON schema cannot express the rule, so a schema-drawn key such as `SECRET`
-    would be rejected.
+    `env` keys cannot spell a credential name, which model validation refuses
+    (on update, unless sent masked), so a schema-drawn key such as `SECRET`
+    would be rejected. An update always carries `expected_updated`, which `env`
+    and `secrets` require, and never `remove_secrets`, which goes with
+    `secrets` only.
     """
     for model in ("ConnectionCreate", "ConnectionUpdate"):
         if model not in defs:
@@ -369,6 +371,13 @@ def _draw_plain_env_keys(defs: dict[str, Any]) -> None:
         for node in [env, *env.get("anyOf", [])]:
             if node.get("type") == "object":
                 node["propertyNames"] = {"pattern": r"^[xyz0-9_]*$"}
+    if update := defs.get("ConnectionUpdate"):
+        update["properties"].pop("remove_secrets", None)
+        update["properties"]["expected_updated"] = {
+            "type": "string",
+            "format": "date-time",
+        }
+        update["required"] = sorted({*update["required"], "expected_updated"})
 
 
 # Other model-only constraints, such as unique memberships and pinned plugin
@@ -395,7 +404,7 @@ def _schema_strategy(name: str) -> st.SearchStrategy[Any]:
             defs[model]["properties"][field]["pattern"] = (
                 r"^[^\x00-\x08\x0b\x0c\x0e-\x1f]*$"
             )
-    _draw_plain_env_keys(defs)
+    _apply_connection_rules(defs)
     if name == "kitaru_session_import":
         strategy = _session_import_strategy(schema, defs)
     else:

@@ -814,6 +814,99 @@ async def test_redacted_labels_drill_down_on_another_server_copy(
     assert totals == [1, 1]
 
 
+@pytest.mark.parametrize(("previous", "total"), [((), 0), (("a" * 32,), 1)])
+async def test_cells_of_a_matrix_built_before_a_key_rotation(
+    previous: tuple[str, ...], total: int
+) -> None:
+    session = _session("failed")
+    nodes = [_node(session, "a", "tool_call", "KITKEY_alpha", status="failed")]
+    records = _records({session.id: nodes}, [session])
+    before = MCPSettings(stateless=True, label_key=SecretStr("a" * 32))
+    server, context = build_server_context(_FakeClient(records), settings=before)
+    matrix = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+    [shown] = _structured(matrix)["data"]["cols"]
+
+    after = MCPSettings(
+        stateless=True,
+        label_key=SecretStr("b" * 32),
+        previous_label_keys=[SecretStr(key) for key in previous],
+    )
+    rotated, rotated_context = build_server_context(
+        _FakeClient(records), settings=after
+    )
+    cell = await rotated.call_tool(
+        "kitaru_failure_matrix_cell",
+        {"request": {"from_state": START, "to_state": shown}},
+        rotated_context,
+    )
+
+    assert _structured(cell)["data"]["total"] == total
+
+
+@pytest.mark.parametrize(
+    ("producer", "previous"),
+    [("b", ()), ("b", ("a",)), ("a", ("a", "c"))],
+    ids=["current-only", "current-with-previous", "earlier-previous"],
+)
+async def test_a_redacted_cell_without_failures_keeps_its_attempts(
+    producer: str, previous: tuple[str, ...]
+) -> None:
+    session = _session()
+    nodes = [_node(session, "a", "tool_call", "KITKEY_fixture")]
+    records = _records({session.id: nodes}, [session])
+    built = MCPSettings(stateless=True, label_key=SecretStr(producer * 32))
+    server, context = build_server_context(_FakeClient(records), settings=built)
+    matrix = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+    [shown] = _structured(matrix)["data"]["cells"]
+
+    reading = MCPSettings(
+        stateless=True,
+        label_key=SecretStr("b" * 32),
+        previous_label_keys=[SecretStr(key * 32) for key in previous],
+    )
+    reader, reader_context = build_server_context(
+        _FakeClient(records), settings=reading
+    )
+    cell = await reader.call_tool(
+        "kitaru_failure_matrix_cell",
+        {"request": {"from_state": shown["from_state"], "to_state": shown["to_state"]}},
+        reader_context,
+    )
+
+    assert shown["attempts"] == 1
+    assert _structured(cell)["data"]["total"] == 0
+    assert _structured(cell)["data"]["attempts"] == 1
+
+
+async def test_an_empty_plain_cell_is_not_looked_up_again_with_previous_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = _failing_group()
+    analyses: list[object] = []
+    analyze = failure_matrix._analyze
+
+    def counted(*args: Any) -> Any:
+        analyses.append(args)
+        return analyze(*args)
+
+    monkeypatch.setattr(failure_matrix, "_analyze", counted)
+    settings = MCPSettings(
+        stateless=True,
+        label_key=SecretStr("b" * 32),
+        previous_label_keys=[SecretStr("a" * 32), SecretStr("c" * 32)],
+    )
+    server, context = build_server_context(_FakeClient(records), settings=settings)
+
+    cell = await server.call_tool(
+        "kitaru_failure_matrix_cell",
+        {"request": {"from_state": "lookup_order", "to_state": "never_called"}},
+        context,
+    )
+
+    assert _structured(cell)["data"]["total"] == 0
+    assert len(analyses) == 1
+
+
 def test_long_names_get_bounded_distinct_labels() -> None:
     sessions = [_session("failed"), _session("failed")]
     long_names = ["x" * 200 + "_alpha", "x" * 200 + "_beta"]
