@@ -29,7 +29,10 @@
   }
   const notify = (method, params) => window.parent.postMessage({ jsonrpc: "2.0", method, params }, "*");
 
-  const state = { args: {}, view: null, openTicket: 0, mounted: false, mounting: null, hostContext: {}, sessionCallbacks: [], annotationCallbacks: [], nodeIndex: new Map() };
+  // `args` is the latest tool input; `viewArgs` holds the host arguments, such
+  // as a workspace, of the session on screen, so its reads and saves stay in
+  // the workspace it was opened in until another session replaces it.
+  const state = { args: {}, viewArgs: {}, view: null, openTicket: 0, mounted: false, mounting: null, hostContext: {}, sessionCallbacks: [], annotationCallbacks: [], nodeIndex: new Map() };
 
   window.addEventListener("message", (event) => {
     if (event.source !== window.parent) return;
@@ -73,8 +76,11 @@
     if (result?.structuredContent) return result.structuredContent;
     try { return JSON.parse(result?.content?.[0]?.text ?? ""); } catch { return null; }
   }
-  async function callTool(name, args) {
-    const envelope = envelopeOf(await request("tools/call", { name, arguments: { request: args } }));
+  // Every tool input argument but `request` comes from the host (a workspace,
+  // for one), and goes back with each call about the session it opened.
+  function hostArguments(input) { const { request: _request, ...host } = input || {}; return host; }
+  async function callTool(name, args, hostArgs = {}) {
+    const envelope = envelopeOf(await request("tools/call", { name, arguments: { ...hostArgs, request: args } }));
     if (!envelope) throw new Error(`${name} returned no data`);
     if (!envelope.ok) throw new Error(envelope.error?.message || `${name} failed`);
     return envelope;
@@ -86,7 +92,7 @@
     // Some hosts forward only the text content; the tool's input names the same session.
     const target = viewTarget(envelope?.data || state.args?.request);
     if (!target) { showStatus(result?.content?.find((c) => c.type === "text")?.text || "No session data arrived.", true); return; }
-    await openView(target);
+    await openView(target, hostArguments(state.args));
   }
   function viewTarget(source) {
     if (!source) return null;
@@ -95,18 +101,19 @@
     return source.session_id ? { session_id: source.session_id, viewer } : null;
   }
 
-  async function openView(target) {
+  async function openView(target, hostArgs = state.viewArgs) {
     // A later open supersedes this one, so quick clicks between sessions never
     // leave an older session on screen.
     const ticket = ++state.openTicket;
     try {
       showStatus("Loading the session…");
       const current = () => ticket === state.openTicket;
-      const reading = callTool(READ_TOOL, { operation: "view", ...target }).then(async (env) => { await loadRemainingNodes(env.data, current); return env; });
-      const [envelope] = await Promise.all([reading, mountViewer(target.viewer)]);
+      const reading = callTool(READ_TOOL, { operation: "view", ...target }, hostArgs).then(async (env) => { await loadRemainingNodes(env.data, current, hostArgs); return env; });
+      const [envelope] = await Promise.all([reading, mountViewer(target.viewer, hostArgs)]);
       const data = envelope.data;
       if (!current()) return false;
       state.view = data;
+      state.viewArgs = hostArgs;
       state.nodeIndex = new Map(data.nodes.map((n) => [n.id, n]));
       (envelope.warnings || []).forEach((w) => console.warn(`[kitaru] ${w}`));
       hideStatus();
@@ -127,11 +134,11 @@
     return `This host shows the viewer but did not pass its request on to the Kitaru MCP server, so the session cannot load here. Open it in another MCP Apps host, such as the ChatGPT desktop app, or preview it with python -m kitaru.mcp.viewer_preview. The host said: ${error.message}`;
   }
 
-  async function loadRemainingNodes(data, current) {
+  async function loadRemainingNodes(data, current, hostArgs) {
     data.nodes_truncated = false;
     while (data.nodes_cursor && current()) {
       if (data.nodes.length >= MAX_NODES) { data.nodes_truncated = true; break; }
-      const page = (await callTool(READ_TOOL, { operation: "nodes", session_id: data.session.id, cursor: data.nodes_cursor, size: NODE_PAGE })).data;
+      const page = (await callTool(READ_TOOL, { operation: "nodes", session_id: data.session.id, cursor: data.nodes_cursor, size: NODE_PAGE }, hostArgs)).data;
       data.nodes.push(...page.nodes);
       data.nodes_cursor = page.nodes_cursor;
     }
@@ -142,10 +149,10 @@
     const type = (script.getAttribute("type") || "").trim().toLowerCase();
     return !type || type === "module" || /^(text|application)\/(x-)?(java|ecma)script$/.test(type);
   }
-  async function mountViewer(name) {
+  async function mountViewer(name, hostArgs) {
     if (state.mounted) return;
     if (!state.mounting) state.mounting = (async () => {
-      const { html } = (await callTool(READ_TOOL, { operation: "viewer_source", viewer: name })).data;
+      const { html } = (await callTool(READ_TOOL, { operation: "viewer_source", viewer: name }, hostArgs)).data;
       const doc = new DOMParser().parseFromString(html, "text/html");
       for (const node of doc.head.querySelectorAll("style")) { const s = document.createElement("style"); s.textContent = node.textContent; s.dataset.kvViewer = name; document.head.append(s); }
       if (doc.head.querySelector('link[rel="stylesheet"]')) console.warn("[kitaru] Viewer stylesheets must be inline <style> blocks; <link> is blocked by the page's content security policy.");
@@ -364,7 +371,7 @@
   }
   async function writeAnnotation(args) {
     requireWrite();
-    const env = await callTool(WRITE_TOOL, args);
+    const env = await callTool(WRITE_TOOL, args, state.viewArgs);
     storeAnnotation(env.data);
     return { annotation: env.data, warnings: env.warnings || [] };
   }
@@ -388,7 +395,7 @@
     requireWrite();
     const inv = state.view.investigation;
     if (!inv) throw new Error("Verdicts belong to an investigation; open the session through one.");
-    const env = await callTool(WRITE_TOOL, { operation: "verdict", investigation_id: inv.id, session_id: state.view.session.id, verdict: verdict || null });
+    const env = await callTool(WRITE_TOOL, { operation: "verdict", investigation_id: inv.id, session_id: state.view.session.id, verdict: verdict || null }, state.viewArgs);
     inv.investigation_session = env.data.investigation_session;
     inv.status = env.data.investigation_status;
     const entry = inv.sessions.find((s) => s.position === inv.position);
