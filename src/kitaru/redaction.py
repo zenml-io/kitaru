@@ -67,8 +67,9 @@ _CREDENTIAL_ENDINGS = (
     "secrets",
     "token",
 )
-# `tokens` after one of these words counts tokens, as in `MAX_TOKENS` or
-# `prompt_tokens`; after any other word it holds them, as in `GITHUB_TOKENS`.
+# A name ending in `tokens` counts tokens when any earlier word is one of
+# these, as in `MAX_TOKENS`, `max_new_tokens`, or `prompt_tokens`; otherwise it
+# holds them, as in `GITHUB_TOKENS` or `new_tokens`.
 _TOKEN_COUNT_WORDS = frozenset(
     {
         "budget",
@@ -108,7 +109,7 @@ def is_credential_name(name: str) -> bool:
     if not words:
         return False
     if words[-1] == "tokens":
-        return len(words) == 1 or words[-2] not in _TOKEN_COUNT_WORDS
+        return _TOKEN_COUNT_WORDS.isdisjoint(words[:-1])
     tails = (words[-1], "".join(words[-2:]))
     return any(
         tail in _CREDENTIAL_NOUNS or tail.endswith(_CREDENTIAL_ENDINGS)
