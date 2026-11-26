@@ -79,7 +79,6 @@ _TOKEN_COUNT_WORDS = frozenset(
         "input",
         "max",
         "min",
-        "new",
         "num",
         "output",
         "prompt",
