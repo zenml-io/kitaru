@@ -121,6 +121,22 @@ def test_hosting_settings_come_from_the_environment() -> None:
         MCPSettings.from_environment({"KITARU_MCP_LABEL_KEY": "short"})
 
 
+@pytest.mark.parametrize(
+    "environment",
+    [
+        {"KITARU_MCP_LABEL_KEY": "short-label-key"},
+        {"KITARU_MCP_LABEL_KEY": "k" * 32 + "-valid-tail", "KITARU_MCP_TIMEOUT": "inf"},
+    ],
+    ids=["short-key", "valid-key-other-failure"],
+)
+def test_settings_errors_never_show_the_label_key(environment: dict[str, str]) -> None:
+    with pytest.raises(ValidationError) as refused:
+        MCPSettings.from_environment(environment)
+
+    assert "label-key" not in str(refused.value)
+    assert "valid-tail" not in str(refused.value)
+
+
 def test_settings_reject_nonfinite_and_invalid_bounds() -> None:
     with pytest.raises(ValueError, match="must not be blank"):
         MCPSettings(server_url="  \t")

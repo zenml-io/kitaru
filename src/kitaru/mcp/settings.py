@@ -35,7 +35,8 @@ class CapabilityMode(StrEnum):
 class MCPSettings(BaseModel):
     """Immutable MCP process settings."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    # `label_key` is a secret, so a refused value never shows in the error.
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
     mode: CapabilityMode = CapabilityMode.READ_ONLY
     server_url: str | None = None
