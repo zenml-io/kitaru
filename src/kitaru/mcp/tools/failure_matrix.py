@@ -34,6 +34,7 @@ from kitaru.mcp.models.failure_matrix import (
     GroupSummary,
     MatrixCell,
 )
+from kitaru.mcp.settings import MCPSettings
 from kitaru.mcp.tools.paging import read_up_to
 from kitaru.mcp.tools.transitions import (
     SessionOutcome,
@@ -67,7 +68,7 @@ async def handle_failure_matrix(
     if not state.settings.stateless:
         snapshot_id = uuid.uuid4().hex
         state.matrix_snapshots.put(snapshot_id, records)
-    groups = _analyze(state, request, records)
+    groups = _analyze(request, records, _get_label_keys(state.settings)[0])
     base, compare = groups[0], groups[1] if len(groups) > 1 else None
     rows, cols, cells = build_cells(
         base.outcomes, compare.outcomes if compare else None, request.sources
@@ -116,20 +117,25 @@ async def handle_failure_cell(
                 "the cell.",
             )
         records = cached
-    groups = _analyze(state, request, records)
     index = 1 if request.side == "compare" else 0
-    if index >= len(groups):
+    if index >= len(records):
         raise MCPToolError(
             "invalid_arguments",
             "side='compare' needs compare_filter.",
             recovery="Pass the same compare_filter the matrix was built with.",
         )
-    return cell_details(
-        groups[index].outcomes,
-        (request.from_state, request.to_state),
-        request.sources,
-        request.limit,
-    )
+    # A matrix built before a key rotation tagged its redacted labels with an
+    # earlier key, so an empty cell is looked up again with each of those.
+    for label_key in _get_label_keys(state.settings):
+        cell = cell_details(
+            _analyze(request, records, label_key)[index].outcomes,
+            (request.from_state, request.to_state),
+            request.sources,
+            request.limit,
+        )
+        if cell.total:
+            break
+    return cell
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,17 +166,24 @@ async def _fetch_groups(
     )
 
 
+def _get_label_keys(settings: MCPSettings) -> list[bytes | None]:
+    """Return the key that tags new labels, then the keys of earlier labels.
+
+    `None` stands for this process's own key, used when no key is set.
+    """
+    current = settings.label_key
+    return [
+        current.get_secret_value().encode() if current else None,
+        *(key.get_secret_value().encode() for key in settings.previous_label_keys),
+    ]
+
+
 def _analyze(
-    state: MCPServerState,
     request: FailureMatrixRequest,
     records: Sequence[GroupRecords],
+    label_key: bytes | None,
 ) -> list[_AnalyzedGroup]:
-    label_key = state.settings.label_key
-    labeler = build_labeler(
-        request.state_by,
-        request.state_map,
-        label_key.get_secret_value().encode() if label_key else None,
-    )
+    labeler = build_labeler(request.state_by, request.state_map, label_key)
     folded = fold_rare_states(
         [analyze_group(group, labeler) for group in records],
         request.sources,

@@ -115,11 +115,16 @@ def test_hosting_settings_come_from_the_environment() -> None:
             "KITARU_MCP_STATELESS": "true",
             "KITARU_MCP_LABEL_KEY": key,
             "KITARU_MCP_CUSTOM_VIEWERS": "false",
+            "KITARU_MCP_PREVIOUS_LABEL_KEYS": f"{'a' * 32}, {'b' * 32}",
         }
     )
 
     assert settings.stateless is True
     assert settings.custom_viewers is False
+    assert [key.get_secret_value() for key in settings.previous_label_keys] == [
+        "a" * 32,
+        "b" * 32,
+    ]
     assert settings.label_key is not None
     assert settings.label_key.get_secret_value() == key
     with pytest.raises(ValueError, match="at least 32"):
@@ -131,8 +136,9 @@ def test_hosting_settings_come_from_the_environment() -> None:
     [
         {"KITARU_MCP_LABEL_KEY": "short-label-key"},
         {"KITARU_MCP_LABEL_KEY": "k" * 32 + "-valid-tail", "KITARU_MCP_TIMEOUT": "inf"},
+        {"KITARU_MCP_PREVIOUS_LABEL_KEYS": "k" * 32 + "-valid-tail,short-label-key"},
     ],
-    ids=["short-key", "valid-key-other-failure"],
+    ids=["short-key", "valid-key-other-failure", "short-previous-key"],
 )
 def test_settings_errors_never_show_the_label_key(environment: dict[str, str]) -> None:
     with pytest.raises(ValidationError) as refused:

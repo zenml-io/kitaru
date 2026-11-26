@@ -814,6 +814,35 @@ async def test_redacted_labels_drill_down_on_another_server_copy(
     assert totals == [1, 1]
 
 
+@pytest.mark.parametrize(("previous", "total"), [((), 0), (("a" * 32,), 1)])
+async def test_cells_of_a_matrix_built_before_a_key_rotation(
+    previous: tuple[str, ...], total: int
+) -> None:
+    session = _session("failed")
+    nodes = [_node(session, "a", "tool_call", "KITKEY_alpha", status="failed")]
+    records = _records({session.id: nodes}, [session])
+    before = MCPSettings(stateless=True, label_key=SecretStr("a" * 32))
+    server, context = build_server_context(_FakeClient(records), settings=before)
+    matrix = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+    [shown] = _structured(matrix)["data"]["cols"]
+
+    after = MCPSettings(
+        stateless=True,
+        label_key=SecretStr("b" * 32),
+        previous_label_keys=[SecretStr(key) for key in previous],
+    )
+    rotated, rotated_context = build_server_context(
+        _FakeClient(records), settings=after
+    )
+    cell = await rotated.call_tool(
+        "kitaru_failure_matrix_cell",
+        {"request": {"from_state": START, "to_state": shown}},
+        rotated_context,
+    )
+
+    assert _structured(cell)["data"]["total"] == total
+
+
 def test_long_names_get_bounded_distinct_labels() -> None:
     sessions = [_session("failed"), _session("failed")]
     long_names = ["x" * 200 + "_alpha", "x" * 200 + "_beta"]

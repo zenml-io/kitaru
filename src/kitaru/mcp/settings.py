@@ -8,6 +8,7 @@ import os
 from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import (
     BaseModel,
@@ -59,12 +60,23 @@ class MCPSettings(BaseModel):
     # that serve one matrix and its cells must share it; when unset, each
     # process draws its own.
     label_key: SecretStr | None = Field(default=None, min_length=32)
+    # Keys that tagged labels before `label_key` replaced them, so a cell of a
+    # matrix built before the rotation still finds its sessions.
+    previous_label_keys: tuple[Annotated[SecretStr, Field(min_length=32)], ...] = ()
 
     @field_validator("server_url")
     @classmethod
     def _reject_blank_target(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
             raise ValueError("explicit server target must not be blank")
+        return value
+
+    @field_validator("previous_label_keys", mode="before")
+    @classmethod
+    def _split_previous_label_keys(cls, value: object) -> object:
+        # The environment lists the keys in one variable, separated by commas.
+        if isinstance(value, str):
+            return tuple(key.strip() for key in value.split(",") if key.strip())
         return value
 
     @field_validator("viewers_dir", mode="before")
@@ -100,6 +112,7 @@ class MCPSettings(BaseModel):
             "debug": "KITARU_MCP_DEBUG",
             "stateless": "KITARU_MCP_STATELESS",
             "label_key": "KITARU_MCP_LABEL_KEY",
+            "previous_label_keys": "KITARU_MCP_PREVIOUS_LABEL_KEYS",
         }
         for field, variable in mapping.items():
             value = env.get(variable)
