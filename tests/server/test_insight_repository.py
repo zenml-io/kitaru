@@ -526,17 +526,47 @@ async def test_negated_import_filter_excludes_null_imports(setup: Setup) -> None
 
 
 async def test_query_filters_by_name(setup: Setup) -> None:
-    """Filter insights scoped to one exact name."""
+    """Filter insights by exact name and substring ops on name and title."""
     matching = await _create_insight(
-        setup.insights, setup.owner_id, setup.agent_id, name="first"
+        setup.insights,
+        setup.owner_id,
+        setup.agent_id,
+        name="post-import-insights",
+        title="Refunded final-sale item",
     )
-    await _create_insight(setup.insights, setup.owner_id, setup.agent_id, name="second")
-    insights, _ = await setup.insights.query(
+    await _create_insight(
+        setup.insights,
+        setup.owner_id,
+        setup.agent_id,
+        name="session-audit",
+        title="Slow lookup tool",
+    )
+    by_exact, _ = await setup.insights.query(
         InsightFilter(
-            expression=FilterCondition(field="name", op=FilterOp.EQ, value="first")
+            expression=FilterCondition(
+                field="name", op=FilterOp.EQ, value="post-import-insights"
+            )
         )
     )
-    assert [insight.id for insight in insights] == [matching.id]
+    assert [insight.id for insight in by_exact] == [matching.id]
+
+    by_name_contains, _ = await setup.insights.query(
+        InsightFilter(
+            expression=FilterCondition(
+                field="name", op=FilterOp.CONTAINS, value="import"
+            )
+        )
+    )
+    assert [insight.id for insight in by_name_contains] == [matching.id]
+
+    by_title_contains, _ = await setup.insights.query(
+        InsightFilter(
+            expression=FilterCondition(
+                field="title", op=FilterOp.CONTAINS, value="final-sale"
+            )
+        )
+    )
+    assert [insight.id for insight in by_title_contains] == [matching.id]
 
 
 async def test_query_filters_by_status_and_source_provider(setup: Setup) -> None:

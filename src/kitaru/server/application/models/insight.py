@@ -24,6 +24,7 @@ from kitaru.server.filtering import (
     EQUALITY_OPS,
     NULLABLE_OPS,
     SCOPE_OPS,
+    STRING_OPS,
     FilterField,
 )
 
@@ -36,7 +37,8 @@ class InsightFilter(ListFilter):
         "agent_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "import_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS | NULLABLE_OPS),
         "task_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS),
-        "name": FilterField(value_type=str, ops=EQUALITY_OPS),
+        "name": FilterField(value_type=str, ops=STRING_OPS),
+        "title": FilterField(value_type=str, ops=STRING_OPS),
         "status": FilterField(value_type=str, ops=EQUALITY_OPS),
         "source_provider": FilterField(value_type=str, ops=EQUALITY_OPS | NULLABLE_OPS),
     }

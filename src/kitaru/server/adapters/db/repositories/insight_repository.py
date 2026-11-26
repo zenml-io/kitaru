@@ -45,6 +45,7 @@ INSIGHT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "import_id": InsightORM.import_id,
     "task_id": InsightORM.task_id,
     "name": InsightORM.name,
+    "title": InsightORM.title,
     "status": InsightORM.status,
     "source_provider": InsightORM.source_provider,
 }

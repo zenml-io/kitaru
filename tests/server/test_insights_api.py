@@ -468,6 +468,68 @@ async def test_list_insights_filters_by_status_and_source_provider(
     assert [item["id"] for item in by_provider["items"]] == [created[1]["id"]]
 
 
+async def test_list_insights_filters_by_name_and_title_contains(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Support substring search on both insight name and title via REST filter."""
+    created = (
+        await client.post(
+            "/api/v1/insights",
+            json={
+                "agent_id": agent_id,
+                "insights": [
+                    _text_insight("Refunded final-sale item", name="post-import-audit"),
+                    _text_insight("Slow lookup tool", name="latency-report"),
+                ],
+            },
+        )
+    ).json()
+
+    by_name = (
+        await client.get(
+            "/api/v1/insights",
+            params={
+                "filter": json.dumps(
+                    {"field": "name", "op": "contains", "value": "import"}
+                )
+            },
+        )
+    ).json()
+    assert [item["id"] for item in by_name["items"]] == [created[0]["id"]]
+
+    by_title = (
+        await client.get(
+            "/api/v1/insights",
+            params={
+                "filter": json.dumps(
+                    {"field": "title", "op": "contains", "value": "final-sale"}
+                )
+            },
+        )
+    ).json()
+    assert [item["id"] for item in by_title["items"]] == [created[0]["id"]]
+
+    by_either = (
+        await client.get(
+            "/api/v1/insights",
+            params={
+                "filter": json.dumps(
+                    {
+                        "or": [
+                            {"field": "name", "op": "contains", "value": "latency"},
+                            {"field": "title", "op": "contains", "value": "final-sale"},
+                        ]
+                    }
+                )
+            },
+        )
+    ).json()
+    assert {item["id"] for item in by_either["items"]} == {
+        created[0]["id"],
+        created[1]["id"],
+    }
+
+
 async def test_list_insights_walks_pages(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
