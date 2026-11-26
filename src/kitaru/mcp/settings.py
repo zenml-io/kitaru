@@ -3,6 +3,7 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Validated settings for the local Kitaru MCP runtime."""
 
+import json
 import math
 import os
 from collections.abc import Mapping
@@ -73,11 +74,18 @@ class MCPSettings(BaseModel):
 
     @field_validator("previous_label_keys", mode="before")
     @classmethod
-    def _split_previous_label_keys(cls, value: object) -> object:
-        # The environment lists the keys in one variable, separated by commas.
-        if isinstance(value, str):
-            return tuple(key.strip() for key in value.split(",") if key.strip())
-        return value
+    def _parse_previous_label_keys(cls, value: object) -> object:
+        # The environment holds the keys as a JSON array of strings, so each
+        # keeps its exact bytes, as `KITARU_MCP_LABEL_KEY` held them.
+        if not isinstance(value, str):
+            return value
+        try:
+            keys = json.loads(value)
+        except ValueError:
+            keys = None
+        if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+            raise ValueError("must be a JSON array of strings")
+        return tuple(keys)
 
     @field_validator("viewers_dir", mode="before")
     @classmethod

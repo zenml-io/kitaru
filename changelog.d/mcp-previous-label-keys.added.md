@@ -1,1 +1,1 @@
-- Add the `previous_label_keys` MCP setting (`KITARU_MCP_PREVIOUS_LABEL_KEYS`, comma-separated, each at least 32 characters). After a `label_key` rotation, `kitaru_failure_matrix_cell` still opens the cells of a matrix built with one of those earlier keys.
+- Add the `previous_label_keys` MCP setting (`KITARU_MCP_PREVIOUS_LABEL_KEYS`, a JSON array of strings, each at least 32 characters and kept byte for byte as `KITARU_MCP_LABEL_KEY` held it). After a `label_key` rotation, `kitaru_failure_matrix_cell` still opens the cells of a matrix built with one of those earlier keys.
