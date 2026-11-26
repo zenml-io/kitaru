@@ -150,9 +150,10 @@ async def invoke_tool(
     `spec.run` runs through `state.execute`, so the state's settings bound its
     time and concurrency. Its data is redacted, unless it returns a
     `ToolSuccessPayload` with `redact=False`, and wrapped in the tool's result
-    envelope. A failure becomes an error envelope, and only its type is
-    logged: a backend's message can echo a secret in a shape no redaction
-    pattern knows.
+    envelope. A failure becomes an error envelope, and its message is never
+    logged, since a backend's message can echo a secret in a shape no
+    redaction pattern knows: the log has the failure's type, or, for a result
+    that fails validation, the locations of the invalid fields.
 
     Args:
         spec: The tool.
