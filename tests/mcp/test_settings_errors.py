@@ -115,11 +115,16 @@ def test_hosting_settings_come_from_the_environment() -> None:
             "KITARU_MCP_STATELESS": "true",
             "KITARU_MCP_LABEL_KEY": key,
             "KITARU_MCP_CUSTOM_VIEWERS": "false",
+            "KITARU_MCP_PREVIOUS_LABEL_KEYS": json.dumps(["a" * 32, "b" * 32]),
         }
     )
 
     assert settings.stateless is True
     assert settings.custom_viewers is False
+    assert [key.get_secret_value() for key in settings.previous_label_keys] == [
+        "a" * 32,
+        "b" * 32,
+    ]
     assert settings.label_key is not None
     assert settings.label_key.get_secret_value() == key
     with pytest.raises(ValueError, match="at least 32"):
@@ -127,12 +132,36 @@ def test_hosting_settings_come_from_the_environment() -> None:
 
 
 @pytest.mark.parametrize(
+    "active", ["k" * 32 + "\n", "k" * 16 + ", " + "k" * 16, " " + "k" * 32]
+)
+def test_any_active_label_key_can_be_retired_byte_for_byte(active: str) -> None:
+    before = MCPSettings.from_environment({"KITARU_MCP_LABEL_KEY": active})
+    after = MCPSettings.from_environment(
+        {
+            "KITARU_MCP_LABEL_KEY": "n" * 32,
+            "KITARU_MCP_PREVIOUS_LABEL_KEYS": json.dumps([active]),
+        }
+    )
+
+    assert before.label_key is not None
+    assert [key.get_secret_value() for key in after.previous_label_keys] == [
+        before.label_key.get_secret_value()
+    ]
+
+
+@pytest.mark.parametrize(
     "environment",
     [
         {"KITARU_MCP_LABEL_KEY": "short-label-key"},
         {"KITARU_MCP_LABEL_KEY": "k" * 32 + "-valid-tail", "KITARU_MCP_TIMEOUT": "inf"},
+        {
+            "KITARU_MCP_PREVIOUS_LABEL_KEYS": json.dumps(
+                ["k" * 32 + "-valid-tail", "short-label-key"]
+            )
+        },
+        {"KITARU_MCP_PREVIOUS_LABEL_KEYS": "k" * 32 + "-valid-tail"},
     ],
-    ids=["short-key", "valid-key-other-failure"],
+    ids=["short-key", "valid-key-other-failure", "short-previous-key", "not-json"],
 )
 def test_settings_errors_never_show_the_label_key(environment: dict[str, str]) -> None:
     with pytest.raises(ValidationError) as refused:

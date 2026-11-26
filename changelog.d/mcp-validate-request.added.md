@@ -1,0 +1,1 @@
+- Add `ToolSpec.validate_request(request)`, which validates a tool's raw `request` argument the way Kitaru's MCP server does: its errors name each refused field and never show the input. Add `build_tools(mode)`, the tools to pass as `MCPServer(tools=...)`.

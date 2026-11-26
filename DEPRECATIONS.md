@@ -19,3 +19,9 @@ Deprecated surfaces that are still served for backwards compatibility. One entry
 - **Deprecated:** The `payload_blob_id` field on `POST /api/v1/imports`. Requests still accept it, mapped to a blob source (`source: {"type": "blob", "blob_id": ...}`).
 - **Replaced by:** `source`, accepting a blob source or an API source.
 - **Removable:** Once the dashboard and generated clients send `source` directly.
+
+## `kitaru.mcp.registry.register_tools`
+
+- **Deprecated:** `register_tools(server, mode)`, which adds the MCP tools to an existing server. It still adds them, with a `DeprecationWarning`, but tools added this way show refused inputs in their argument errors.
+- **Replaced by:** `MCPServer(tools=build_tools(mode))`, whose tools hide refused inputs. A host that validates tool arguments itself uses `ToolSpec.validate_request`.
+- **Removable:** Once no host outside Kitaru calls `register_tools`.

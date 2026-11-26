@@ -3,11 +3,13 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Validated settings for the local Kitaru MCP runtime."""
 
+import json
 import math
 import os
 from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import (
     BaseModel,
@@ -59,6 +61,11 @@ class MCPSettings(BaseModel):
     # that serve one matrix and its cells must share it; when unset, each
     # process draws its own.
     label_key: SecretStr | None = Field(default=None, min_length=32)
+    # Keys that tagged labels before `label_key` replaced them, so on a
+    # `stateless` server a cell of a matrix built before the rotation still
+    # finds its sessions. A server that keeps matrices answers cells from its
+    # copy, which the restart that rotates the key has already dropped.
+    previous_label_keys: tuple[Annotated[SecretStr, Field(min_length=32)], ...] = ()
 
     @field_validator("server_url")
     @classmethod
@@ -66,6 +73,21 @@ class MCPSettings(BaseModel):
         if value is not None and not value.strip():
             raise ValueError("explicit server target must not be blank")
         return value
+
+    @field_validator("previous_label_keys", mode="before")
+    @classmethod
+    def _parse_previous_label_keys(cls, value: object) -> object:
+        # The environment holds the keys as a JSON array of strings, so each
+        # keeps its exact bytes, as `KITARU_MCP_LABEL_KEY` held them.
+        if not isinstance(value, str):
+            return value
+        try:
+            keys = json.loads(value)
+        except ValueError:
+            keys = None
+        if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+            raise ValueError("must be a JSON array of strings")
+        return tuple(keys)
 
     @field_validator("viewers_dir", mode="before")
     @classmethod
@@ -100,6 +122,7 @@ class MCPSettings(BaseModel):
             "debug": "KITARU_MCP_DEBUG",
             "stateless": "KITARU_MCP_STATELESS",
             "label_key": "KITARU_MCP_LABEL_KEY",
+            "previous_label_keys": "KITARU_MCP_PREVIOUS_LABEL_KEYS",
         }
         for field, variable in mapping.items():
             value = env.get(variable)

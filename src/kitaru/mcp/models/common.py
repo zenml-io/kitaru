@@ -109,8 +109,9 @@ class ToolSuccessPayload(MCPModel):
     )
     redact: bool = Field(
         default=True,
-        description="Mask credential-shaped strings in the result. Off only for "
-        "data that comes from the user's own files rather than from Kitaru.",
+        description="Mask credential-shaped strings in `data`. Off only for data "
+        "that comes from the user's own files rather than from Kitaru; warnings, "
+        "links, and text are masked either way.",
     )
 
 

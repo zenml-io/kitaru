@@ -17598,10 +17598,40 @@
               "description": "Replaces every plain setting. A value sent exactly as `kitaru_connection_read` shows it, such as `***` or `Bearer ***`, keeps the value the connection stores; leaving a key out deletes it. A key that names a credential is accepted only as `***`: put new credentials in `secrets`.",
               "title": "Env"
             },
+            "expected_updated": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The connection's `updated` time as `kitaru_connection_read` shows it; required with `env` or `secrets`, and checked on any update that sends it. The server reads the connection just before writing and refuses the update if its `updated` differs, as a change to `env` or `default` makes it. Not detected: a change committed after that read, and a change to secrets alone, which leaves `updated` as it was.",
+              "title": "Expected Updated"
+            },
             "operation": {
               "const": "update",
               "title": "Operation",
               "type": "string"
+            },
+            "remove_secrets": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Names of stored secrets this update deletes on purpose; goes with `secrets`. `secrets: {}` with every stored name here deletes them all. A name the connection no longer stores is ignored.",
+              "title": "Remove Secrets"
             },
             "secrets": {
               "anyOf": [
@@ -17618,7 +17648,7 @@
                 }
               ],
               "default": null,
-              "description": "Replaces every stored secret. Stored values cannot be read back, so send every secret the connection should keep, not only new ones.",
+              "description": "Replaces every stored secret. Stored values cannot be read back, so send every secret the connection should keep, not only new ones, and name each stored secret to delete in `remove_secrets`; an update that would drop a stored secret otherwise is refused.",
               "title": "Secrets"
             }
           },

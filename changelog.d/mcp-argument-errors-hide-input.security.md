@@ -1,0 +1,1 @@
+- `kitaru-mcp` tool argument errors no longer append the raw input that failed validation, so a refused `kitaru_connections_manage` call does not echo a value it sent in `secrets`. The error still names each refused field, and can still name map keys or an unknown operation.

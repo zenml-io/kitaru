@@ -4,6 +4,7 @@
 """Strict connection read and management inputs."""
 
 import uuid
+from datetime import datetime
 from typing import Annotated, Literal, Self
 
 from pydantic import (
@@ -11,8 +12,10 @@ from pydantic import (
     Field,
     SecretStr,
     TypeAdapter,
+    ValidationInfo,
     ValidatorFunctionWrapHandler,
     WrapValidator,
+    field_validator,
     model_validator,
 )
 
@@ -143,17 +146,58 @@ class ConnectionUpdate(MCPModel):
         default=None,
         description="Replaces every stored secret. Stored values cannot be read "
         "back, so send every secret the connection should keep, not only new "
-        "ones.",
+        "ones, and name each stored secret to delete in `remove_secrets`; an "
+        "update that would drop a stored secret otherwise is refused.",
+    )
+    remove_secrets: list[str] | None = Field(
+        default=None,
+        description="Names of stored secrets this update deletes on purpose; "
+        "goes with `secrets`. `secrets: {}` with every stored name here deletes "
+        "them all. A name the connection no longer stores is ignored.",
     )
     default: bool | None = None
+    expected_updated: datetime | None = Field(
+        default=None,
+        description="The connection's `updated` time as `kitaru_connection_read` "
+        "shows it; required with `env` or `secrets`, and checked on any update "
+        "that sends it. The server reads the connection just before writing and "
+        "refuses the update if its `updated` differs, as a change to `env` or "
+        "`default` makes it. Not detected: a change committed after that read, "
+        "and a change to secrets alone, which leaves `updated` as it was.",
+    )
+
+    @field_validator("env", "secrets", "default")
+    @classmethod
+    def _refuse_null(cls, value: object, info: ValidationInfo) -> object:
+        # A field error, run only for a sent field, carries that field's input;
+        # a model error would carry the whole request, secret values included.
+        if value is None:
+            raise ValueError(f"{info.field_name} cannot be null")
+        return value
 
     @model_validator(mode="after")
     def _validate_update(self) -> Self:
-        for field in ("env", "secrets", "default"):
-            if field in self.model_fields_set and getattr(self, field) is None:
-                raise ValueError(f"{field} cannot be null")
         if not {"env", "secrets", "default"} & self.model_fields_set:
             raise ValueError("connection update must change at least one field")
+        if self.expected_updated is None and (
+            self.env is not None or self.secrets is not None
+        ):
+            _refuse_keys(
+                ["expected_updated"],
+                "is required with `env` or `secrets`: send the connection's "
+                "`updated` time from `kitaru_connection_read`.",
+            )
+        removed = self.remove_secrets or []
+        if removed and self.secrets is None:
+            _refuse_keys(
+                removed,
+                "is listed in `remove_secrets`, which goes with `secrets`: send "
+                "every stored secret to keep in `secrets`.",
+            )
+        if both := sorted(set(removed) & set(self.secrets or {})):
+            _refuse_keys(
+                both, "is both sent in `secrets` and listed in `remove_secrets`."
+            )
         return self
 
 
