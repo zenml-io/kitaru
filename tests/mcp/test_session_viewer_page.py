@@ -14,14 +14,17 @@ from kitaru.mcp.apps import load_session_viewer_html
 _DRIVER = Path(__file__).with_name("viewer_page_driver.mjs")
 
 
-def _drive_page(tmp_path: Path) -> dict[str, list[dict[str, Any]]]:
-    html = load_session_viewer_html()
-    runtime = html.split("<script>", 1)[1].rsplit("</script>", 1)[0]
-    (tmp_path / "runtime.js").write_text(runtime)
+@pytest.fixture(scope="module")
+def page(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    """Every scenario's result, from one run of the page in Node."""
     node = shutil.which("node")
-    assert node is not None
+    if node is None:
+        pytest.skip("needs Node.js")
+    html = load_session_viewer_html()
+    runtime = tmp_path_factory.mktemp("viewer") / "runtime.js"
+    runtime.write_text(html.split("<script>", 1)[1].rsplit("</script>", 1)[0])
     finished = subprocess.run(
-        [node, str(_DRIVER), str(tmp_path / "runtime.js")],
+        [node, str(_DRIVER), str(runtime)],
         capture_output=True,
         text=True,
         check=True,
@@ -30,11 +33,10 @@ def _drive_page(tmp_path: Path) -> dict[str, list[dict[str, Any]]]:
     return json.loads(finished.stdout)
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
 def test_the_page_keeps_each_session_in_the_workspace_it_was_opened_in(
-    tmp_path: Path,
+    page: dict[str, Any],
 ) -> None:
-    calls = _drive_page(tmp_path)
+    calls = page
 
     shown = [(c["operation"], c["session"], c["host"]) for c in calls["hosted"]]
     first, next_ = {"workspace": "research"}, {"workspace": "second"}
@@ -50,9 +52,8 @@ def test_the_page_keeps_each_session_in_the_workspace_it_was_opened_in(
     assert all(call["host"] == {} for call in calls["local"])
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
-def test_edits_in_progress_never_land_on_the_next_session(tmp_path: Path) -> None:
-    shown = _drive_page(tmp_path)["sessionChange"]
+def test_edits_in_progress_never_land_on_the_next_session(page: dict[str, Any]) -> None:
+    shown = page["sessionChange"]
 
     assert shown == {
         "current": "next",
@@ -65,9 +66,8 @@ def test_edits_in_progress_never_land_on_the_next_session(tmp_path: Path) -> Non
     }
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
-def test_edits_survive_the_same_session_rendering_again(tmp_path: Path) -> None:
-    shown = _drive_page(tmp_path)
+def test_edits_survive_the_same_session_rendering_again(page: dict[str, Any]) -> None:
+    shown = page
 
     assert shown["sameSessionRerender"] == {
         "current": "first",
@@ -82,11 +82,10 @@ def test_edits_survive_the_same_session_rendering_again(tmp_path: Path) -> None:
     }
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
 def test_the_first_session_never_touches_the_next_sessions_edits(
-    tmp_path: Path,
+    page: dict[str, Any],
 ) -> None:
-    shown = _drive_page(tmp_path)
+    shown = page
 
     assert shown["earlierSaveFinishesLater"] == {
         "nextBoxStillOpen": True,
@@ -99,18 +98,16 @@ def test_the_first_session_never_touches_the_next_sessions_edits(
     }
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
 def test_a_saved_verdict_shows_after_the_same_session_renders_again(
-    tmp_path: Path,
+    page: dict[str, Any],
 ) -> None:
-    shown = _drive_page(tmp_path)["verdictDuringRerender"]
+    shown = page["verdictDuringRerender"]
 
     assert shown == {"shownVerdict": "problematic"}
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
-def test_a_draft_answer_stays_with_its_investigation(tmp_path: Path) -> None:
-    shown = _drive_page(tmp_path)["answerDraftAcrossInvestigations"]
+def test_a_draft_answer_stays_with_its_investigation(page: dict[str, Any]) -> None:
+    shown = page["answerDraftAcrossInvestigations"]
 
     assert shown == {
         "keptOnRerender": "Draft for the first review",
