@@ -6,7 +6,6 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
-from dataclasses import dataclass, field
 from typing import TypeVar
 
 from kitaru.client.api_client import KitaruAPIClient
@@ -17,25 +16,40 @@ from kitaru.mcp.settings import MCPSettings
 ResultT = TypeVar("ResultT")
 
 
-@dataclass(slots=True)
 class MCPServerState:
-    """One process-lifetime client with bounded concurrency."""
+    """Server settings, an optional Kitaru client, and bounded concurrency.
 
-    settings: MCPSettings
-    client: KitaruAPIClient
-    semaphore: asyncio.Semaphore = field(init=False)
-    # Cell drill-downs must read the records the visible matrix was built from,
-    # so each matrix keeps its records briefly under a snapshot id.
-    matrix_snapshots: TTLCache[tuple[GroupRecords, ...]] = field(
-        default_factory=lambda: TTLCache(max_entries=4, ttl_seconds=300), init=False
-    )
-    _handler_deadline: ContextVar[float | None] = field(init=False, repr=False)
-    _closed: bool = field(default=False, init=False)
+    A state built without a client runs only tools that need no Kitaru server;
+    reading `client` from it raises.
+    """
 
-    def __post_init__(self) -> None:
+    def __init__(
+        self, settings: MCPSettings, client: KitaruAPIClient | None = None
+    ) -> None:
         """Create the semaphore from the configured maximum concurrency."""
-        self.semaphore = asyncio.Semaphore(self.settings.max_concurrency)
-        self._handler_deadline = ContextVar("kitaru_mcp_handler_deadline", default=None)
+        self.settings = settings
+        self._client = client
+        self.semaphore = asyncio.Semaphore(settings.max_concurrency)
+        # Cell drill-downs must read the records the visible matrix was built
+        # from, so each matrix keeps its records briefly under a snapshot id.
+        self.matrix_snapshots: TTLCache[tuple[GroupRecords, ...]] = TTLCache(
+            max_entries=4, ttl_seconds=300
+        )
+        self._handler_deadline: ContextVar[float | None] = ContextVar(
+            "kitaru_mcp_handler_deadline", default=None
+        )
+        self._closed = False
+
+    @property
+    def client(self) -> KitaruAPIClient:
+        """The Kitaru client.
+
+        Raises:
+            RuntimeError: The state was built without a client.
+        """
+        if self._client is None:
+            raise RuntimeError("This MCP server state has no Kitaru client.")
+        return self._client
 
     async def execute(self, operation: Callable[[], Awaitable[ResultT]]) -> ResultT:
         """Run one handler with bounded concurrency and timeout."""
@@ -55,7 +69,8 @@ class MCPServerState:
         return max(0.0, deadline - asyncio.get_running_loop().time())
 
     async def close(self) -> None:
-        """Close the lifecycle client exactly once."""
+        """Close the Kitaru client, if any, exactly once."""
         if not self._closed:
             self._closed = True
-            await self.client.close()
+            if self._client is not None:
+                await self._client.close()

@@ -151,11 +151,6 @@ async def test_each_tool_runs_the_handler_its_spec_names(
         assert result_type is inspect.signature(spec.handler).return_annotation
 
 
-class _NoServer:
-    def __getattr__(self, name: str) -> object:
-        raise AssertionError(f"a tool marked as needing no server read client.{name}")
-
-
 SERVERLESS_REQUESTS = {
     "kitaru_docs_search": {"query": "failure matrix"},
     "kitaru_feedback_draft": {
@@ -167,7 +162,8 @@ SERVERLESS_REQUESTS = {
 
 async def test_tools_marked_as_needing_no_server_run_without_a_client() -> None:
     serverless = [spec for spec in TOOL_SPECS if not spec.needs_server]
-    state = MCPServerState(MCPSettings(), cast(Any, _NoServer()))
+    # Built without a client: a tool that reads one raises.
+    state = MCPServerState(MCPSettings())
 
     assert {spec.name for spec in serverless} == set(SERVERLESS_REQUESTS)
     for spec in serverless:
