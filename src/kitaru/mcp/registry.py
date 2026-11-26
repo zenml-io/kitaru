@@ -17,7 +17,6 @@ from mcp.server.mcpserver.tools import Tool
 from mcp.types import CallToolResult, ToolAnnotations
 from pydantic import BaseModel, ConfigDict, ValidationError, create_model
 
-from kitaru.api_models.v1.base import JsonValue
 from kitaru.mcp.apps import FAILURE_MATRIX_URI, SESSION_VIEWER_URI, ui_meta
 from kitaru.mcp.errors import (
     MCPOutputValidationError,
@@ -77,7 +76,7 @@ from kitaru.mcp.models.workflows import (
     WorkflowCancelRequest,
     WorkflowStartRequest,
 )
-from kitaru.mcp.redaction import redact, redact_data
+from kitaru.mcp.redaction import to_json_data
 from kitaru.mcp.settings import CapabilityMode
 from kitaru.mcp.tools.activity import handle_activity_read
 from kitaru.mcp.tools.analyzers import handle_analyzers_manage
@@ -209,20 +208,15 @@ async def invoke_tool(
         data = await state.execute(lambda: spec.run(state, request))
         if isinstance(data, ToolSuccessPayload):
             redacting = data.redact
-            json_data = (
-                redact_data(data.data) if redacting else cast(JsonValue, data.data)
-            )
-            # `redact=False` covers the data alone: warnings and links come
-            # from Kitaru, not from the user's own files.
             envelope = success_result(
                 spec.result_type,
-                json_data,
-                warnings=[redact(warning) for warning in data.warnings],
-                links=cast(dict[str, str], redact_data(data.links)),
+                to_json_data(data.data),
+                warnings=data.warnings,
+                links=data.links,
             )
             text = data.text
         else:
-            envelope = success_result(spec.result_type, redact_data(data))
+            envelope = success_result(spec.result_type, to_json_data(data))
     except passthrough:
         raise
     # Handlers marshal their own request payloads and raise `MCPToolError` when a
