@@ -113,7 +113,7 @@ def _check_dropped_secrets(
 def _check_unchanged(
     stored: ConnectionResponse, expected_updated: datetime | None
 ) -> None:
-    """Refuse an update built on a read older than the stored connection."""
+    """Refuse an update whose `expected_updated` no longer matches `updated`."""
     if expected_updated is None:
         # Validation requires it; a request built without validation must not
         # skip the check.

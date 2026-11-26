@@ -508,7 +508,7 @@ async def test_update_refuses_contradictory_secret_removals(
 
 
 async def test_update_refuses_a_connection_changed_since_it_was_read() -> None:
-    """An update built on a stale read never overwrites someone else's change."""
+    """An update built on a read older than an `env` change is refused."""
     sent: list[ConnectionUpdateRequest] = []
     stored, client = _get_legacy_client(sent)
     server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
