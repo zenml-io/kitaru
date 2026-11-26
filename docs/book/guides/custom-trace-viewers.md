@@ -42,7 +42,7 @@ Install the MCP server in a project, as in [Set up your coding agent](../agent-n
 uv add "kitaru[mcp]"
 ```
 
-Viewers live in one folder, `~/.config/kitaru/viewers` unless you name another with `--viewers-dir` or `KITARU_MCP_VIEWERS_DIR`. The built-in `default` viewer needs no file and shows any session as a list of steps. Saving notes needs `--mode standard`; in `read-only` the viewer opens for reading only.
+Viewers live in one folder, `~/.config/kitaru/viewers` unless you name another with `--viewers-dir` or `KITARU_MCP_VIEWERS_DIR`. A server started with `KITARU_MCP_CUSTOM_VIEWERS=false` reads no folder and serves only the built-in viewers. The built-in `default` viewer needs no file and shows any session as a list of steps. Saving notes needs `--mode standard`; in `read-only` the viewer opens for reading only.
 
 Chat apps start the MCP server without your shell's `PATH`, so give them absolute paths. `which uv` prints the path to `uv`.
 

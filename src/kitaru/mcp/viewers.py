@@ -29,6 +29,8 @@ def get_viewers_directory(settings: MCPSettings) -> Path:
 
 def list_viewers(settings: MCPSettings) -> list[str]:
     """List the built-in viewers, then the custom viewers in name order."""
+    if not settings.custom_viewers:
+        return list(BUILTIN_VIEWERS)
     directory = get_viewers_directory(settings)
     custom: list[str] = []
     if directory.is_dir():
@@ -86,6 +88,13 @@ def _get_custom_viewer_path(settings: MCPSettings, name: str) -> Path:
     # sit outside the viewers folder.
     if not _NAME.match(name):
         raise MCPToolError("invalid_arguments", f"{name!r} is not a viewer name.")
+    if not settings.custom_viewers:
+        raise MCPToolError(
+            "not_found",
+            f"No viewer named {name!r}.",
+            details={"available": list(BUILTIN_VIEWERS)},
+            recovery="Open one of the available viewers.",
+        )
     directory = get_viewers_directory(settings)
     path = directory / f"{name}{VIEWER_SUFFIX}"
     if not path.is_file():
