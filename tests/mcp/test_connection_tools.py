@@ -366,6 +366,27 @@ async def test_update_refuses_any_credential_value_but_the_masked_one() -> None:
     assert "HF_TOKEN" in refusal["message"]
 
 
+async def test_update_refuses_a_masked_secret_value() -> None:
+    """`***` cannot keep a stored secret: `secrets` replaces all of them."""
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    secrets = {"LANGFUSE_SECRET_KEY": "***", "HF_TOKEN": "hf-planted"}
+    request = {"operation": "update", "connection_id": str(stored.id)}
+
+    with pytest.raises(ToolError) as refused:
+        await server.call_tool(
+            "kitaru_connections_manage",
+            {"request": {**request, "secrets": secrets}},
+            context,
+        )
+
+    assert sent == []
+    assert "LANGFUSE_SECRET_KEY" in str(refused.value)
+    assert "send every value" in str(refused.value)
+    assert "hf-planted" not in str(refused.value)
+
+
 # One rule decides both what `env` refuses on write and what reads mask.
 CREDENTIAL_NAMES = [
     ("OPENAI_API_KEY", True),

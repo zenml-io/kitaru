@@ -9,6 +9,7 @@ from typing import Annotated, Literal, Self
 from pydantic import (
     AfterValidator,
     Field,
+    SecretStr,
     TypeAdapter,
     ValidatorFunctionWrapHandler,
     WrapValidator,
@@ -55,18 +56,15 @@ PlainEnv = Annotated[
 ]
 
 
-def _refuse_sent_credential(name: str) -> str:
-    raise ValueError(
-        f"names a credential, so `env` takes it only as `{MASKED}`, which keeps "
-        "the value the connection stores; leaving it out of `env` deletes that "
-        "value. Put a new credential in `secrets`, which on update replaces every "
-        "stored secret."
+def _refuse_keys(keys: list[str], message: str) -> None:
+    # Fail on each key alone: an error on the map would echo its values, which
+    # may be the very credential.
+    def refuse(_name: str) -> str:
+        raise ValueError(message)
+
+    TypeAdapter(dict[Annotated[str, AfterValidator(refuse)], None]).validate_python(
+        dict.fromkeys(keys)
     )
-
-
-_SENT_CREDENTIALS = TypeAdapter(
-    dict[Annotated[str, AfterValidator(_refuse_sent_credential)], None]
-)
 
 
 def _check_update_env(
@@ -77,13 +75,34 @@ def _check_update_env(
         key for key, item in env.items() if is_credential_name(key) and item != MASKED
     ]
     if sent:
-        # Fail on each key alone: an error on the map would echo its values,
-        # which may be the very credential.
-        _SENT_CREDENTIALS.validate_python(dict.fromkeys(sent))
+        _refuse_keys(
+            sent,
+            f"names a credential, so `env` takes it only as `{MASKED}`, which "
+            "keeps the value the connection stores; leaving it out of `env` "
+            "deletes that value. Put a new credential in `secrets`, which on "
+            "update replaces every stored secret.",
+        )
     return env
 
 
+def _check_update_secrets(
+    value: object, handler: ValidatorFunctionWrapHandler
+) -> dict[str, SecretStr]:
+    secrets = handler(value)
+    masked = [key for key, item in secrets.items() if item.get_secret_value() == MASKED]
+    if masked:
+        _refuse_keys(
+            masked,
+            f"is `{MASKED}`, but a stored secret cannot be kept that way: "
+            "`secrets` replaces every stored secret, so send every value.",
+        )
+    return secrets
+
+
 UpdateEnv = Annotated[dict[str, str], WrapValidator(_check_update_env)]
+UpdateSecrets = Annotated[
+    dict[str, PlainSerializedSecretStr], WrapValidator(_check_update_secrets)
+]
 
 
 ConnectionReadRequest = Annotated[
@@ -120,7 +139,7 @@ class ConnectionUpdate(MCPModel):
         "out deletes it. A key that names a credential is accepted only as "
         f"`{MASKED}`: put new credentials in `secrets`.",
     )
-    secrets: dict[str, PlainSerializedSecretStr] | None = Field(
+    secrets: UpdateSecrets | None = Field(
         default=None,
         description="Replaces every stored secret. Stored values cannot be read "
         "back, so send every secret the connection should keep, not only new "
