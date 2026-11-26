@@ -91,14 +91,9 @@ def _check_dropped_secrets(
     stored: Iterable[str], sent: Mapping[str, object], removed: Iterable[str]
 ) -> None:
     """Refuse an update whose `secrets` would delete a stored secret unasked."""
+    # A name already gone is a no-op, so a retried update still goes through;
+    # a mistyped one leaves its stored secret uncovered, which is refused below.
     stored, removed = set(stored), set(removed)
-    if unknown := sorted(removed - stored):
-        raise MCPToolError(
-            "invalid_arguments",
-            f"`remove_secrets` names {', '.join(unknown)}, which the connection "
-            "does not store.",
-            details={"secret_keys": sorted(stored)},
-        )
     if dropped := sorted(stored - set(sent) - removed):
         raise MCPToolError(
             "invalid_arguments",

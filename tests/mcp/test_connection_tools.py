@@ -440,9 +440,18 @@ async def test_update_built_without_validation_still_refuses_a_credential() -> N
         ({"NEW_KEY": "new-planted"}, None, "LANGFUSE_SECRET_KEY"),
         ({"NEW_KEY": "new-planted"}, ["LANGFUSE_SECRET_KEY"], None),
         ({}, ["LANGFUSE_SECRET_KEY"], None),
-        ({"LANGFUSE_SECRET_KEY": "kept-planted"}, ["GONE_KEY"], "GONE_KEY"),
+        # A retried removal names a secret already gone; it changes nothing.
+        ({"LANGFUSE_SECRET_KEY": "kept-planted"}, ["GONE_KEY"], None),
+        # A mistyped removal leaves the stored secret uncovered.
+        ({"NEW_KEY": "new-planted"}, ["LANGFUSE_SECRET_KY"], "LANGFUSE_SECRET_KEY"),
     ],
-    ids=["drops-a-stored-secret", "removes-on-purpose", "deletes-all", "unknown"],
+    ids=[
+        "drops-a-stored-secret",
+        "removes-on-purpose",
+        "deletes-all",
+        "already-gone",
+        "typo",
+    ],
 )
 async def test_update_deletes_a_stored_secret_only_when_asked(
     secrets: dict[str, str], remove: list[str] | None, refused: str | None

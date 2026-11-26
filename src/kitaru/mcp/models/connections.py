@@ -153,7 +153,7 @@ class ConnectionUpdate(MCPModel):
         default=None,
         description="Names of stored secrets this update deletes on purpose; "
         "goes with `secrets`. `secrets: {}` with every stored name here deletes "
-        "them all.",
+        "them all. A name the connection no longer stores is ignored.",
     )
     default: bool | None = None
     expected_updated: datetime | None = Field(

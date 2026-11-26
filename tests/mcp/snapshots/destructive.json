@@ -17630,7 +17630,7 @@
                 }
               ],
               "default": null,
-              "description": "Names of stored secrets this update deletes on purpose; goes with `secrets`. `secrets: {}` with every stored name here deletes them all.",
+              "description": "Names of stored secrets this update deletes on purpose; goes with `secrets`. `secrets: {}` with every stored name here deletes them all. A name the connection no longer stores is ignored.",
               "title": "Remove Secrets"
             },
             "secrets": {
