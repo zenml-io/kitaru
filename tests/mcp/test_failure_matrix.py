@@ -878,6 +878,35 @@ async def test_a_redacted_cell_without_failures_keeps_its_attempts(
     assert _structured(cell)["data"]["attempts"] == 1
 
 
+async def test_an_empty_plain_cell_is_not_looked_up_again_with_previous_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = _failing_group()
+    analyses: list[object] = []
+    analyze = failure_matrix._analyze
+
+    def counted(*args: Any) -> Any:
+        analyses.append(args)
+        return analyze(*args)
+
+    monkeypatch.setattr(failure_matrix, "_analyze", counted)
+    settings = MCPSettings(
+        stateless=True,
+        label_key=SecretStr("b" * 32),
+        previous_label_keys=[SecretStr("a" * 32), SecretStr("c" * 32)],
+    )
+    server, context = build_server_context(_FakeClient(records), settings=settings)
+
+    cell = await server.call_tool(
+        "kitaru_failure_matrix_cell",
+        {"request": {"from_state": "lookup_order", "to_state": "never_called"}},
+        context,
+    )
+
+    assert _structured(cell)["data"]["total"] == 0
+    assert len(analyses) == 1
+
+
 def test_long_names_get_bounded_distinct_labels() -> None:
     sessions = [_session("failed"), _session("failed")]
     long_names = ["x" * 200 + "_alpha", "x" * 200 + "_beta"]

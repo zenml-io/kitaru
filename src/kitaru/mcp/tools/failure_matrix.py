@@ -34,9 +34,11 @@ from kitaru.mcp.models.failure_matrix import (
     GroupSummary,
     MatrixCell,
 )
+from kitaru.mcp.redaction import MASKED
 from kitaru.mcp.settings import MCPSettings
 from kitaru.mcp.tools.paging import read_up_to
 from kitaru.mcp.tools.transitions import (
+    SHORTENED,
     SessionOutcome,
     analyze_group,
     build_cells,
@@ -126,7 +128,13 @@ async def handle_failure_cell(
         )
     # A matrix built before a key rotation tagged its redacted labels with an
     # earlier key, so a cell no session matched is looked up again with each of
-    # those; a cell matches when it has sessions or counts attempts.
+    # those; a cell matches when it has sessions or counts attempts. Only a
+    # redacted label carries a key's tag; redaction leaves MASKED in it, and a
+    # label cut short for length keeps its mark even where MASKED was cut off.
+    keys = _get_label_keys(state.settings)
+    states = (request.from_state, request.to_state)
+    if not any(MASKED in label or SHORTENED in label for label in states):
+        keys = keys[:1]
     cells = (
         cell_details(
             _analyze(request, records, label_key)[index].outcomes,
@@ -134,7 +142,7 @@ async def handle_failure_cell(
             request.sources,
             request.limit,
         )
-        for label_key in _get_label_keys(state.settings)
+        for label_key in keys
     )
     current = next(cells)
     if current.total or current.attempts is not None:
