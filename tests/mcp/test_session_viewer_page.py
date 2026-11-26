@@ -63,3 +63,37 @@ def test_edits_in_progress_never_land_on_the_next_session(tmp_path: Path) -> Non
         "composerWasStillOpen": False,
         "noteTargets": ["first"],
     }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
+def test_edits_survive_the_same_session_rendering_again(tmp_path: Path) -> None:
+    shown = _drive_page(tmp_path)
+
+    assert shown["sameSessionRerender"] == {
+        "current": "first",
+        "appended": ["Pending save for first"],
+        "composerStillOpen": True,
+        "noteTargets": ["first"],
+    }
+    assert shown["investigationPositions"] == {
+        "position": 1,
+        "keptOnSamePosition": True,
+        "closedOnNextPosition": True,
+    }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
+def test_the_first_session_never_touches_the_next_sessions_edits(
+    tmp_path: Path,
+) -> None:
+    shown = _drive_page(tmp_path)
+
+    assert shown["earlierSaveFinishesLater"] == {
+        "nextBoxStillOpen": True,
+        "nextNotes": [],
+        "noteTargets": ["first"],
+    }
+    assert shown["noteButtonAcrossSessions"] == {
+        "offered": True,
+        "removedWithFirst": True,
+    }

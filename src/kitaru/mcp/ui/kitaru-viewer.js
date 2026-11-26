@@ -32,7 +32,7 @@
   // `args` is the latest tool input; `viewArgs` holds the host arguments, such
   // as a workspace, of the session on screen, so its reads and saves stay in
   // the workspace it was opened in until another session replaces it.
-  const state = { args: {}, viewArgs: {}, view: null, openTicket: 0, mounted: false, mounting: null, hostContext: {}, sessionCallbacks: [], annotationCallbacks: [], nodeIndex: new Map() };
+  const state = { args: {}, viewArgs: {}, viewKey: null, view: null, openTicket: 0, mounted: false, mounting: null, hostContext: {}, sessionCallbacks: [], annotationCallbacks: [], nodeIndex: new Map() };
 
   window.addEventListener("message", (event) => {
     if (event.source !== window.parent) return;
@@ -112,10 +112,13 @@
       const [envelope] = await Promise.all([reading, mountViewer(target.viewer, hostArgs)]);
       const data = envelope.data;
       if (!current()) return false;
-      // A note box still open belongs to the session this view replaces.
-      closeComposer();
+      // Edits in progress belong to the session on screen: rendering it again
+      // keeps them, and another session drops them.
+      const key = viewKey(data, hostArgs);
+      if (key !== state.viewKey) { closeComposer(); dropNoteOffers(); }
       state.view = data;
       state.viewArgs = hostArgs;
+      state.viewKey = key;
       state.nodeIndex = new Map(data.nodes.map((n) => [n.id, n]));
       (envelope.warnings || []).forEach((w) => console.warn(`[kitaru] ${w}`));
       hideStatus();
@@ -128,6 +131,11 @@
       if (ticket === state.openTicket) showStatus(describeFailure(error), true);
       return false;
     }
+  }
+  // The record a view shows: its session, its place in an investigation, and
+  // the host arguments, such as a workspace, it was read with.
+  function viewKey(view, hostArgs) {
+    return JSON.stringify([view.session.id, view.investigation?.id ?? null, view.investigation?.position ?? null, hostArgs]);
   }
   // A JSON-RPC error here comes from the host, not from Kitaru: the server
   // reports its own failures inside a tool result.
@@ -373,11 +381,11 @@
   }
   async function writeAnnotation(args) {
     requireWrite();
-    const view = state.view;
+    const key = state.viewKey;
     const env = await callTool(WRITE_TOOL, args, state.viewArgs);
     // Kitaru stored the note on the session it names; show it only while that
     // session is still the one on screen.
-    if (state.view === view) storeAnnotation(env.data);
+    if (state.viewKey === key) storeAnnotation(env.data);
     return { annotation: env.data, warnings: env.warnings || [] };
   }
   function note({ selector = null, quote = null, text }) {
@@ -496,6 +504,9 @@
 
   let composer = null;
   function closeComposer() { composer?.remove(); composer = null; }
+  // Hide each floating "+ Note" button, which offers to note text it selected.
+  const noteOffers = new Set();
+  function dropNoteOffers() { for (const hide of noteOffers) hide(); }
   // Open a comment box for `target` (from kitaru.selection() or kitaru.target(el)).
   function compose(target, { title } = {}) {
     closeComposer();
@@ -505,13 +516,16 @@
     const save = h("button", { class: "kv-btn kv-primary", text: "Save", disabled: !state.view.capabilities.can_write, onclick: () => saving(save, async () => {
       if (!box.value.trim()) return null;
       const r = await note({ selector: target.selector, quote: target.quote ?? null, text: box.value.trim() });
-      closeComposer(); window.getSelection()?.removeAllRanges(); toast("Saved");
+      // Another session's box may be open by now; close only this one.
+      if (composer === dialog) { closeComposer(); window.getSelection()?.removeAllRanges(); }
+      toast("Saved");
       return r;
     }) });
-    composer = h("div", { class: "kv-composer", role: "dialog", "aria-label": "Add a note" },
+    const dialog = h("div", { class: "kv-composer", role: "dialog", "aria-label": "Add a note" },
       h("div", { class: "kv-composer-title", text: title || describeTarget(target) }),
       quote ? h("div", { class: "kv-note-quote", text: quote }) : null,
       box, h("div", { class: "kv-row" }, h("button", { class: "kv-btn", text: "Cancel", onclick: closeComposer }), save));
+    composer = dialog;
     document.body.append(composer);
     const rect = target.rect || target.element?.getBoundingClientRect();
     const top = (rect ? rect.bottom : 80) + window.scrollY + 8;
@@ -538,6 +552,7 @@
   function enableSelectionNotes({ title = null } = {}) {
     let button = null;
     const hide = () => { button?.remove(); button = null; };
+    noteOffers.add(hide);
     const onUp = () => setTimeout(() => {
       if (composer?.contains(document.activeElement)) return;
       const sel = selection();

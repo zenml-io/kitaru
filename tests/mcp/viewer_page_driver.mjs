@@ -7,12 +7,40 @@ import vm from "node:vm";
 
 const runtime = fs.readFileSync(process.argv[2], "utf8");
 
-async function openPage(inputs) {
+function viewData(request) {
+  if (!request.investigation_id) {
+    return {
+      session: { id: request.session_id },
+      nodes: [],
+      nodes_cursor: request.session_id === "first" ? "more" : null,
+      annotations: [],
+      capabilities: { can_write: true },
+    };
+  }
+  const position = request.position ?? 0;
+  return {
+    session: { id: `review-${position}` },
+    nodes: [],
+    nodes_cursor: null,
+    annotations: [],
+    capabilities: { can_write: true },
+    investigation: {
+      id: request.investigation_id, name: "Review", position, status: "open",
+      sessions: [{ position: 0, verdict: null }, { position: 1, verdict: null }],
+      investigation_session: { id: `link-${position}`, verdict: null, questions: [] },
+    },
+  };
+}
+
+async function openPage(inputs, opening = { session_id: "first" }) {
   const calls = [];
   const elements = [];
+  const listeners = {};
+  let timers = [];
   let listener;
   let holdNote = false;
   let releaseNote = null;
+  let selected = null;
   const receive = (data) => listener({ source: parent, data: { jsonrpc: "2.0", ...data } });
   const parent = {
     postMessage(message) {
@@ -23,13 +51,7 @@ async function openPage(inputs) {
         calls.push({ operation: request.operation, session: request.session_id ?? null, host });
         const data = {
           viewer_source: { html: "<p>viewer</p>" },
-          view: {
-            session: { id: request.session_id },
-            nodes: [],
-            nodes_cursor: request.session_id === "first" ? "more" : null,
-            annotations: [],
-            capabilities: { can_write: true },
-          },
+          view: viewData(request),
           nodes: { nodes: [], nodes_cursor: null },
           note: { id: `note-${calls.length}`, text: request.text },
         }[request.operation];
@@ -44,19 +66,23 @@ async function openPage(inputs) {
     },
   };
   const node = {
-    querySelectorAll: () => [], querySelector: () => null, childNodes: [],
+    querySelectorAll: () => [], querySelector: () => null, childNodes: [], clientWidth: 800,
     append() {}, replaceChildren() {}, getBoundingClientRect: () => ({ height: 10 }),
   };
   const win = {
-    parent, getSelection: () => null,
+    parent, scrollX: 0, scrollY: 0, scrollTo() {},
+    getSelection: () => selected ?? { rangeCount: 0, isCollapsed: true, removeAllRanges() {} },
     addEventListener(name, callback) { if (name === "message") listener = callback; },
   };
   const doc = {
     documentElement: node, head: node, body: node, querySelectorAll: () => [],
     getElementById: () => node, dispatchEvent() {},
+    addEventListener(name, handler) { (listeners[name] ||= []).push(handler); },
+    createRange: () => ({ selectNodeContents() {}, setEnd() {}, toString: () => "" }),
     createElement(tag) {
       const element = {
         tag, style: {}, handlers: {}, removed: false, append() {}, focus() {}, setAttribute() {},
+        contains: () => false,
         addEventListener(name, handler) { this.handlers[name] = handler; },
         remove() { this.removed = true; },
       };
@@ -65,13 +91,22 @@ async function openPage(inputs) {
     },
   };
   vm.runInNewContext(runtime, {
-    window: win, document: doc, console, setTimeout() {},
+    window: win, document: doc, console, Node: { ELEMENT_NODE: 1 },
+    setTimeout(callback) { timers.push(callback); },
     crypto: { randomUUID: () => "key" },
     ResizeObserver: class { observe() {} }, CustomEvent: class {},
     DOMParser: class { parseFromString() { return doc; } },
   });
   const settle = async (done) => {
     for (let turn = 0; turn < 100 && !done(); turn++) await new Promise((r) => setImmediate(r));
+  };
+  // The host sends a tool's input, then its result; the page renders the
+  // session the result names.
+  const show = async (request, host = inputs[request.session_id] ?? {}) => {
+    const before = win.kitaru?.view;
+    receive({ method: "ui/notifications/tool-input", params: { arguments: { ...host, request } } });
+    receive({ method: "ui/notifications/tool-result", params: { structuredContent: { ok: true, data: request } } });
+    await settle(() => win.kitaru?.view && win.kitaru.view !== before);
   };
   const input = (session) => receive({
     method: "ui/notifications/tool-input",
@@ -82,16 +117,44 @@ async function openPage(inputs) {
     await settle(() => win.kitaru?.view?.session?.id === session);
   };
   await settle(() => listener !== undefined);
-  input("first");
-  await result("first");
+  await show(opening);
   const holdNextNote = async (save) => {
     holdNote = true;
     const saved = save();
     await settle(() => releaseNote !== null);
     return { saved, release: () => releaseNote() };
   };
-  return { win, calls, elements, input, result, holdNextNote };
+  const compose = (text) => {
+    win.kitaru.ui.compose({ kind: "session", selector: null, quote: null }, { title: text });
+    const box = elements.findLast((e) => e.tag === "textarea");
+    box.value = text;
+    return {
+      composer: elements.findLast((e) => e.className === "kv-composer"),
+      save: elements.findLast((e) => e.textContent === "Save"),
+    };
+  };
+  // Select text in a node of the session on screen, as a reviewer would.
+  const select = (nodeId) => {
+    const block = {
+      nodeType: 1,
+      closest: () => block,
+      getAttribute: (name) => (name === "data-annot-scope" ? `node:${nodeId}` : "/outputs/text"),
+    };
+    const range = {
+      startContainer: block, endContainer: block, startOffset: 0, toString: () => "quoted",
+      getBoundingClientRect: () => ({ top: 50, right: 100, bottom: 70, left: 10 }),
+    };
+    selected = { rangeCount: 1, isCollapsed: false, getRangeAt: () => range, removeAllRanges() {} };
+    for (const handler of listeners.mouseup || []) handler();
+    const due = timers;
+    timers = [];
+    for (const callback of due) callback();
+  };
+  const notes = () => win.kitaru.allNotes().map((n) => n.text);
+  return { win, calls, elements, show, input, result, holdNextNote, compose, select, notes };
 }
+
+const noteTargets = (calls) => calls.filter((c) => c.operation === "note").map((c) => c.session);
 
 // The host sends the next tool's input before that tool's result arrives.
 async function workspaces(inputs) {
@@ -106,12 +169,8 @@ async function workspaces(inputs) {
 // A note box and a save are both in progress on the first session when the
 // next one renders.
 async function sessionChangeDuringEdits() {
-  const { win, calls, elements, input, result, holdNextNote } = await openPage({ first: {}, next: {} });
-  win.kitaru.ui.compose({ kind: "session", selector: null, quote: null }, { title: "Note on first" });
-  const box = elements.find((e) => e.tag === "textarea");
-  const save = elements.find((e) => e.textContent === "Save");
-  const composer = elements.find((e) => e.className === "kv-composer");
-  box.value = "Draft for first";
+  const { win, calls, input, result, holdNextNote, compose, notes } = await openPage({ first: {}, next: {} });
+  const { composer, save } = compose("Draft for first");
   const pending = await holdNextNote(() => win.kitaru.note({ text: "Pending save for first" }));
   input("next");
   await result("next");
@@ -119,16 +178,63 @@ async function sessionChangeDuringEdits() {
   await pending.saved;
   const composerWasStillOpen = !composer.removed;
   if (composerWasStillOpen) await save.handlers.click();
-  return {
-    current: win.kitaru.view.session.id,
-    appended: win.kitaru.allNotes().map((n) => n.text),
-    composerWasStillOpen,
-    noteTargets: calls.filter((c) => c.operation === "note").map((c) => c.session),
-  };
+  return { current: win.kitaru.view.session.id, appended: notes(), composerWasStillOpen, noteTargets: noteTargets(calls) };
+}
+
+// The host renders the session on screen again while a box and a save on it
+// are in progress.
+async function sameSessionRerender() {
+  const { win, calls, show, holdNextNote, compose, notes } = await openPage({ first: { workspace: "research" } });
+  const { composer } = compose("Draft for first");
+  const pending = await holdNextNote(() => win.kitaru.note({ text: "Pending save for first" }));
+  await show({ session_id: "first" });
+  pending.release();
+  await pending.saved;
+  return { current: win.kitaru.view.session.id, appended: notes(), composerStillOpen: !composer.removed, noteTargets: noteTargets(calls) };
+}
+
+// The reviewer opens the investigation position on screen again, then the next.
+async function investigationPositions() {
+  const { win, compose } = await openPage({}, { investigation_id: "review", position: 0 });
+  const { composer } = compose("Draft for position 0");
+  await win.kitaru.goTo(0);
+  const keptOnSamePosition = !composer.removed;
+  await win.kitaru.goTo(1);
+  return { position: win.kitaru.view.investigation.position, keptOnSamePosition, closedOnNextPosition: composer.removed };
+}
+
+// The reviewer saves on the first session, moves to the next, and starts a
+// note there before the first save finishes.
+async function earlierSaveFinishesLater() {
+  const { win, calls, input, result, holdNextNote, compose, notes } = await openPage({ first: {}, next: {} });
+  const first = compose("Saved on first");
+  const pending = await holdNextNote(() => first.save.handlers.click());
+  input("next");
+  await result("next");
+  const next = compose("Draft for next");
+  pending.release();
+  await pending.saved;
+  return { nextBoxStillOpen: !next.composer.removed, nextNotes: notes(), noteTargets: noteTargets(calls) };
+}
+
+// A floating "+ Note" button offered for text on the first session.
+async function noteButtonAcrossSessions() {
+  const { win, elements, input, result, select } = await openPage({ first: {}, next: {} });
+  win.kitaru.ui.enableSelectionNotes();
+  select("first-node");
+  const button = elements.findLast((e) => e.textContent === "+ Note");
+  const offered = button !== undefined && !button.removed;
+  input("next");
+  await result("next");
+  return { offered, removedWithFirst: button?.removed ?? false };
 }
 
 console.log(JSON.stringify({
   hosted: await workspaces({ first: { workspace: "research" }, next: { workspace: "second" } }),
   local: await workspaces({ first: {}, next: {} }),
   sessionChange: await sessionChangeDuringEdits(),
+  sameSessionRerender: await sameSessionRerender(),
+  investigationPositions: await investigationPositions(),
+  earlierSaveFinishesLater: await earlierSaveFinishesLater(),
+  noteButtonAcrossSessions: await noteButtonAcrossSessions(),
 }));
