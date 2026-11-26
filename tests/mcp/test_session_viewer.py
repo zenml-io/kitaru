@@ -470,6 +470,50 @@ async def test_a_missing_viewer_lists_the_ones_that_exist(tmp_path: Path) -> Non
     assert envelope["error"]["details"]["available"] == ["default", "line-schedule"]
 
 
+@pytest.mark.parametrize("custom_viewers", [True, False])
+async def test_a_server_without_custom_viewers_serves_built_ins_only(
+    custom_viewers: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # With no viewers folder set, custom viewers come from the config folder.
+    monkeypatch.setenv("KITARU_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "viewers").mkdir()
+    (tmp_path / "viewers" / "gene-map.html").write_text("<p>custom</p>")
+    settings = MCPSettings(custom_viewers=custom_viewers)
+    client = _Client()
+    server, context = build_server_context(client, settings=settings)
+
+    source = await _call(
+        server,
+        context,
+        "kitaru_viewer_read",
+        {"operation": "viewer_source", "viewer": "gene-map"},
+    )
+    opened = await _call(
+        server,
+        context,
+        "kitaru_session_view",
+        {"session_id": str(client.session_id), "viewer": "gene-map"},
+    )
+    missing = await _call(
+        server,
+        context,
+        "kitaru_session_view",
+        {"session_id": str(client.session_id), "viewer": "absent"},
+    )
+
+    if custom_viewers:
+        assert source["data"]["html"] == "<p>custom</p>"
+        assert opened["ok"] is True
+        assert list_viewers(settings) == ["default", "gene-map"]
+        return
+    assert list_viewers(settings) == ["default"]
+    for envelope in (source, opened, missing):
+        assert envelope["error"]["code"] == "not_found"
+        assert envelope["error"]["details"] == {"available": ["default"]}
+        assert str(tmp_path) not in json.dumps(envelope)
+        assert "folder" not in json.dumps(envelope)
+
+
 @pytest.mark.parametrize("name", ["../secrets", "gene.map", "Gene", ""])
 async def test_viewer_names_cannot_leave_the_viewers_folder(
     name: str, tmp_path: Path

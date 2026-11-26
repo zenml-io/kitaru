@@ -45,12 +45,15 @@ class MCPSettings(BaseModel):
     pool_size: int = Field(default=20, ge=1, le=1000)
     max_concurrency: int = Field(default=10, ge=1, le=1000)
     viewers_dir: Path | None = None
+    # Off, only the viewers bundled with Kitaru exist: nothing is read from the
+    # viewers folder, and no answer names it.
+    custom_viewers: bool = True
     debug: bool = False
     # Turn on for a server that runs as several copies behind one address: a
     # follow-up call can reach another copy, so no state is kept in memory
     # between calls. The failure matrix then returns no snapshot_id and each
     # cell reads its sessions again. Custom viewers are still read from each
-    # copy's own `viewers_dir`.
+    # copy's own viewers folder unless `custom_viewers` is off.
     stateless: bool = False
     # Keys the digest that tells apart state labels redaction made equal. Copies
     # that serve one matrix and its cells must share it; when unset, each
@@ -93,6 +96,7 @@ class MCPSettings(BaseModel):
             "pool_size": "KITARU_MCP_POOL_SIZE",
             "max_concurrency": "KITARU_MCP_MAX_CONCURRENCY",
             "viewers_dir": "KITARU_MCP_VIEWERS_DIR",
+            "custom_viewers": "KITARU_MCP_CUSTOM_VIEWERS",
             "debug": "KITARU_MCP_DEBUG",
             "stateless": "KITARU_MCP_STATELESS",
             "label_key": "KITARU_MCP_LABEL_KEY",

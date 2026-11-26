@@ -111,10 +111,15 @@ def test_settings_default_and_explicit_over_environment_precedence() -> None:
 def test_hosting_settings_come_from_the_environment() -> None:
     key = "k" * 32
     settings = MCPSettings.from_environment(
-        {"KITARU_MCP_STATELESS": "true", "KITARU_MCP_LABEL_KEY": key}
+        {
+            "KITARU_MCP_STATELESS": "true",
+            "KITARU_MCP_LABEL_KEY": key,
+            "KITARU_MCP_CUSTOM_VIEWERS": "false",
+        }
     )
 
     assert settings.stateless is True
+    assert settings.custom_viewers is False
     assert settings.label_key is not None
     assert settings.label_key.get_secret_value() == key
     with pytest.raises(ValueError, match="at least 32"):
