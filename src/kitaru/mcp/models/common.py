@@ -107,6 +107,11 @@ class ToolSuccessPayload(MCPModel):
         description="Plain-language summary sent as the text result instead of "
         "the JSON envelope; the structured result keeps the full data.",
     )
+    redact: bool = Field(
+        default=True,
+        description="Mask credential-shaped strings in the result. Off only for "
+        "data that comes from the user's own files rather than from Kitaru.",
+    )
 
 
 RegistryItem = (
@@ -140,7 +145,7 @@ class _MCPJob(JobResponse):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    kind: Literal["session_run", "import", "evaluation", "replay"]  # ty: ignore[invalid-attribute-override]
+    kind: Literal["session_run", "import", "evaluation", "replay"]  # ty: ignore[incompatible-attribute-override]
 
 
 ActivityItem = (
@@ -156,10 +161,17 @@ ActivityItem = (
 )
 
 
+class ActivityPageData(PageData[ActivityItem]):
+    """Bounded page of activity records."""
+
+    # Accept generic PageData instances as well as dictionaries.
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ActivityReadResult(ToolResult):
     """Typed activity read result."""
 
-    data: ActivityItem | PageData[ActivityItem] | None = None
+    data: ActivityItem | ActivityPageData | None = None
     links: dict[Literal["inspect"], str] = Field(default_factory=dict)
 
 

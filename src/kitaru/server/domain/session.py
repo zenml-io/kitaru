@@ -33,6 +33,7 @@ from kitaru.server.domain.base import (
 from kitaru.server.domain.blob import Blob
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.payload import Payload
+from kitaru.server.domain.tag import Tag
 
 
 class SessionNotFound(NotFoundError):
@@ -409,6 +410,7 @@ class Session(DomainModel):
     tokens: TokenUsage | None = None
     llm_call_count: int = 0
     tool_call_count: int = 0
+    tags: list[Tag] = Field(default_factory=list)
     created: datetime | None = None
     updated: datetime | None = None
 

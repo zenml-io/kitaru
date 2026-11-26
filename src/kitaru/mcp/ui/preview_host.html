@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kitaru viewer preview</title>
+<style>
+:root { color-scheme: light dark; --bg: #f4f2ee; --card: #fff; --ink: #1a1714; --ink-2: #6b6560; --border: #e5e2dc; --brand: #f17829; --bad: #b42330; --good: #1f7a36; }
+@media (prefers-color-scheme: dark) { :root { --bg: #12110f; --card: #1c1a17; --ink: #f3efe9; --ink-2: #b3aca4; --border: #34302b; --bad: #ff7b7b; --good: #5cc27a; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 13.5px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--card); position: sticky; top: 0; z-index: 2; }
+header h1 { font-size: 14px; margin: 0 8px 0 0; }
+header label { display: flex; gap: 6px; align-items: center; color: var(--ink-2); }
+input, select, button { font: inherit; color: inherit; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+input { width: 290px; } input.short { width: 60px; } input.mid { width: 130px; }
+button { cursor: pointer; } button.primary { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; padding: 16px; }
+@media (max-width: 1000px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.chat { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+.chat .hint { color: var(--ink-2); margin-bottom: 8px; }
+iframe { width: 100%; height: 480px; border: 1px solid var(--border); border-radius: 10px; background: transparent; display: block; }
+body.fullscreen .layout { grid-template-columns: minmax(0, 1fr); padding: 0; }
+body.fullscreen aside, body.fullscreen .chat .hint { display: none; }
+body.fullscreen .chat { border: 0; border-radius: 0; padding: 0; }
+body.fullscreen iframe { height: calc(100vh - 54px) !important; border-radius: 0; }
+aside { display: flex; flex-direction: column; gap: 8px; }
+aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); margin: 4px 0 0; }
+.log { display: flex; flex-direction: column; gap: 6px; max-height: calc(100vh - 140px); overflow: auto; }
+.entry { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.entry .k { font-weight: 600; } .entry.err { border-color: var(--bad); color: var(--bad); } .entry.ok .k { color: var(--good); } .entry.msg { border-left: 3px solid var(--brand); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kitaru viewer preview</h1>
+  <label>Investigation <input id="investigation" placeholder="investigation id"></label>
+  <label>Position <input id="position" class="short" type="number" min="0" value="0"></label>
+  <label>or session <input id="session" placeholder="session id"></label>
+  <label>Viewer <input id="viewer" class="mid" value="default"></label>
+  <button class="primary" id="open">Open</button>
+  <button id="theme">Toggle theme</button>
+  <button id="check">Check anchors</button>
+</header>
+<div class="layout">
+  <section class="chat">
+    <div class="hint">This page stands in for an MCP host such as the ChatGPT desktop app: the viewer runs in a sandboxed frame under the MCP Apps default content security policy, and its tool calls go to a real <code>kitaru-mcp</code> process.</div>
+    <iframe id="app" title="Kitaru session viewer" sandbox="allow-scripts"></iframe>
+  </section>
+  <aside>
+    <h2>What the host sees</h2>
+    <div class="log" id="log"></div>
+  </aside>
+</div>
+<script>
+"use strict";
+const PREVIEW = /*{{PREVIEW_CONFIG}}*/ {};
+const $ = (id) => document.getElementById(id);
+const frame = $("app");
+let theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+let displayMode = "inline";
+let toolArgs = null, toolResult = null, nextId = 1;
+const waiting = new Map();
+
+function log(kind, text, cls = "") {
+  const entry = document.createElement("div");
+  entry.className = `entry ${cls}`;
+  const k = document.createElement("span"); k.className = "k"; k.textContent = kind;
+  entry.append(k, document.createTextNode(` ${text}`));
+  $("log").prepend(entry);
+}
+async function callTool(name, args) {
+  const response = await fetch("/call", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, arguments: args }) });
+  const result = await response.json();
+  const ok = !result.isError;
+  const op = args?.request?.operation ? ` ${args.request.operation}` : "";
+  log(`${name}${op}`, ok ? "ok" : (result.structuredContent?.error?.message || "failed"), ok ? "ok" : "err");
+  for (const w of result.structuredContent?.warnings || []) log("warning", w);
+  return result;
+}
+function send(message) { frame.contentWindow.postMessage({ jsonrpc: "2.0", ...message }, "*"); }
+function ask(method, params) { const id = `host-${nextId++}`; send({ id, method, params }); return new Promise((resolve) => waiting.set(id, resolve)); }
+function hostContext() { return { theme, displayMode, availableDisplayModes: ["inline", "fullscreen"], platform: "web", toolInfo: { tool: { name: "kitaru_session_view" } } }; }
+
+async function handle(method, params) {
+  switch (method) {
+    case "ui/initialize": return { protocolVersion: params.protocolVersion, hostInfo: { name: "kitaru-viewer-preview", version: "1.0.0" }, hostCapabilities: { openLinks: {}, serverTools: {}, logging: {} }, hostContext: hostContext() };
+    case "tools/call": return callTool(params.name, params.arguments);
+    case "ui/message": log("Message to the assistant", params.content?.map((c) => c.text).join("\n"), "msg"); return {};
+    case "ui/update-model-context": log("Context for the assistant", params.content?.map((c) => c.text).join("\n")); return {};
+    case "ui/open-link": window.open(params.url, "_blank", "noopener"); log("Open link", params.url); return {};
+    case "ui/request-display-mode": displayMode = params.mode === "fullscreen" ? "fullscreen" : "inline"; document.body.classList.toggle("fullscreen", displayMode === "fullscreen"); send({ method: "ui/notifications/host-context-changed", params: { displayMode } }); return { mode: displayMode };
+    case "ping": return {};
+    default: throw new Error(`The preview host does not support ${method}`);
+  }
+}
+window.addEventListener("message", async (event) => {
+  if (event.source !== frame.contentWindow) return;
+  const m = event.data;
+  if (!m || m.jsonrpc !== "2.0") return;
+  if (m.id != null && !m.method) { const done = waiting.get(m.id); if (done) { waiting.delete(m.id); done(m.result ?? m.error); } return; }
+  if (m.id != null) {
+    try { send({ id: m.id, result: await handle(m.method, m.params || {}) }); }
+    catch (error) { send({ id: m.id, error: { code: -32601, message: error.message } }); }
+    return;
+  }
+  if (m.method === "ui/notifications/initialized") {
+    if (toolArgs) { send({ method: "ui/notifications/tool-input", params: { arguments: toolArgs } }); send({ method: "ui/notifications/tool-result", params: toolResult }); }
+  } else if (m.method === "ui/notifications/size-changed" && displayMode === "inline") {
+    frame.style.height = `${Math.min(Math.max(m.params.height, 200), 4000)}px`;
+  } else if (m.method === "notifications/message") {
+    log("Log", JSON.stringify(m.params));
+  }
+});
+
+async function open() {
+  const investigation = $("investigation").value.trim(), session = $("session").value.trim();
+  const request = { viewer: $("viewer").value.trim() || "default" };
+  if (investigation) { request.investigation_id = investigation; request.position = Number($("position").value || 0); }
+  else if (session) request.session_id = session;
+  else { log("Open", "Enter an investigation or session id.", "err"); return; }
+  toolArgs = { request };
+  toolResult = await callTool("kitaru_session_view", toolArgs);
+  const text = toolResult.content?.find((c) => c.type === "text")?.text;
+  if (text) log("Text the model receives", text);
+  frame.src = `/app?t=${Date.now()}`;
+}
+async function check() {
+  const result = await ask("kitaru/self-check", {});
+  const lines = (result.problems || []).map((p) => `✗ ${p.path ?? ""} ${p.problem}${p.stored ? `\n   stored   ${p.stored}\n   rendered ${p.rendered}` : ""}`)
+    .concat((result.hints || []).map((h) => `• ${h.path ?? ""} ${h.hint}`));
+  log(result.ok ? "Anchors ok" : "Anchor problems", `${result.checked ?? 0} anchors checked${lines.length ? `\n${lines.join("\n")}` : ""}`, result.ok ? "ok" : "err");
+  return result;
+}
+$("open").addEventListener("click", open);
+$("check").addEventListener("click", check);
+$("theme").addEventListener("click", () => { theme = theme === "dark" ? "light" : "dark"; send({ method: "ui/notifications/host-context-changed", params: { theme } }); });
+window.previewCheck = check;
+for (const key of ["investigation", "position", "session", "viewer"]) if (PREVIEW[key] != null) $(key).value = PREVIEW[key];
+if (PREVIEW.investigation || PREVIEW.session) open();
+</script>
+</body>
+</html>

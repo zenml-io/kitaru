@@ -8,10 +8,19 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
+from jsonschema import Draft202012Validator
 from mcp.types import TextContent
+from scripts.report_mcp_schema import (
+    MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES,
+    MAX_MODEL_TOOLS,
+    MAX_TOOL_SCHEMA_BYTES,
+)
 
 from kitaru.api_models.v1.agent import AgentResponse
+from kitaru.api_models.v1.session import SessionDetailResponse, SessionResponse
+from kitaru.api_models.v1.tag import TagResponse
 from kitaru.mcp import registry
+from kitaru.mcp.apps import is_model_visible
 from kitaru.mcp.errors import (
     MCPToolError,
     error_result,
@@ -19,7 +28,14 @@ from kitaru.mcp.errors import (
     success_result,
 )
 from kitaru.mcp.lifecycle import MCPServerState
-from kitaru.mcp.models.common import RegistryReadResult, ToolResult
+from kitaru.mcp.models.common import (
+    ActivityItem,
+    ActivityReadResult,
+    PageData,
+    PageMetadata,
+    RegistryReadResult,
+    ToolResult,
+)
 from kitaru.mcp.registry import TOOL_SPECS
 from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
@@ -35,6 +51,8 @@ EXPECTED = {
         "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
+        "kitaru_session_view",
+        "kitaru_viewer_read",
     ],
     CapabilityMode.STANDARD: [
         "kitaru_registry_read",
@@ -46,6 +64,8 @@ EXPECTED = {
         "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
+        "kitaru_session_view",
+        "kitaru_viewer_read",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
@@ -54,6 +74,7 @@ EXPECTED = {
         "kitaru_evaluators_manage",
         "kitaru_analyzers_manage",
         "kitaru_connections_manage",
+        "kitaru_viewer_write",
     ],
     CapabilityMode.DESTRUCTIVE: [
         "kitaru_registry_read",
@@ -65,6 +86,8 @@ EXPECTED = {
         "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
+        "kitaru_session_view",
+        "kitaru_viewer_read",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
@@ -73,6 +96,7 @@ EXPECTED = {
         "kitaru_evaluators_manage",
         "kitaru_analyzers_manage",
         "kitaru_connections_manage",
+        "kitaru_viewer_write",
         "kitaru_workflow_cancel",
         "kitaru_delete",
     ],
@@ -102,6 +126,8 @@ async def test_exact_capability_filtered_inventories_and_annotations() -> None:
                     "kitaru_feedback_draft",
                     "kitaru_failure_matrix",
                     "kitaru_failure_matrix_cell",
+                    "kitaru_session_view",
+                    "kitaru_viewer_read",
                 }
             )
 
@@ -162,9 +188,65 @@ async def test_actual_sdk_discovery_schemas_fit_budgets() -> None:
         combined = _compact_size(tool["inputSchema"]) + _compact_size(
             tool["outputSchema"]
         )
-        assert combined < 45 * 1024
-    assert _compact_size({"tools": dumped}) < 242 * 1024
-    assert len(tools) <= 19
+        assert combined < MAX_TOOL_SCHEMA_BYTES
+    # Hosts keep app-only tools out of the model's context, so the context
+    # budget counts the tools the model sees.
+    model_visible = [tool for tool in dumped if is_model_visible(tool.get("_meta"))]
+    assert (
+        _compact_size({"tools": model_visible}) < MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES
+    )
+    assert len(model_visible) <= MAX_MODEL_TOOLS
+
+
+@pytest.mark.parametrize("session_type", [SessionResponse, SessionDetailResponse])
+@pytest.mark.parametrize("serialized", [False, True])
+def test_activity_result_preserves_generic_pages_and_complete_session_tags(
+    session_type: type[SessionResponse], serialized: bool
+) -> None:
+    now = datetime.now(UTC)
+    tag = TagResponse(
+        id=uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        name="reviewed",
+        created=now,
+        updated=now,
+    )
+    session = session_type.model_validate(
+        {
+            "id": uuid.uuid4(),
+            "owner_id": tag.owner_id,
+            "agent_id": uuid.uuid4(),
+            "number": 1,
+            "origin": "imported",
+            "status": "completed",
+            "metadata": {},
+            "llm_call_count": 0,
+            "tool_call_count": 0,
+            "tags": [tag],
+            "created": now,
+            "updated": now,
+            "inputs": {"question": "Why?"},
+            "outputs": {"answer": "Because."},
+        }
+    )
+    page = PageData[ActivityItem](
+        items=[session],
+        page=PageMetadata(size=1, next_cursor="next-page", has_more=True),
+    )
+
+    result = ActivityReadResult.model_validate(
+        {"ok": True, "data": page.model_dump(mode="json") if serialized else page}
+    )
+    result_data = result.model_dump(mode="json")["data"]
+
+    assert result_data == {
+        "items": [session.model_dump(mode="json")],
+        "page": {"size": 1, "next_cursor": "next-page", "has_more": True},
+    }
+    assert result_data["items"][0]["tags"] == [tag.model_dump(mode="json")]
+    Draft202012Validator(ActivityReadResult.model_json_schema()).validate(
+        result.model_dump(mode="json")
+    )
 
 
 async def test_activity_child_schema_exposes_only_kind_specific_fields() -> None:

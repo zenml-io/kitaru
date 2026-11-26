@@ -771,7 +771,7 @@ async def test_unknown_snapshot_asks_for_a_rebuild_instead_of_refetching() -> No
 
 async def test_stateless_server_keeps_no_matrix_and_cells_read_again() -> None:
     client = _FakeClient(_failing_group())
-    server, context = build_server_context(client, stateless=True)
+    server, context = build_server_context(client, settings=MCPSettings(stateless=True))
 
     matrix = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
     # Another copy of the server built this snapshot, so this one cannot know it.
