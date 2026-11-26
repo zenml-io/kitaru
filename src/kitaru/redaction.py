@@ -95,6 +95,7 @@ MASKED = "***"
 """The text that stands in for a masked value."""
 
 _TOKEN_USAGE_KEYS = frozenset(TokenUsage.model_fields)
+_DIGITS = re.compile(r"[0-9]+")
 _MAX_DEPTH = 64
 
 
@@ -195,7 +196,10 @@ def _redact_data(
 def _is_token_usage(value: Any, *, key: str) -> bool:
     """Recognize only numeric token usage fields, including per-call means."""
     if key in _TOKEN_USAGE_KEYS:
-        return _is_token_count(value)
+        # A connection setting holds a count as a string, such as "4096".
+        return _is_token_count(value) or (
+            isinstance(value, str) and _DIGITS.fullmatch(value) is not None
+        )
     if key != "tokens":
         return False
     if isinstance(value, dict):

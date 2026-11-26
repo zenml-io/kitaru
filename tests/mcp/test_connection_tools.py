@@ -439,6 +439,12 @@ CREDENTIAL_NAMES = [
     ("MAX_COMPLETION_TOKENS", False),
     ("max_new_tokens", False),
     ("prompt_tokens", False),
+    # Token usage fields: a stored count is a string of digits, shown like a number.
+    ("input_tokens", False),
+    ("output_tokens", False),
+    ("cached_input_tokens", False),
+    ("cache_write_input_tokens", False),
+    ("reasoning_tokens", False),
     ("secret_keys", False),
     ("TOKENIZER_NAME", False),
     ("AWS_WEB_IDENTITY_TOKEN_FILE", False),
