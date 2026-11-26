@@ -9888,7 +9888,7 @@
       "openWorldHint": true,
       "readOnlyHint": true
     },
-    "description": "Open one session in an interactive trace viewer where a reviewer annotates it.\n\nPass `session_id`, or `investigation_id` with `position` to review an\ninvestigation's sessions with its questions and verdicts. `viewer` picks the\npage: `default`, or a custom viewer saved as `<name>.html` in the viewers\nfolder. The result names the session; the viewer page reads its payloads\nitself. Notes, answers, and verdicts the reviewer saves in the viewer go to\nKitaru; read them back with `kitaru_review_read`.",
+    "description": "Open one session in an interactive trace viewer where a reviewer annotates it.\n\nPass `session_id`, or `investigation_id` with `position` to review an\ninvestigation's sessions with its questions and verdicts. `viewer` picks the\npage: `default`, or a named custom viewer if this server enables custom\nviewers. The result names the session; the viewer page reads its payloads\nitself. Notes, answers, and verdicts the reviewer saves in the viewer go to\nKitaru; read them back with `kitaru_review_read`.",
     "inputSchema": {
       "$defs": {
         "SessionViewRequest": {
@@ -9932,7 +9932,7 @@
             },
             "viewer": {
               "default": "default",
-              "description": "Viewer to open: `default`, or the file name without `.html` of a viewer in the viewers folder.",
+              "description": "Viewer to open: `default`, or the name of a custom viewer if this server enables custom viewers.",
               "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
               "title": "Viewer",
               "type": "string"
@@ -10246,7 +10246,7 @@
               "type": "string"
             },
             "viewer": {
-              "description": "Viewer to open: `default`, or the file name without `.html` of a viewer in the viewers folder.",
+              "description": "Viewer to open: `default`, or the name of a custom viewer if this server enables custom viewers.",
               "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
               "title": "Viewer",
               "type": "string"
@@ -10305,7 +10305,7 @@
             },
             "viewer": {
               "default": "default",
-              "description": "Viewer to open: `default`, or the file name without `.html` of a viewer in the viewers folder.",
+              "description": "Viewer to open: `default`, or the name of a custom viewer if this server enables custom viewers.",
               "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
               "title": "Viewer",
               "type": "string"

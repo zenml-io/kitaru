@@ -395,8 +395,8 @@ TOOL_SPECS = (
 
         Pass `session_id`, or `investigation_id` with `position` to review an
         investigation's sessions with its questions and verdicts. `viewer` picks the
-        page: `default`, or a custom viewer saved as `<name>.html` in the viewers
-        folder. The result names the session; the viewer page reads its payloads
+        page: `default`, or a named custom viewer if this server enables custom
+        viewers. The result names the session; the viewer page reads its payloads
         itself. Notes, answers, and verdicts the reviewer saves in the viewer go to
         Kitaru; read them back with `kitaru_review_read`.
         """

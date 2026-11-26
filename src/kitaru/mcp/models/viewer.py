@@ -18,8 +18,8 @@ ViewerName = Annotated[
     str,
     Field(
         pattern=VIEWER_NAME_PATTERN,
-        description="Viewer to open: `default`, or the file name without `.html` "
-        "of a viewer in the viewers folder.",
+        description="Viewer to open: `default`, or the name of a custom viewer "
+        "if this server enables custom viewers.",
     ),
 ]
 # Long enough for a selected paragraph, short enough that a quote cannot carry
