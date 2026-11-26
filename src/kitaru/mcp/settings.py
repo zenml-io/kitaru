@@ -61,8 +61,10 @@ class MCPSettings(BaseModel):
     # that serve one matrix and its cells must share it; when unset, each
     # process draws its own.
     label_key: SecretStr | None = Field(default=None, min_length=32)
-    # Keys that tagged labels before `label_key` replaced them, so a cell of a
-    # matrix built before the rotation still finds its sessions.
+    # Keys that tagged labels before `label_key` replaced them, so on a
+    # `stateless` server a cell of a matrix built before the rotation still
+    # finds its sessions. A server that keeps matrices answers cells from its
+    # copy, which the restart that rotates the key has already dropped.
     previous_label_keys: tuple[Annotated[SecretStr, Field(min_length=32)], ...] = ()
 
     @field_validator("server_url")
