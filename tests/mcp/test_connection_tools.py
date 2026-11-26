@@ -40,6 +40,7 @@ from kitaru.mcp.models.connections import (
     ConnectionUpdate,
 )
 from kitaru.mcp.references import ReferenceResolutionError
+from kitaru.mcp.registry import TOOL_SPECS, invoke_tool
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
 from kitaru.mcp.tools.connections import (
     handle_connection_read,
@@ -385,6 +386,26 @@ async def test_update_refuses_a_masked_secret_value() -> None:
     assert "LANGFUSE_SECRET_KEY" in str(refused.value)
     assert "send every value" in str(refused.value)
     assert "hf-planted" not in str(refused.value)
+
+
+async def test_update_built_without_validation_still_refuses_a_credential() -> None:
+    """A host that skips validation gets a refusal, not a silent keep."""
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    spec = next(spec for spec in TOOL_SPECS if spec.name == "kitaru_connections_manage")
+    request = ConnectionUpdate.model_construct(
+        operation="update",
+        connection_id=stored.id,
+        env={"OPENAI_API_KEY": "sk-new-value"},
+    )
+    state = MCPServerState(MCPSettings(), cast(Any, client))
+
+    result = await invoke_tool(spec, state, request)
+
+    assert sent == []
+    error = _structured(result)["error"]
+    assert error["code"] == "invalid_arguments"
+    assert "OPENAI_API_KEY" in error["message"]
 
 
 # One rule decides both what `env` refuses on write and what reads mask.

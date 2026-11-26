@@ -80,6 +80,17 @@ async def _restore_shown_values(
 ) -> dict[str, str]:
     """Return `env` with each value sent as a read shows it set to the stored one."""
     credentials = [key for key in env if is_credential_name(key)]
+    sent = sorted(key for key in credentials if env[key] != MASKED)
+    if sent:
+        # Validation refuses these; a request built without it must neither
+        # store the credential nor lose the change without a word.
+        raise MCPToolError(
+            "invalid_arguments",
+            f"`env` keys {', '.join(sent)} name credentials and take only "
+            f"`{MASKED}`, which keeps the stored value.",
+            recovery="Put a new credential in `secrets`; on update, `secrets` "
+            "replaces every stored secret.",
+        )
     # Every masked display contains MASKED, so an update without one, and
     # without a credential key, has nothing to restore.
     if not credentials and not any(MASKED in value for value in env.values()):
