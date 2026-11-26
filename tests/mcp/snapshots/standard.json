@@ -17598,6 +17598,20 @@
               "description": "Replaces every plain setting. A value sent exactly as `kitaru_connection_read` shows it, such as `***` or `Bearer ***`, keeps the value the connection stores; leaving a key out deletes it. A key that names a credential is accepted only as `***`: put new credentials in `secrets`.",
               "title": "Env"
             },
+            "expected_updated": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The connection's `updated` time as `kitaru_connection_read` shows it; required with `env` or `secrets`. The update is refused if the connection changed after that read.",
+              "title": "Expected Updated"
+            },
             "operation": {
               "const": "update",
               "title": "Operation",

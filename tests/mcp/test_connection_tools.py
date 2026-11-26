@@ -15,7 +15,7 @@
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -200,8 +200,10 @@ async def test_connection_management_uses_only_typed_sdk_mutations() -> None:
         calls.append(("update", request))
         return SimpleNamespace()
 
+    existing = _get_connection("langfuse-prod", connection_id=connection_id)
+
     async def get(_connection_id: uuid.UUID) -> object:
-        return _get_connection("langfuse-prod", connection_id=connection_id)
+        return existing
 
     state = _get_state(
         SimpleNamespace(
@@ -226,6 +228,7 @@ async def test_connection_management_uses_only_typed_sdk_mutations() -> None:
             operation="update",
             connection_id=connection_id,
             secrets={"LANGFUSE_SECRET_KEY": "sk-rotated"},
+            expected_updated=existing.updated,
         ),
     )
     await handle_connections_manage(
@@ -297,15 +300,18 @@ def _get_legacy_client(
         "AWS_REGION": "eu",
     }
     stored = _get_connection("legacy").model_copy(update={"env": env})
+    # Tests replace `client.stored` to change the connection behind a caller.
+    client = SimpleNamespace(stored=stored)
 
     async def get(_connection_id: uuid.UUID) -> Any:
-        return stored
+        return client.stored
 
     async def update(_connection_id: uuid.UUID, request: Any) -> Any:
         sent.append(request)
-        return stored
+        return client.stored
 
-    return stored, SimpleNamespace(connections=SimpleNamespace(get=get, update=update))
+    client.connections = SimpleNamespace(get=get, update=update)
+    return stored, client
 
 
 def _structured(result: object) -> dict[str, Any]:
@@ -323,7 +329,11 @@ async def test_update_sending_back_the_read_env_keeps_the_masked_values() -> Non
         context,
     )
     env = {**_structured(read)["data"]["env"], "AWS_REGION": "us"}
-    request = {"operation": "update", "connection_id": str(stored.id)}
+    request = {
+        "operation": "update",
+        "connection_id": str(stored.id),
+        "expected_updated": _structured(read)["data"]["updated"],
+    }
 
     updated = await server.call_tool(
         "kitaru_connections_manage", {"request": {**request, "env": env}}, context
@@ -350,7 +360,11 @@ async def test_update_refuses_any_credential_value_but_the_masked_one() -> None:
     sent: list[ConnectionUpdateRequest] = []
     stored, client = _get_legacy_client(sent)
     server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
-    request = {"operation": "update", "connection_id": str(stored.id)}
+    request = {
+        "operation": "update",
+        "connection_id": str(stored.id),
+        "expected_updated": stored.updated.isoformat(),
+    }
 
     with pytest.raises(ToolError) as plaintext:
         await server.call_tool(
@@ -379,7 +393,11 @@ async def test_update_refuses_a_masked_secret_value() -> None:
     stored, client = _get_legacy_client(sent)
     server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
     secrets = {"LANGFUSE_SECRET_KEY": "***", "HF_TOKEN": "hf-planted"}
-    request = {"operation": "update", "connection_id": str(stored.id)}
+    request = {
+        "operation": "update",
+        "connection_id": str(stored.id),
+        "expected_updated": stored.updated.isoformat(),
+    }
 
     with pytest.raises(ToolError) as refused:
         await server.call_tool(
@@ -435,6 +453,7 @@ async def test_update_deletes_a_stored_secret_only_when_asked(
         "operation": "update",
         "connection_id": str(stored.id),
         "secrets": secrets,
+        "expected_updated": stored.updated.isoformat(),
     }
     if remove is not None:
         request["remove_secrets"] = remove
@@ -470,7 +489,11 @@ async def test_update_refuses_contradictory_secret_removals(
     sent: list[ConnectionUpdateRequest] = []
     stored, client = _get_legacy_client(sent)
     server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
-    request = {"operation": "update", "connection_id": str(stored.id)}
+    request = {
+        "operation": "update",
+        "connection_id": str(stored.id),
+        "expected_updated": stored.updated.isoformat(),
+    }
 
     with pytest.raises(ToolError) as refused:
         await server.call_tool(
@@ -482,6 +505,43 @@ async def test_update_refuses_contradictory_secret_removals(
     assert sent == []
     assert "HF_TOKEN" in str(refused.value)
     assert "hf-planted" not in str(refused.value)
+
+
+async def test_update_refuses_a_connection_changed_since_it_was_read() -> None:
+    """An update built on a stale read never overwrites someone else's change."""
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    read = await server.call_tool(
+        "kitaru_connection_read",
+        {"request": {"operation": "get", "reference": str(stored.id)}},
+        context,
+    )
+    shown = _structured(read)["data"]
+    client.stored = stored.model_copy(
+        update={"updated": stored.updated + timedelta(seconds=1)}
+    )
+    request = {
+        "operation": "update",
+        "connection_id": str(stored.id),
+        "env": {**shown["env"], "AWS_REGION": "us"},
+    }
+
+    stale = await server.call_tool(
+        "kitaru_connections_manage",
+        {"request": {**request, "expected_updated": shown["updated"]}},
+        context,
+    )
+    with pytest.raises(ToolError) as unguarded:
+        await server.call_tool(
+            "kitaru_connections_manage", {"request": request}, context
+        )
+
+    assert sent == []
+    error = _structured(stale)["error"]
+    assert error["code"] == "conflict"
+    assert "kitaru_connection_read" in error["recovery"]
+    assert "expected_updated" in str(unguarded.value)
 
 
 # One rule decides both what `env` refuses on write and what reads mask.

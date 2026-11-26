@@ -3,8 +3,8 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Connection read and management handlers."""
 
-import uuid
 from collections.abc import Iterable, Mapping
+from datetime import UTC, datetime
 
 from kitaru.api_models.v1.connection import (
     ConnectionCreateRequest,
@@ -63,15 +63,19 @@ async def handle_connections_manage(
         values = request.model_dump(
             include={"env", "secrets", "default"}, exclude_unset=True
         )
-        if request.env:
-            values["env"] = await _restore_shown_values(
-                state, request.connection_id, request.env
-            )
-        if request.secrets is not None:
+        if request.env is not None or request.secrets is not None:
+            if request.env:
+                _refuse_sent_credentials(request.env)
+            # Read right before the write; a change landing between the two
+            # is still missed, which only a check in the server could close.
             stored = await state.client.connections.get(request.connection_id)
-            _check_dropped_secrets(
-                stored.secret_keys, request.secrets, request.remove_secrets or []
-            )
+            _check_unchanged(stored, request.expected_updated)
+            if request.env:
+                values["env"] = _restore_shown_values(stored.env, request.env)
+            if request.secrets is not None:
+                _check_dropped_secrets(
+                    stored.secret_keys, request.secrets, request.remove_secrets or []
+                )
         return await state.client.connections.update(
             request.connection_id, ConnectionUpdateRequest.model_validate(values)
         )
@@ -103,12 +107,35 @@ def _check_dropped_secrets(
         )
 
 
-async def _restore_shown_values(
-    state: MCPServerState, connection_id: uuid.UUID, env: Mapping[str, str]
-) -> dict[str, str]:
-    """Return `env` with each value sent as a read shows it set to the stored one."""
-    credentials = [key for key in env if is_credential_name(key)]
-    sent = sorted(key for key in credentials if env[key] != MASKED)
+def _check_unchanged(
+    stored: ConnectionResponse, expected_updated: datetime | None
+) -> None:
+    """Refuse an update built on a read older than the stored connection."""
+    if expected_updated is None:
+        # Validation requires it; a request built without validation must not
+        # skip the check.
+        raise MCPToolError(
+            "invalid_arguments",
+            "An update of `env` or `secrets` needs `expected_updated`.",
+            recovery="Send the connection's `updated` time from "
+            "`kitaru_connection_read` as `expected_updated`.",
+        )
+    if _as_utc(stored.updated) != _as_utc(expected_updated):
+        raise MCPToolError(
+            "conflict",
+            "The connection changed after it was read.",
+            recovery="Read it again with `kitaru_connection_read`, apply the "
+            "change to what it shows now, and send its new `updated` time as "
+            "`expected_updated`.",
+        )
+
+
+def _as_utc(moment: datetime) -> datetime:
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+def _refuse_sent_credentials(env: Mapping[str, str]) -> None:
+    sent = sorted(key for key in env if is_credential_name(key) and env[key] != MASKED)
     if sent:
         # Validation refuses these; a request built without it must neither
         # store the credential nor lose the change without a word.
@@ -119,12 +146,15 @@ async def _restore_shown_values(
             recovery="Put a new credential in `secrets`; on update, `secrets` "
             "replaces every stored secret.",
         )
-    # Every masked display contains MASKED, so an update without one, and
-    # without a credential key, has nothing to restore.
-    if not credentials and not any(MASKED in value for value in env.values()):
-        return dict(env)
-    stored = (await state.client.connections.get(connection_id)).env
-    missing = sorted(key for key in credentials if key not in stored)
+
+
+def _restore_shown_values(
+    stored: Mapping[str, str], env: Mapping[str, str]
+) -> dict[str, str]:
+    """Return `env` with each value sent as a read shows it set to the stored one."""
+    missing = sorted(
+        key for key in env if is_credential_name(key) and key not in stored
+    )
     if missing:
         raise MCPToolError(
             "invalid_arguments",

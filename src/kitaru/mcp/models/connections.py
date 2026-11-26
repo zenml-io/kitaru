@@ -4,6 +4,7 @@
 """Strict connection read and management inputs."""
 
 import uuid
+from datetime import datetime
 from typing import Annotated, Literal, Self
 
 from pydantic import (
@@ -11,8 +12,10 @@ from pydantic import (
     Field,
     SecretStr,
     TypeAdapter,
+    ValidationInfo,
     ValidatorFunctionWrapHandler,
     WrapValidator,
+    field_validator,
     model_validator,
 )
 
@@ -153,6 +156,29 @@ class ConnectionUpdate(MCPModel):
         "them all.",
     )
     default: bool | None = None
+    expected_updated: datetime | None = Field(
+        default=None,
+        validate_default=True,
+        description="The connection's `updated` time as `kitaru_connection_read` "
+        "shows it; required with `env` or `secrets`. The update is refused if "
+        "the connection changed after that read.",
+    )
+
+    @field_validator("expected_updated")
+    @classmethod
+    def _require_expected_updated(
+        cls, value: datetime | None, info: ValidationInfo
+    ) -> datetime | None:
+        # A field error, not a model one: the model's error would echo every
+        # input, secret values included.
+        if value is None and any(
+            info.data.get(field) is not None for field in ("env", "secrets")
+        ):
+            raise ValueError(
+                "an update of `env` or `secrets` needs the connection's `updated` "
+                "time from `kitaru_connection_read`"
+            )
+        return value
 
     @model_validator(mode="after")
     def _validate_update(self) -> Self:
