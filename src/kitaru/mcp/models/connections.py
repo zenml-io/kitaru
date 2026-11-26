@@ -160,8 +160,9 @@ class ConnectionUpdate(MCPModel):
         default=None,
         validate_default=True,
         description="The connection's `updated` time as `kitaru_connection_read` "
-        "shows it; required with `env` or `secrets`. The update is refused if "
-        "the connection changed after that read.",
+        "shows it; required with `env` or `secrets`, and checked on any update "
+        "that sends it. The update is refused if the connection changed after "
+        "that read.",
     )
 
     @field_validator("expected_updated")

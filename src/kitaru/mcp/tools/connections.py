@@ -63,7 +63,10 @@ async def handle_connections_manage(
         values = request.model_dump(
             include={"env", "secrets", "default"}, exclude_unset=True
         )
-        if request.env is not None or request.secrets is not None:
+        if any(
+            value is not None
+            for value in (request.env, request.secrets, request.expected_updated)
+        ):
             if request.env:
                 _refuse_sent_credentials(request.env)
             # Read right before the write; a change landing between the two

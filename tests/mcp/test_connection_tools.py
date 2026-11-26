@@ -544,6 +544,27 @@ async def test_update_refuses_a_connection_changed_since_it_was_read() -> None:
     assert "expected_updated" in str(unguarded.value)
 
 
+async def test_a_default_only_update_honors_a_supplied_expected_updated() -> None:
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    stale = (stored.updated - timedelta(seconds=1)).isoformat()
+    request = {"operation": "update", "connection_id": str(stored.id), "default": True}
+
+    refused = await server.call_tool(
+        "kitaru_connections_manage",
+        {"request": {**request, "expected_updated": stale}},
+        context,
+    )
+    unguarded = await server.call_tool(
+        "kitaru_connections_manage", {"request": request}, context
+    )
+
+    assert _structured(refused)["error"]["code"] == "conflict"
+    assert _structured(unguarded)["ok"] is True
+    assert len(sent) == 1
+
+
 # One rule decides both what `env` refuses on write and what reads mask.
 CREDENTIAL_NAMES = [
     ("OPENAI_API_KEY", True),
