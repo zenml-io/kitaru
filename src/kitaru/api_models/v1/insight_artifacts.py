@@ -35,6 +35,17 @@ InsightStatus = Literal["new", "reviewed", "archived"]
 _SPLIT_BAR_MIN_SHARE = 0.02
 
 
+class _ArtifactBase(DiscriminatedRequestModel):
+    """Shared optional fields for all insight artifact blocks."""
+
+    title: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=120,
+        description="Optional block title.",
+    )
+
+
 class StatItem(RequestModel):
     """Single headline count or value inside a stat grid."""
 
@@ -49,7 +60,7 @@ class StatItem(RequestModel):
     )
 
 
-class StatGridArtifact(DiscriminatedRequestModel):
+class StatGridArtifact(_ArtifactBase):
     """One to six headline counts at a glance."""
 
     type: Literal["stat_grid"] = Field(default="stat_grid")
@@ -58,7 +69,7 @@ class StatGridArtifact(DiscriminatedRequestModel):
     )
 
 
-class RateArtifact(DiscriminatedRequestModel):
+class RateArtifact(_ArtifactBase):
     """Single rate with optional confidence range, or an x-of-y share bar."""
 
     type: Literal["rate"] = Field(default="rate")
@@ -138,7 +149,7 @@ class CategoryValue(RequestModel):
         return self
 
 
-class CategoricalArtifact(DiscriminatedRequestModel):
+class CategoricalArtifact(_ArtifactBase):
     """Ranked bars, focus-within-total, baseline-tick, path bars, split, or donut."""
 
     type: Literal["categorical"] = Field(default="categorical")
@@ -226,7 +237,7 @@ class ComparisonRow(RequestModel):
     )
 
 
-class ComparisonArtifact(DiscriminatedRequestModel):
+class ComparisonArtifact(_ArtifactBase):
     """Two-group or two-period comparison across one or more rows."""
 
     type: Literal["comparison"] = Field(default="comparison")
@@ -284,7 +295,7 @@ class TableColumn(RequestModel):
     ] = Field(default="text", description="Cell formatting hint.")
 
 
-class TableArtifact(DiscriminatedRequestModel):
+class TableArtifact(_ArtifactBase):
     """Structured table with optional inline rate bars and session links."""
 
     type: Literal["table"] = Field(default="table")
@@ -319,7 +330,7 @@ class Bin(RequestModel):
     focus: bool = Field(default=False, description="Highlight this bin.")
 
 
-class BinnedArtifact(DiscriminatedRequestModel):
+class BinnedArtifact(_ArtifactBase):
     """Contiguous histogram for spread across ordered bins."""
 
     type: Literal["binned"] = Field(default="binned")
@@ -368,7 +379,7 @@ class SessionDot(RequestModel):
     highlight: bool = Field(default=False, description="Highlight as outlier/focus.")
 
 
-class SessionDotsArtifact(DiscriminatedRequestModel):
+class SessionDotsArtifact(_ArtifactBase):
     """Dot strip showing every session when n <= 100; past 100 use binned."""
 
     type: Literal["session_dots"] = Field(default="session_dots")
@@ -411,7 +422,7 @@ class SeriesAnnotation(RequestModel):
     label: str = Field(min_length=1, max_length=60, description="Marker label.")
 
 
-class TimeSeriesArtifact(DiscriminatedRequestModel):
+class TimeSeriesArtifact(_ArtifactBase):
     """Change over 3+ points in time or versions on one shared scale."""
 
     type: Literal["time_series"] = Field(default="time_series")
@@ -499,7 +510,7 @@ class StepStripRow(RequestModel):
     )
 
 
-class StepStripArtifact(DiscriminatedRequestModel):
+class StepStripArtifact(_ArtifactBase):
     """Where in a run failures start, as stacked rows or per-agent small multiples."""
 
     type: Literal["step_strip"] = Field(default="step_strip")
@@ -556,7 +567,7 @@ class FailureMatrixCell(RequestModel):
     )
 
 
-class FailureMatrixArtifact(DiscriminatedRequestModel):
+class FailureMatrixArtifact(_ArtifactBase):
     """2D last-good x first-wrong transition heatmap, strictly max 6x6."""
 
     type: Literal["failure_matrix"] = Field(default="failure_matrix")
@@ -616,7 +627,7 @@ class SankeyLink(RequestModel):
     tone: Tone = Field(default="neutral", description="Semantic tone.")
 
 
-class FlowSankeyArtifact(DiscriminatedRequestModel):
+class FlowSankeyArtifact(_ArtifactBase):
     """Session split flow; strictly max 3 stages and 8 nodes, else use path_bars."""
 
     type: Literal["flow_sankey"] = Field(default="flow_sankey")
@@ -664,7 +675,7 @@ class StoryStep(RequestModel):
     )
 
 
-class StepStoryArtifact(DiscriminatedRequestModel):
+class StepStoryArtifact(_ArtifactBase):
     """Numbered step-by-step story of a failure, with optional session link."""
 
     type: Literal["step_story"] = Field(default="step_story")
@@ -686,7 +697,7 @@ class CycleStep(RequestModel):
     status: Literal["ok", "error"] = Field(default="ok", description="Call status.")
 
 
-class ToolCycleArtifact(DiscriminatedRequestModel):
+class ToolCycleArtifact(_ArtifactBase):
     """Repeating tool loop and its count."""
 
     type: Literal["tool_cycle"] = Field(default="tool_cycle")
@@ -725,7 +736,7 @@ class SessionSide(RequestModel):
     )
 
 
-class SessionComparisonArtifact(DiscriminatedRequestModel):
+class SessionComparisonArtifact(_ArtifactBase):
     """Failing session side by side with a passing counterexample or replay."""
 
     type: Literal["session_comparison"] = Field(default="session_comparison")
@@ -743,7 +754,7 @@ class TimelineSpan(RequestModel):
     tone: Tone = Field(default="neutral", description="Semantic tone.")
 
 
-class SessionTimelineArtifact(DiscriminatedRequestModel):
+class SessionTimelineArtifact(_ArtifactBase):
     """Duration waterfall for one session; never use for aggregate failure location."""
 
     type: Literal["session_timeline"] = Field(default="session_timeline")
@@ -782,7 +793,7 @@ class EvidenceRow(RequestModel):
     )
 
 
-class EvidenceArtifact(DiscriminatedRequestModel):
+class EvidenceArtifact(_ArtifactBase):
     """Concrete sessions proving a finding as a step table or compact rows."""
 
     type: Literal["evidence"] = Field(default="evidence")
@@ -797,7 +808,7 @@ class EvidenceArtifact(DiscriminatedRequestModel):
     )
 
 
-class TextArtifact(DiscriminatedRequestModel):
+class TextArtifact(_ArtifactBase):
     """Markdown prose, R2 callout banner, or labeled code/prompt hypothesis."""
 
     type: Literal["text"] = Field(default="text")

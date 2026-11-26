@@ -284,6 +284,7 @@ async def test_analyzer_writes_one_insight_per_finding(
     assert insight.summary == "Verified in 1 of 2 imported sessions. Harm: high."
     assert insight.findings[0].artifacts[0].type == "rate"
     assert insight.findings[0].artifacts[1].model_dump() == {
+        "title": None,
         "type": "text",
         "style": "body",
         "label": None,

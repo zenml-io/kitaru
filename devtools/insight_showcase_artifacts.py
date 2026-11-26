@@ -90,14 +90,16 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                 summary="Big number tiles, sampled rate with CI, and x-of-y share bar.",
                 artifacts=[
                     StatGridArtifact(
+                        title="Run overview",
                         items=[
                             StatItem(label="New", value=1, tone="warn"),
                             StatItem(label="Recurring", value=2, tone="neutral"),
                             StatItem(label="Resolved", value=1, tone="good"),
                             StatItem(label="Sessions", value=214, unit="sessions"),
-                        ]
+                        ],
                     ),
                     RateArtifact(
+                        title="Sampled failure rate",
                         presentation="range",
                         rate=0.14,
                         ci_low=0.10,
@@ -109,6 +111,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         tone="risk",
                     ),
                     RateArtifact(
+                        title="Affected session share",
                         presentation="share_bar",
                         rate=31 / 214,
                         numerator=31,
@@ -124,6 +127,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                 summary="Ranked bars, baseline bars, donut, dot plot, and table.",
                 artifacts=[
                     CategoricalArtifact(
+                        title="Failure causes",
                         presentation="ranked_bars",
                         unit="sessions",
                         values=[
@@ -141,6 +145,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         ],
                     ),
                     CategoricalArtifact(
+                        title="Skip rate by order edit",
                         presentation="baseline_bars",
                         unit="percent",
                         baseline_value=14,
@@ -153,6 +158,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         ],
                     ),
                     CategoricalArtifact(
+                        title="Session outcomes",
                         presentation="donut",
                         unit="sessions",
                         values=[
@@ -162,6 +168,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         ],
                     ),
                     ComparisonArtifact(
+                        title="Outcomes with vs. without order edit",
                         presentation="dot_plot",
                         before_label="No order edit",
                         after_label="Order edited",
@@ -181,6 +188,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         ],
                     ),
                     ComparisonArtifact(
+                        title="Change since last import",
                         presentation="import_status",
                         before_label="Oct 12",
                         after_label="Oct 19",
@@ -210,6 +218,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         ],
                     ),
                     TableArtifact(
+                        title="Per-tool failure rates",
                         columns=[
                             TableColumn(key="tool", label="Tool", format="mono"),
                             TableColumn(key="calls", label="Calls", format="number"),
@@ -249,6 +258,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                 summary="Histogram columns, per-session dot strip, and trend lines.",
                 artifacts=[
                     BinnedArtifact(
+                        title="Session duration distribution",
                         presentation="columns",
                         unit="seconds",
                         median=4.2,
@@ -261,6 +271,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         ],
                     ),
                     SessionDotsArtifact(
+                        title="Slowest individual sessions",
                         unit="seconds",
                         scale_min=0,
                         scale_max=25,
@@ -290,6 +301,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         ],
                     ),
                     TimeSeriesArtifact(
+                        title="Failure rate over time",
                         presentation="highlight_line",
                         x_labels=["Oct 1", "Oct 5", "Oct 10", "Oct 15", "Oct 19"],
                         unit="percent",
@@ -310,6 +322,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         ],
                     ),
                     TimeSeriesArtifact(
+                        title="Daily session outcomes",
                         presentation="stacked_columns",
                         x_labels=["Oct 14", "Oct 15", "Oct 16", "Oct 17", "Oct 18"],
                         unit="sessions",
@@ -339,6 +352,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                 ),
                 artifacts=[
                     StepStripArtifact(
+                        title="Where failures start by step",
                         presentation="rows",
                         total_steps=10,
                         rows=[
@@ -353,6 +367,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         ],
                     ),
                     FailureMatrixArtifact(
+                        title="Last good to first failing tool",
                         state_by="tool",
                         rows=["edit_order", "lookup_order", "search"],
                         cols=["issue_refund", "fetch_page", "escalate"],
@@ -387,6 +402,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         ],
                     ),
                     FlowSankeyArtifact(
+                        title="Order edit to outcome flow",
                         stages=[
                             SankeyStage(
                                 label="Entry",
@@ -448,6 +464,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         ],
                     ),
                     StepStoryArtifact(
+                        title="How it happened",
                         session_id=s1.session_id,
                         session_label=s1.label,
                         steps=[
@@ -475,6 +492,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         ],
                     ),
                     ToolCycleArtifact(
+                        title="Repeating tool loop",
                         steps=[
                             CycleStep(name="search", status="ok"),
                             CycleStep(name="fetch_page", status="error"),
@@ -484,6 +502,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         note="Repeats up to 14x when search returns stale URLs.",
                     ),
                     SessionComparisonArtifact(
+                        title="Failing vs. passing session",
                         left=SessionSide(
                             session_id=s1.session_id,
                             session_label=s1.label,
@@ -516,6 +535,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                         ),
                     ),
                     SessionTimelineArtifact(
+                        title="Single-session latency waterfall",
                         session_id=s1.session_id,
                         session_label=s1.label,
                         total_duration_ms=11_400,
@@ -543,6 +563,7 @@ def build_all_17_artifacts_report(sessions: list[SeededSession]) -> InsightInput
                 summary="Compact evidence rows plus callout and hypothesis.",
                 artifacts=[
                     EvidenceArtifact(
+                        title="Evidence",
                         presentation="compact",
                         total_sessions=31,
                         rows=[

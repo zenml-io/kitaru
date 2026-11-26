@@ -7236,6 +7236,21 @@
               "description": "Visual layout hint.",
               "title": "Presentation"
             },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
+            },
             "type": {
               "const": "binned",
               "default": "binned",
@@ -7300,6 +7315,21 @@
               "default": null,
               "description": "Visual layout hint.",
               "title": "Presentation"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
             },
             "type": {
               "const": "categorical",
@@ -7462,6 +7492,21 @@
               "minItems": 1,
               "title": "Rows",
               "type": "array"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
             },
             "type": {
               "const": "comparison",
@@ -7661,6 +7706,21 @@
               "title": "Rows",
               "type": "array"
             },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
+            },
             "total_sessions": {
               "description": "Total sessions behind this finding for 'Open all N'.",
               "minimum": 1,
@@ -7836,6 +7896,21 @@
               "title": "State By",
               "type": "string"
             },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
+            },
             "total_failed": {
               "description": "Total failed sessions.",
               "minimum": 0,
@@ -7934,6 +8009,21 @@
               "minItems": 2,
               "title": "Stages",
               "type": "array"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
             },
             "type": {
               "const": "flow_sankey",
@@ -9054,6 +9144,21 @@
               "title": "Rate",
               "type": "number"
             },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
+            },
             "tone": {
               "default": "risk",
               "description": "Semantic tone.",
@@ -9242,6 +9347,21 @@
               "$ref": "#/$defs/SessionSide",
               "description": "Right session (counterexample or replay)."
             },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
+            },
             "type": {
               "const": "session_comparison",
               "default": "session_comparison",
@@ -9338,6 +9458,21 @@
               "default": null,
               "description": "Optional min.",
               "title": "Scale Min"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
             },
             "type": {
               "const": "session_dots",
@@ -9453,6 +9588,21 @@
               "title": "Spans",
               "type": "array"
             },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
+            },
             "total_duration_ms": {
               "description": "Total session duration in milliseconds.",
               "minimum": 1,
@@ -9487,6 +9637,21 @@
               "minItems": 1,
               "title": "Items",
               "type": "array"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
             },
             "type": {
               "const": "stat_grid",
@@ -9615,6 +9780,21 @@
               "title": "Steps",
               "type": "array"
             },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
+            },
             "type": {
               "const": "step_story",
               "default": "step_story",
@@ -9651,6 +9831,21 @@
               "minItems": 1,
               "title": "Rows",
               "type": "array"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
             },
             "total_steps": {
               "description": "Number of step blocks on the shared scale.",
@@ -9931,6 +10126,21 @@
               "title": "Rows",
               "type": "array"
             },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
+            },
             "type": {
               "const": "table",
               "default": "table",
@@ -10050,6 +10260,21 @@
               "title": "Style",
               "type": "string"
             },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
+            },
             "type": {
               "const": "text",
               "default": "text",
@@ -10106,6 +10331,21 @@
               "minItems": 1,
               "title": "Series",
               "type": "array"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
             },
             "type": {
               "const": "time_series",
@@ -10303,6 +10543,21 @@
               "minItems": 1,
               "title": "Steps",
               "type": "array"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Optional block title.",
+              "title": "Title"
             },
             "type": {
               "const": "tool_cycle",

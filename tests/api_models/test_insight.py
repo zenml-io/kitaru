@@ -625,3 +625,32 @@ def test_step_strip_table_and_direct_model_constructors() -> None:
         == "session_timeline"
     )
     assert StatGridArtifact(items=[StatItem(label="New", value=1)]).type == "stat_grid"
+
+
+def test_optional_artifact_title_supported_on_every_artifact_type() -> None:
+    """Every artifact accepts an optional short block title and rejects blank/long."""
+    for payload in ALL_ARTIFACT_PAYLOADS:
+        titled = InsightInput(
+            name="titled-check",
+            title="Titled artifact check",
+            findings=[
+                InsightFinding(
+                    id="f1",
+                    title="Finding",
+                    artifacts=[{**payload, "title": "Block title"}],
+                )
+            ],
+        )
+        assert titled.findings[0].artifacts[0].title == "Block title"
+
+        untitled = InsightInput(
+            name="untitled-check",
+            title="Untitled artifact check",
+            findings=[InsightFinding(id="f1", title="Finding", artifacts=[payload])],
+        )
+        assert untitled.findings[0].artifacts[0].title is None
+
+    with pytest.raises(ValidationError):
+        RateArtifact(rate=0.5, title="")
+    with pytest.raises(ValidationError):
+        RateArtifact(rate=0.5, title="x" * 121)

@@ -109,6 +109,7 @@ def build_meridian_report(sessions: list[SeededSession]) -> InsightInput:
                         chat_prompt="Why is the range 10% to 20% on the refund skip?",
                     ),
                     EvidenceArtifact(
+                        title="Evidence",
                         presentation="table",
                         total_sessions=31,
                         rows=[
