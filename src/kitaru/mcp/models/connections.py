@@ -27,23 +27,23 @@ class ConnectionGetRequest(MCPModel):
     reference: str = Field(min_length=1)
 
 
-def _refuse_credential_like(name: str) -> str:
+def _refuse_credential_name(name: str) -> str:
     # Check keys, not the map: a refused map would echo its values, which may
     # be the very credential, in the validation error.
     if is_credential_name(name):
         raise ValueError(
-            "looks like a credential; move it to `secrets`, which are stored "
+            "names a credential; move it to `secrets`, which are stored "
             "encrypted and never returned"
         )
     return name
 
 
 PlainEnv = Annotated[
-    dict[Annotated[str, AfterValidator(_refuse_credential_like)], str],
+    dict[Annotated[str, AfterValidator(_refuse_credential_name)], str],
     Field(
         description="Plain settings, stored unencrypted and readable by anyone "
-        "who can read the connection. Keys that look like credentials are "
-        "refused: put those in `secrets`."
+        "who can read the connection. Keys that name credentials are refused: "
+        "put those in `secrets`."
     ),
 ]
 
@@ -74,8 +74,19 @@ class ConnectionUpdate(MCPModel):
 
     operation: Literal["update"]
     connection_id: uuid.UUID
-    env: PlainEnv | None = None
-    secrets: dict[str, PlainSerializedSecretStr] | None = None
+    env: dict[str, str] | None = Field(
+        default=None,
+        description="Replaces every plain setting. They are stored unencrypted "
+        "and readable by anyone who can read the connection, so a key that "
+        "names a credential is refused unless it is already stored with the "
+        "same value: put new credentials in `secrets`.",
+    )
+    secrets: dict[str, PlainSerializedSecretStr] | None = Field(
+        default=None,
+        description="Replaces every stored secret. Stored values cannot be read "
+        "back, so send every secret the connection should keep, not only new "
+        "ones.",
+    )
     default: bool | None = None
 
     @model_validator(mode="after")

@@ -17489,7 +17489,7 @@
               "additionalProperties": {
                 "type": "string"
               },
-              "description": "Plain settings, stored unencrypted and readable by anyone who can read the connection. Keys that look like credentials are refused: put those in `secrets`.",
+              "description": "Plain settings, stored unencrypted and readable by anyone who can read the connection. Keys that name credentials are refused: put those in `secrets`.",
               "title": "Env",
               "type": "object"
             },
@@ -17588,7 +17588,6 @@
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "description": "Plain settings, stored unencrypted and readable by anyone who can read the connection. Keys that look like credentials are refused: put those in `secrets`.",
                   "type": "object"
                 },
                 {
@@ -17596,6 +17595,7 @@
                 }
               ],
               "default": null,
+              "description": "Replaces every plain setting. They are stored unencrypted and readable by anyone who can read the connection, so a key that names a credential is refused unless it is already stored with the same value: put new credentials in `secrets`.",
               "title": "Env"
             },
             "operation": {
@@ -17618,6 +17618,7 @@
                 }
               ],
               "default": null,
+              "description": "Replaces every stored secret. Stored values cannot be read back, so send every secret the connection should keep, not only new ones.",
               "title": "Secrets"
             }
           },

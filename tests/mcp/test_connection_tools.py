@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Connection read and management tool contracts."""
 
+import json
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -24,7 +25,11 @@ from mcp.types import CallToolResult
 from mcp_fakes import build_server_context
 
 from kitaru.api_models.v1.base import Page
-from kitaru.api_models.v1.connection import ConnectionListParams, ConnectionResponse
+from kitaru.api_models.v1.connection import (
+    ConnectionListParams,
+    ConnectionResponse,
+    ConnectionUpdateRequest,
+)
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.common import PageData
@@ -250,32 +255,22 @@ async def test_connection_update_rejects_explicit_nulls() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    "request_body",
-    [
-        {"operation": "create", "name": "openai", "provider": "openai"},
-        {"operation": "update", "connection_id": str(uuid.uuid4())},
-    ],
-    ids=["create", "update"],
-)
-async def test_credential_like_env_keys_are_refused_without_echoing_values(
-    request_body: dict[str, object],
-) -> None:
-    """A key that looks like a credential belongs in `secrets`, never in `env`."""
-    client = SimpleNamespace()
-    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+async def test_credential_env_keys_are_refused_without_echoing_values() -> None:
+    """A key that names a credential belongs in `secrets`, never in `env`."""
+    server, context = build_server_context(
+        SimpleNamespace(), mode=CapabilityMode.STANDARD
+    )
     env = {
         "OPENAI_API_KEY": "sk-planted-value",
         "awsSecretAccessKey": "planted-camel-value",
         "HFToken": "planted-acronym-value",
         "MAX_TOKENS": "4096",
     }
+    request = {"operation": "create", "name": "openai", "provider": "openai"}
 
     with pytest.raises(ToolError) as refused:
         await server.call_tool(
-            "kitaru_connections_manage",
-            {"request": {**request_body, "env": env}},
-            context,
+            "kitaru_connections_manage", {"request": {**request, "env": env}}, context
         )
 
     message = str(refused.value)
@@ -284,6 +279,44 @@ async def test_credential_like_env_keys_are_refused_without_echoing_values(
     assert "MAX_TOKENS" not in message
     assert "secrets" in message
     assert "planted" not in message
+
+
+async def test_update_keeps_a_stored_credential_env_key_and_leaves_secrets() -> None:
+    """An update may send back a legacy credential in `env`, not a new one."""
+    stored = _get_connection("legacy").model_copy(
+        update={"env": {"AWS_SECRET_ACCESS_KEY": "legacy", "AWS_REGION": "eu"}}
+    )
+    sent: list[ConnectionUpdateRequest] = []
+
+    async def get(_connection_id: uuid.UUID) -> Any:
+        return stored
+
+    async def update(_connection_id: uuid.UUID, request: Any) -> Any:
+        sent.append(request)
+        return stored
+
+    client = SimpleNamespace(connections=SimpleNamespace(get=get, update=update))
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    env = {"AWS_SECRET_ACCESS_KEY": "legacy", "AWS_REGION": "us"}
+    request = {"operation": "update", "connection_id": str(stored.id)}
+
+    kept = await server.call_tool(
+        "kitaru_connections_manage", {"request": {**request, "env": env}}, context
+    )
+    changed = await server.call_tool(
+        "kitaru_connections_manage",
+        {"request": {**request, "env": {**env, "AWS_SECRET_ACCESS_KEY": "planted"}}},
+        context,
+    )
+
+    [update_request] = sent
+    assert cast(CallToolResult, kept).is_error is False
+    assert update_request.env == env
+    assert "secrets" not in update_request.model_fields_set
+    refusal = cast(dict[str, Any], cast(CallToolResult, changed).structured_content)
+    assert "AWS_SECRET_ACCESS_KEY" in refusal["error"]["message"]
+    assert "replaces every stored secret" in refusal["error"]["message"]
+    assert "planted" not in json.dumps(refusal)
 
 
 # One rule decides both what `env` refuses on write and what reads mask.
