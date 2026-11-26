@@ -25,16 +25,96 @@ from pydantic import BaseModel
 
 from kitaru.api_models.v1.session import TokenUsage
 
-_SECRET_KEY = re.compile(
-    r"(?:^|[_-])(?:api[_-]?keys?|access[_-]?tokens?|refresh[_-]?tokens?|tokens?|"
-    r"passwords?|secrets?)$|^(?:authorization|credentials?|device[_-]?codes?|"
-    r"client[_-]?secrets?|private[_-]?keys?|secret[_-]?env)$",
-    re.IGNORECASE,
+# A name holds a credential when the noun it ends in names one, as in
+# `OPENAI_API_KEY`, `HFToken`, or `PGPASSWORD`. The last word decides what the
+# value is, so `credential_status`, `secret_keys`, and
+# `AWS_WEB_IDENTITY_TOKEN_FILE` hold none. Two-word nouns are matched glued.
+_CREDENTIAL_NOUNS = frozenset(
+    {
+        "accesskey",
+        "accesskeys",
+        "accesstokens",
+        "apikey",
+        "apikeys",
+        "apitokens",
+        "authkey",
+        "authkeys",
+        "authorization",
+        "authtokens",
+        "credential",
+        "credentials",
+        "devicecode",
+        "devicecodes",
+        "encryptionkey",
+        "encryptionkeys",
+        "privatekey",
+        "privatekeys",
+        "pwd",
+        "refreshtokens",
+        "secretenv",
+        "secretkey",
+        "signingkey",
+        "signingkeys",
+    }
+)
+_CREDENTIAL_ENDINGS = (
+    "passphrase",
+    "passphrases",
+    "passwd",
+    "password",
+    "passwords",
+    "secret",
+    "secrets",
+    "token",
+)
+# A name ending in `tokens` counts tokens when any earlier word is one of
+# these, as in `MAX_TOKENS`, `max_new_tokens`, or `prompt_tokens`; otherwise it
+# holds them, as in `GITHUB_TOKENS` or `new_tokens`.
+_TOKEN_COUNT_WORDS = frozenset(
+    {
+        "budget",
+        "cache",
+        "cached",
+        "completion",
+        "context",
+        "input",
+        "max",
+        "min",
+        "num",
+        "output",
+        "prompt",
+        "reasoning",
+        "remaining",
+        "total",
+        "used",
+    }
 )
 _SECRET_VALUE = re.compile(r"(?i)(bearer\s+|KITKEY_|ZENPROKEY_)[^\s,;\]\}\"']+")
 
+MASKED = "***"
+"""The text that stands in for a masked value."""
+
 _TOKEN_USAGE_KEYS = frozenset(TokenUsage.model_fields)
 _MAX_DEPTH = 64
+
+
+def is_credential_name(name: str) -> bool:
+    """Return whether a setting or field name says its value is a credential."""
+    # One capital before the word, not `[A-Z]+`: the same split, without
+    # backtracking that grows with the square of a long all-caps name.
+    spaced = re.sub(r"([A-Z])([A-Z][a-z])", r"\1_\2", name)
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", spaced)
+    # Digits drop out, so `API_KEY1` and `TOKEN2` end in their nouns.
+    words = re.findall(r"[a-z]+", spaced.lower())
+    if not words:
+        return False
+    if words[-1] == "tokens":
+        return _TOKEN_COUNT_WORDS.isdisjoint(words[:-1])
+    tails = (words[-1], "".join(words[-2:]))
+    return any(
+        tail in _CREDENTIAL_NOUNS or tail.endswith(_CREDENTIAL_ENDINGS)
+        for tail in tails
+    )
 
 
 def redact(value: str) -> str:
@@ -57,10 +137,12 @@ def _redact_data(
     """Normalize one value while retaining key context and active ancestors."""
     if (
         key is not None
-        and _SECRET_KEY.search(key)
+        # A token usage field holds a count, so anything else under it is
+        # masked like a credential.
+        and (is_credential_name(key) or key in _TOKEN_USAGE_KEYS)
         and not _is_token_usage(value, key=key)
     ):
-        return "***"
+        return MASKED
     if depth >= _MAX_DEPTH:
         return "[depth limit]"
     if isinstance(value, BaseModel):

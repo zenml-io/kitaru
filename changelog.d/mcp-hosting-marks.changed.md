@@ -1,0 +1,2 @@
+- `kitaru.mcp.registry.ToolSpec` takes keyword arguments only and no longer has `handler`. Code that builds its own `ToolSpec` passes `request_type`, `result_type`, and `run`. `MCPServerState` takes its Kitaru client as an optional argument, for a host that runs only tools that need no server.
+- The `kitaru_failure_matrix` result's `snapshot_id` can be `null`: a server with `stateless` on keeps no matrix in memory.
