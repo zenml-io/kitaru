@@ -48,3 +48,18 @@ def test_the_page_keeps_each_session_in_the_workspace_it_was_opened_in(
         ("note", "next", next_),
     ]
     assert all(call["host"] == {} for call in calls["local"])
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs Node.js")
+def test_edits_in_progress_never_land_on_the_next_session(tmp_path: Path) -> None:
+    shown = _drive_page(tmp_path)["sessionChange"]
+
+    assert shown == {
+        "current": "next",
+        # The first session's save reached Kitaru, but the next session's
+        # notes never show it.
+        "appended": [],
+        # The note box opened on the first session closes with it.
+        "composerWasStillOpen": False,
+        "noteTargets": ["first"],
+    }

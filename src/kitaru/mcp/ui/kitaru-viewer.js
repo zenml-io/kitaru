@@ -112,6 +112,8 @@
       const [envelope] = await Promise.all([reading, mountViewer(target.viewer, hostArgs)]);
       const data = envelope.data;
       if (!current()) return false;
+      // A note box still open belongs to the session this view replaces.
+      closeComposer();
       state.view = data;
       state.viewArgs = hostArgs;
       state.nodeIndex = new Map(data.nodes.map((n) => [n.id, n]));
@@ -371,8 +373,11 @@
   }
   async function writeAnnotation(args) {
     requireWrite();
+    const view = state.view;
     const env = await callTool(WRITE_TOOL, args, state.viewArgs);
-    storeAnnotation(env.data);
+    // Kitaru stored the note on the session it names; show it only while that
+    // session is still the one on screen.
+    if (state.view === view) storeAnnotation(env.data);
     return { annotation: env.data, warnings: env.warnings || [] };
   }
   function note({ selector = null, quote = null, text }) {
