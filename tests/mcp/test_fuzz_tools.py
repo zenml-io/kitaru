@@ -356,14 +356,19 @@ def _session_import_strategy(
 
 
 def _draw_plain_env_keys(defs: dict[str, Any]) -> None:
-    """Draw connection-create `env` keys that cannot spell a credential name.
+    """Draw connection `env` keys that cannot spell a credential name.
 
-    Model validation refuses such keys, and the JSON schema cannot express the
-    rule, so a schema-drawn key such as `SECRET` would be rejected.
+    Model validation refuses such keys (on update, unless sent masked), and the
+    JSON schema cannot express the rule, so a schema-drawn key such as `SECRET`
+    would be rejected.
     """
-    if "ConnectionCreate" in defs:
-        env = defs["ConnectionCreate"]["properties"]["env"]
-        env["propertyNames"] = {"pattern": r"^[xyz0-9_]*$"}
+    for model in ("ConnectionCreate", "ConnectionUpdate"):
+        if model not in defs:
+            continue
+        env = defs[model]["properties"]["env"]
+        for node in [env, *env.get("anyOf", [])]:
+            if node.get("type") == "object":
+                node["propertyNames"] = {"pattern": r"^[xyz0-9_]*$"}
 
 
 # Other model-only constraints, such as unique memberships and pinned plugin

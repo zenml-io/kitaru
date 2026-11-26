@@ -13,7 +13,6 @@
 #  permissions and limitations under the License.
 """Connection read and management tool contracts."""
 
-import json
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -281,12 +280,13 @@ async def test_credential_env_keys_are_refused_without_echoing_values() -> None:
     assert "planted" not in message
 
 
-async def test_update_keeps_a_stored_credential_env_key_and_leaves_secrets() -> None:
-    """An update may send back a legacy credential in `env`, not a new one."""
+def _get_legacy_client(
+    sent: list[ConnectionUpdateRequest],
+) -> tuple[ConnectionResponse, SimpleNamespace]:
+    """A connection made before `env` refused credentials, holding one there."""
     stored = _get_connection("legacy").model_copy(
-        update={"env": {"AWS_SECRET_ACCESS_KEY": "legacy", "AWS_REGION": "eu"}}
+        update={"env": {"OPENAI_API_KEY": "sk-legacy", "AWS_REGION": "eu"}}
     )
-    sent: list[ConnectionUpdateRequest] = []
 
     async def get(_connection_id: uuid.UUID) -> Any:
         return stored
@@ -295,28 +295,70 @@ async def test_update_keeps_a_stored_credential_env_key_and_leaves_secrets() -> 
         sent.append(request)
         return stored
 
-    client = SimpleNamespace(connections=SimpleNamespace(get=get, update=update))
-    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
-    env = {"AWS_SECRET_ACCESS_KEY": "legacy", "AWS_REGION": "us"}
-    request = {"operation": "update", "connection_id": str(stored.id)}
+    return stored, SimpleNamespace(connections=SimpleNamespace(get=get, update=update))
 
-    kept = await server.call_tool(
-        "kitaru_connections_manage", {"request": {**request, "env": env}}, context
+
+def _structured(result: object) -> dict[str, Any]:
+    return cast(dict[str, Any], cast(CallToolResult, result).structured_content)
+
+
+async def test_update_sending_back_the_read_env_keeps_a_stored_credential() -> None:
+    """An agent edits the `env` it read; the masked credential stays stored."""
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    read = await server.call_tool(
+        "kitaru_connection_read",
+        {"request": {"operation": "get", "reference": str(stored.id)}},
+        context,
     )
-    changed = await server.call_tool(
+    env = {**_structured(read)["data"]["env"], "AWS_REGION": "us"}
+
+    updated = await server.call_tool(
         "kitaru_connections_manage",
-        {"request": {**request, "env": {**env, "AWS_SECRET_ACCESS_KEY": "planted"}}},
+        {
+            "request": {
+                "operation": "update",
+                "connection_id": str(stored.id),
+                "env": env,
+            }
+        },
         context,
     )
 
     [update_request] = sent
-    assert cast(CallToolResult, kept).is_error is False
-    assert update_request.env == env
+    assert env["OPENAI_API_KEY"] == "***"
+    assert _structured(updated)["ok"] is True
+    assert update_request.env == {"OPENAI_API_KEY": "sk-legacy", "AWS_REGION": "us"}
     assert "secrets" not in update_request.model_fields_set
-    refusal = cast(dict[str, Any], cast(CallToolResult, changed).structured_content)
-    assert "AWS_SECRET_ACCESS_KEY" in refusal["error"]["message"]
-    assert "replaces every stored secret" in refusal["error"]["message"]
-    assert "planted" not in json.dumps(refusal)
+
+
+async def test_update_refuses_any_credential_value_but_the_masked_one() -> None:
+    """A plaintext credential never enters `env`, even the stored one."""
+    sent: list[ConnectionUpdateRequest] = []
+    stored, client = _get_legacy_client(sent)
+    server, context = build_server_context(client, mode=CapabilityMode.STANDARD)
+    request = {"operation": "update", "connection_id": str(stored.id)}
+
+    with pytest.raises(ToolError) as plaintext:
+        await server.call_tool(
+            "kitaru_connections_manage",
+            {"request": {**request, "env": {"OPENAI_API_KEY": "sk-legacy"}}},
+            context,
+        )
+    unknown = await server.call_tool(
+        "kitaru_connections_manage",
+        {"request": {**request, "env": {"HF_TOKEN": "***"}}},
+        context,
+    )
+
+    assert sent == []
+    assert "OPENAI_API_KEY" in str(plaintext.value)
+    assert "sk-legacy" not in str(plaintext.value)
+    assert "replaces every stored secret" in str(plaintext.value)
+    refusal = _structured(unknown)["error"]
+    assert refusal["code"] == "invalid_arguments"
+    assert "HF_TOKEN" in refusal["message"]
 
 
 # One rule decides both what `env` refuses on write and what reads mask.
@@ -373,5 +415,4 @@ async def test_env_refuses_on_write_exactly_what_reads_mask(
     )
 
     assert bool(created) is not credential
-    body = cast(dict[str, Any], cast(CallToolResult, result).structured_content)
-    assert body["data"]["env"][name] == ("***" if credential else "4096")
+    assert _structured(result)["data"]["env"][name] == ("***" if credential else "4096")

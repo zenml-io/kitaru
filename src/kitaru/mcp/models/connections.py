@@ -6,11 +6,18 @@
 import uuid
 from typing import Annotated, Literal, Self
 
-from pydantic import AfterValidator, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    Field,
+    TypeAdapter,
+    ValidatorFunctionWrapHandler,
+    WrapValidator,
+    model_validator,
+)
 
 from kitaru.api_models.v1.base import PlainSerializedSecretStr
 from kitaru.mcp.models.common import IDEMPOTENCY_KEY_DESCRIPTION, MCPModel, PageOptions
-from kitaru.mcp.redaction import is_credential_name
+from kitaru.mcp.redaction import MASKED, is_credential_name
 
 
 class ConnectionListRequest(PageOptions):
@@ -48,6 +55,46 @@ PlainEnv = Annotated[
 ]
 
 
+def _refuse_sent_credential(name: str) -> str:
+    raise ValueError(
+        f"names a credential, so `env` takes it only as `{MASKED}`, which keeps "
+        "the value the connection stores; leaving it out of `env` deletes that "
+        "value. Put a new credential in `secrets`, which on update replaces every "
+        "stored secret."
+    )
+
+
+_SENT_CREDENTIALS = TypeAdapter(
+    dict[Annotated[str, AfterValidator(_refuse_sent_credential)], None]
+)
+
+
+def _check_update_env(
+    value: object, handler: ValidatorFunctionWrapHandler
+) -> dict[str, str]:
+    env = handler(value)
+    sent = [
+        key for key, item in env.items() if is_credential_name(key) and item != MASKED
+    ]
+    if sent:
+        # Fail on each key alone: an error on the map would echo its values,
+        # which may be the very credential.
+        _SENT_CREDENTIALS.validate_python(dict.fromkeys(sent))
+    return env
+
+
+UpdateEnv = Annotated[
+    dict[str, str],
+    WrapValidator(_check_update_env),
+    Field(
+        description="Replaces every plain setting. A key that names a credential "
+        f"is accepted only as `{MASKED}`, as `kitaru_connection_read` shows it, "
+        "which keeps the value the connection stores; leaving it out deletes "
+        "that value. Put new credentials in `secrets`."
+    ),
+]
+
+
 ConnectionReadRequest = Annotated[
     ConnectionListRequest | ConnectionGetRequest,
     Field(discriminator="operation"),
@@ -74,13 +121,7 @@ class ConnectionUpdate(MCPModel):
 
     operation: Literal["update"]
     connection_id: uuid.UUID
-    env: dict[str, str] | None = Field(
-        default=None,
-        description="Replaces every plain setting. They are stored unencrypted "
-        "and readable by anyone who can read the connection, so a key that "
-        "names a credential is refused unless it is already stored with the "
-        "same value: put new credentials in `secrets`.",
-    )
+    env: UpdateEnv | None = None
     secrets: dict[str, PlainSerializedSecretStr] | None = Field(
         default=None,
         description="Replaces every stored secret. Stored values cannot be read "

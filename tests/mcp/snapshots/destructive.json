@@ -17588,6 +17588,7 @@
                   "additionalProperties": {
                     "type": "string"
                   },
+                  "description": "Replaces every plain setting. A key that names a credential is accepted only as `***`, as `kitaru_connection_read` shows it, which keeps the value the connection stores; leaving it out deletes that value. Put new credentials in `secrets`.",
                   "type": "object"
                 },
                 {
@@ -17595,7 +17596,6 @@
                 }
               ],
               "default": null,
-              "description": "Replaces every plain setting. They are stored unencrypted and readable by anyone who can read the connection, so a key that names a credential is refused unless it is already stored with the same value: put new credentials in `secrets`.",
               "title": "Env"
             },
             "operation": {

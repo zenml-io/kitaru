@@ -65,6 +65,9 @@ _CREDENTIAL_ENDINGS = (
 )
 _SECRET_VALUE = re.compile(r"(?i)(bearer\s+|KITKEY_|ZENPROKEY_)[^\s,;\]\}\"']+")
 
+MASKED = "***"
+"""The text that stands in for a masked value."""
+
 _TOKEN_USAGE_KEYS = frozenset(TokenUsage.model_fields)
 _MAX_DEPTH = 64
 
@@ -113,7 +116,7 @@ def _redact_data(
         and (is_credential_name(key) or key in _TOKEN_USAGE_KEYS)
         and not _is_token_usage(value, key=key)
     ):
-        return "***"
+        return MASKED
     if depth >= _MAX_DEPTH:
         return "[depth limit]"
     if isinstance(value, BaseModel):
