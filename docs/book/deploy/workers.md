@@ -38,9 +38,9 @@ The worker retains the API key for registration and worker-token renewal. Each t
 
 ## Fleet patterns
 
-**One general worker per agent environment.** The simplest useful fleet: each environment that can run an agent gets a worker with no scope, and utility work (imports, evaluations) rides along.
+**One general worker per agent environment.** The simplest useful fleet: each environment that can run an agent gets a worker with no scope, and utility work (imports, evaluations, analyses) rides along.
 
-**Split agent execution from plugin execution.** Agent replays need your application environment; evaluations and imports don't. A scoped pair keeps them independent:
+**Split agent execution from plugin execution.** Agent replays need your application environment; evaluations, imports, and analyses don't. A scoped pair keeps them independent:
 
 ```bash
 # in the agent's environment
@@ -67,4 +67,4 @@ This is the pattern for [CI regression gates](../guides/regression-suite.md): th
 - **Draining**: SIGINT/SIGTERM stops claiming and finishes in-flight tasks; a second signal exits immediately. Per-task timeouts (set server-side and on agent versions) bound the wait.
 - **Crash safety**: a worker that dies stops heartbeating; the server requeues its tasks to the next worker (up to the retry limit). No replay is lost to a pod eviction.
 - **Liveness**: `kitaru worker list` shows the live fleet and when each worker was last seen. Add `--include-stale` to see workers past the liveness window.
-- **Subprocess environments**: evaluator and importer plugins run via `uv` in isolated per-plugin environments, cached by content hash; agent tasks run the agent version's command in the worker's own environment plus the version's [secrets](secrets.md). The default plugins (the five `kitaru/` importers and the built-in evaluator suite) run under the same isolation as plugins you write yourself.
+- **Subprocess environments**: evaluator, importer, and analyzer plugins run via `uv` in isolated per-plugin environments, cached by content hash; agent tasks run the agent version's command in the worker's own environment plus the version's [secrets](secrets.md). The default plugins (the built-in `kitaru/` importers, evaluators, and analyzers) run under the same isolation as plugins you write yourself.
