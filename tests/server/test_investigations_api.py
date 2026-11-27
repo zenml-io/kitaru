@@ -347,6 +347,61 @@ async def test_list_investigations_filters_by_agent_id(
     assert body["items"][0]["agent_id"] == agent_id
 
 
+async def test_list_investigations_filters_by_name(
+    client: httpx.AsyncClient, agent_repository: FakeAgentRepository, agent_id: str
+) -> None:
+    """Filter investigations by name alone and combined with agent_id."""
+    first = (
+        await client.post(
+            "/api/v1/investigations",
+            json={"agent_id": agent_id, "name": "refund-audit", "sessions": []},
+        )
+    ).json()
+    await client.post(
+        "/api/v1/investigations",
+        json={"agent_id": agent_id, "name": "billing-audit", "sessions": []},
+    )
+    other_agent = await create_agent(agent_repository, ACCOUNT.id, name="other")
+    second = (
+        await client.post(
+            "/api/v1/investigations",
+            json={
+                "agent_id": str(other_agent.id),
+                "name": "refund-audit",
+                "sessions": [],
+            },
+        )
+    ).json()
+
+    by_name = await client.get(
+        "/api/v1/investigations",
+        params={
+            "filter": json.dumps({"field": "name", "op": "eq", "value": "refund-audit"})
+        },
+    )
+    assert by_name.status_code == 200
+    assert {item["id"] for item in by_name.json()["items"]} == {
+        first["id"],
+        second["id"],
+    }
+
+    by_name_and_agent = await client.get(
+        "/api/v1/investigations",
+        params={
+            "filter": json.dumps(
+                {
+                    "and": [
+                        {"field": "name", "op": "eq", "value": "refund-audit"},
+                        {"field": "agent_id", "op": "eq", "value": agent_id},
+                    ]
+                }
+            )
+        },
+    )
+    assert by_name_and_agent.status_code == 200
+    assert [item["id"] for item in by_name_and_agent.json()["items"]] == [first["id"]]
+
+
 async def test_update_investigation(client: httpx.AsyncClient, agent_id: str) -> None:
     """Update an investigation's name and description."""
     created = (
