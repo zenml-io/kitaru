@@ -337,6 +337,10 @@ def test_cohort_schema_describes_exact_and_destructive_commands() -> None:
     }
     assert parameters["--baseline"]["type"] == "UUID"
     assert parameters["--baseline"]["required"] is False
+    assert parameters["--add-sessions-file"]["type"] == "path"
+    assert parameters["--remove-sessions-file"]["type"] == "path"
+    assert "repeat" in parameters["--add-session"]["description"].lower()
+    assert "repeat" in parameters["--remove-session"]["description"].lower()
     assert commands["cohort.update"]["idempotency"] == "idempotent replacement"
     assert commands["cohort.version.update"]["idempotency"] == (
         "idempotent replacement"
@@ -501,14 +505,39 @@ def test_help_exposes_only_the_schema_command_surface(capsys) -> None:
     assert "JSONL is streaming-only" in help_text
 
     assert app_module.main(["session", "list", "--help"]) == 0
-    help_text = capsys.readouterr().out
+    help_text = _normalize_help_text(capsys.readouterr().out)
     assert "Items per page" in help_text
-    assert "page.next_cursor" in help_text
+    assert "Cursor from the previous page (page.next_cursor in CLI JSON output)." in (
+        help_text
+    )
     assert "created:asc or created:desc" in help_text
     assert "JSON filter expression" in help_text
 
+    assert app_module.main(["session", "nodes", "--help"]) == 0
+    nodes_help = _normalize_help_text(capsys.readouterr().out)
+    assert "page.next_cursor in CLI JSON output" in nodes_help
+
+    assert app_module.main(["experiment", "update", "--help"]) == 0
+    exp_help = _normalize_help_text(capsys.readouterr().out)
+    assert (
+        "Fixed once the experiment has runs; create a new experiment with the new "
+        "settings."
+    ) in exp_help
+
+    assert app_module.main(["worker", "start", "--help"]) == 0
+    worker_help = _normalize_help_text(capsys.readouterr().out)
+    assert (
+        "Any --claim replaces the default claims (agent, evaluator, importer, "
+        "analyzer). agent=ID serves only that version."
+    ) in worker_help
+
     [job_get] = describe_schema(("job", "get"))
     assert job_get["side_effects"]["reads_local_file"] is True
+
+
+def _normalize_help_text(output: str) -> str:
+    """Strip Rich table borders and collapse line wraps in rendered CLI help."""
+    return " ".join(output.replace("│", " ").split())
 
 
 def test_run_aggregate_help_and_schema_skip_configuration(

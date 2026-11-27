@@ -39,6 +39,7 @@ ERROR_EXIT_CODES: dict[str, int] = {
     "invalid_arguments": 2,
     "invalid_configuration": 2,
     "authentication_failed": 3,
+    "forbidden": 3,
     "not_found": 4,
     "conflict": 5,
     "interaction_required": 5,
@@ -52,6 +53,7 @@ ERROR_EXIT_CODES: dict[str, int] = {
 _ERROR_TITLES = {
     "authentication_failed": "Authentication failed",
     "conflict": "Conflict",
+    "forbidden": "Forbidden",
     "interaction_required": "Interaction required",
     "internal_error": "Internal error",
     "interrupted": "Interrupted",

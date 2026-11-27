@@ -1,0 +1,4 @@
+- Improved CLI `--filter` validation to report JSON parse errors, unknown operators with the allowed list, invalid field names, and nested clause locations instead of a generic filter error.
+- Refused version registration for read-only built-in `kitaru/*` plugins as `forbidden` (exit code 3) before uploading a script blob, and fixed version-registration partial-failure messages so they never claim a parent was created.
+- Added `--add-sessions-file` and `--remove-sessions-file` to `kitaru cohort version create`, clarified repeatable option help text, and added actionable hints when multiple values follow a repeatable option.
+- Clarified `--cursor` help text (`page.next_cursor` in CLI JSON output), frozen-experiment update errors and help text, `kitaru worker start --claim` help text, and filter/pagination documentation.

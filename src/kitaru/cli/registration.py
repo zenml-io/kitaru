@@ -14,13 +14,12 @@ from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import Any
 
 import yaml
 from packaging.requirements import InvalidRequirement, Requirement
-from pydantic import ValidationError
 
-from kitaru.api_models.v1.agent import AgentCreateRequest, AgentListParams
+from kitaru.api_models.v1.agent import AgentCreateRequest
 from kitaru.api_models.v1.agent_version import (
     AgentCapabilities,
     AgentVersionCreateRequest,
@@ -28,41 +27,43 @@ from kitaru.api_models.v1.agent_version import (
 )
 from kitaru.api_models.v1.analyzer import (
     AnalyzerCreateRequest,
-    AnalyzerListParams,
     AnalyzerVersionCreateRequest,
 )
-from kitaru.api_models.v1.annotation import AnnotationListParams
-from kitaru.api_models.v1.base import ListParams, Page
-from kitaru.api_models.v1.cohort import CohortListParams
-from kitaru.api_models.v1.evaluation import EvaluationListParams
+from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
-    EvaluatorListParams,
     EvaluatorVersionCreateRequest,
 )
-from kitaru.api_models.v1.experiment import ExperimentListParams
-from kitaru.api_models.v1.experiment_run import ExperimentRunListParams
 from kitaru.api_models.v1.importer import (
     ImporterCreateRequest,
-    ImporterListParams,
     ImporterVersionCreateRequest,
 )
-from kitaru.api_models.v1.imports import ImportListParams
-from kitaru.api_models.v1.insight import InsightListParams
-from kitaru.api_models.v1.investigation import InvestigationListParams
 from kitaru.api_models.v1.plugin import (
     AnalyzerConfig,
     EvaluatorConfig,
     PackagePluginSource,
     ScriptPluginSource,
 )
-from kitaru.api_models.v1.replay import ReplayListParams
 from kitaru.api_models.v1.replay_config import (
     ReplayOverride,
     ToolPolicy,
 )
-from kitaru.api_models.v1.session import SessionListParams
 from kitaru.cli.config import build_api_client, resolve_credential
+from kitaru.cli.filters import (
+    build_list_params as build_list_params,
+)
+from kitaru.cli.filters import (
+    list_params as list_params,
+)
+from kitaru.cli.filters import (
+    list_validation_error as list_validation_error,
+)
+from kitaru.cli.filters import (
+    parse_filter_option as parse_filter_option,
+)
+from kitaru.cli.filters import (
+    version_list_params as version_list_params,
+)
 from kitaru.cli.output import CLIError, CommandResult
 from kitaru.cli.references import (
     ParentKind,
@@ -76,10 +77,10 @@ from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.credential_store import CredentialStore
 
 _MAX_REQUIREMENT_LENGTH = 255
+_RESERVED_PLUGIN_NAMESPACE_PREFIX = "kitaru/"
 _MODULE_RE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$")
 _ATTRIBUTE_RE = re.compile(r"^[A-Za-z_]\w*$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-ListParamsT = TypeVar("ListParamsT", bound=ListParams)
 
 
 @dataclass(frozen=True, slots=True)
@@ -742,6 +743,15 @@ async def register_plugin_version(
     """Resolve a plugin parent, upload if needed, and create a version."""
     resource = get_plugin_resource(client, kind)
     parent = await resolve_asset(resource, reference, kind.title())
+    if isinstance(parent.name, str) and parent.name.startswith(
+        _RESERVED_PLUGIN_NAMESPACE_PREFIX
+    ):
+        raise CLIError(
+            "forbidden",
+            f"{parent.name} is a built-in {kind} and is read-only. "
+            f"Register your own {kind} under a new name with "
+            f"`kitaru {kind} register`.",
+        )
     plugin_source, blob = await upload_plugin_source(client, source)
     request_type = _plugin_version_request_type(kind)
     try:
@@ -759,6 +769,7 @@ async def register_plugin_version(
             error,
             blob=blob,
             hint="The blob is stored and may be reused; no version was created.",
+            parent_created=False,
         ) from error
     return await build_registration_result(kind, resource, parent, version, blob=blob)
 
@@ -790,118 +801,6 @@ def plugin_parent_request(
     if kind == "analyzer":
         return AnalyzerCreateRequest(**kwargs)
     return EvaluatorCreateRequest(**kwargs, agent_id=agent_id)
-
-
-def list_params(
-    kind: Literal[
-        "agent",
-        "analyzer",
-        "annotation",
-        "cohort",
-        "evaluation",
-        "evaluator",
-        "experiment",
-        "experiment_run",
-        "import",
-        "importer",
-        "insight",
-        "investigation",
-        "replay",
-        "session",
-    ],
-    *,
-    size: int,
-    cursor: str | None,
-    sort: str,
-    filter: str | None,
-) -> ListParams:
-    """Build a kind-specific list request."""
-    request_type = {
-        "agent": AgentListParams,
-        "analyzer": AnalyzerListParams,
-        "annotation": AnnotationListParams,
-        "cohort": CohortListParams,
-        "evaluation": EvaluationListParams,
-        "evaluator": EvaluatorListParams,
-        "experiment": ExperimentListParams,
-        "experiment_run": ExperimentRunListParams,
-        "import": ImportListParams,
-        "importer": ImporterListParams,
-        "insight": InsightListParams,
-        "investigation": InvestigationListParams,
-        "replay": ReplayListParams,
-        "session": SessionListParams,
-    }[kind]
-    return build_list_params(
-        request_type,
-        size=size,
-        cursor=cursor,
-        sort=sort,
-        filter=filter,
-    )
-
-
-def version_list_params(*, size: int, cursor: str | None, sort: str) -> ListParams:
-    """Build shared version-list parameters."""
-    _validate_created_sort(sort)
-    try:
-        return ListParams(size=size, cursor=cursor, sort=sort)
-    except ValidationError as error:
-        raise _list_validation_error(error) from None
-
-
-def build_list_params(
-    request_type: type[ListParamsT],
-    *,
-    size: int,
-    cursor: str | None,
-    sort: str,
-    filter: str | None,
-) -> ListParamsT:
-    """Build filterable list params against the shared server sort contract."""
-    _validate_created_sort(sort)
-    try:
-        return request_type.model_validate(
-            {
-                "size": size,
-                "cursor": cursor,
-                "sort": sort,
-                "filter": filter,
-            }
-        )
-    except ValidationError as error:
-        raise _list_validation_error(error) from None
-
-
-def _validate_created_sort(sort: str) -> None:
-    """Validate the shared server sort allowlist used by collection reads."""
-    if sort not in {"created:asc", "created:desc"}:
-        raise CLIError(
-            "invalid_arguments",
-            "--sort must be created:asc or created:desc.",
-            hint="Use --filter to narrow results without changing their order.",
-        )
-
-
-def _list_validation_error(error: ValidationError) -> CLIError:
-    """Convert list-model validation into a concise option-named error."""
-    issue = error.errors(include_url=False)[0]
-    field = str(issue["loc"][0]) if issue["loc"] else "parameters"
-    if field == "filter":
-        message = "--filter must be a valid JSON filter expression."
-    elif field == "size":
-        message = "--size must be between 1 and 1000."
-    elif field == "sort":
-        message = "--sort must be created:asc or created:desc."
-    else:
-        message = f"Invalid --{field.replace('_', '-')}: {issue['msg']}."
-    return CLIError(
-        "invalid_arguments",
-        message,
-        hint="--limit is an alias for --size; supply only one."
-        if field == "size"
-        else None,
-    )
 
 
 def _load_document(path: Path, label: str = "Spec") -> dict[str, Any]:
@@ -981,19 +880,22 @@ def _partial_failure(
     *,
     blob: Any | None = None,
     hint: str,
+    parent_created: bool = True,
 ) -> CLIError:
     """Describe completed registration phases without deleting remote state."""
     details: dict[str, Any] = {
         "asset_type": kind,
-        "parent": {"completed": True, "id": str(parent.id)},
+        "parent": {"completed": True, "id": str(parent.id)}
+        if parent_created
+        else {"id": str(parent.id)},
         "version": {"completed": False},
         "cause": str(error),
     }
     if blob is not None:
         details["blob"] = {"completed": True, "id": str(blob.id)}
-    return CLIError(
-        "partial_failure",
-        f"Created the {kind} parent but did not complete registration.",
-        details=details,
-        hint=hint,
+    message = (
+        f"Created the {kind} parent but did not complete registration."
+        if parent_created
+        else f"Uploaded the {kind} script blob but could not create the version."
     )
+    return CLIError("partial_failure", message, details=details, hint=hint)

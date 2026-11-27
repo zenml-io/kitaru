@@ -863,6 +863,20 @@ def test_human_not_found_outside_listable_groups_has_no_hint() -> None:
     assert "Try:" not in rendered
 
 
+def test_forbidden_error_uses_forbidden_title_and_exit_code() -> None:
+    """Forbidden errors exit 3 and do not falsely suggest `kitaru login`."""
+    assert ERROR_EXIT_CODES["forbidden"] == 3
+    rendered = _emit_error_to(
+        "evaluator.version.register",
+        CLIError("forbidden", "kitaru/default is read-only."),
+        rich=True,
+    )
+
+    assert "Error: Forbidden" in rendered
+    assert "kitaru/default is read-only." in rendered
+    assert "kitaru login" not in rendered
+
+
 def test_human_setup_renders_steps_and_the_manual_mcp_snippet() -> None:
     """Setup shows each step and the snippet to paste when no client was found."""
     snippet = {"mcpServers": {"kitaru": {"command": "uvx", "args": ["kitaru-mcp"]}}}
