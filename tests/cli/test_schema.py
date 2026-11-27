@@ -515,8 +515,13 @@ def test_help_exposes_only_the_schema_command_surface(capsys) -> None:
     assert "Cursor from the previous page (page.next_cursor in CLI JSON output)." in (
         help_text
     )
-    assert "created:asc or created:desc" in help_text
+    assert "created, started_at, or number" in help_text
+    assert ":asc or :desc" in help_text
     assert "JSON filter expression" in help_text
+
+    assert app_module.main(["agent", "list", "--help"]) == 0
+    agent_help_text = _normalize_help_text(capsys.readouterr().out)
+    assert "created:asc or created:desc" in agent_help_text
 
     assert app_module.main(["session", "nodes", "--help"]) == 0
     nodes_help = _normalize_help_text(capsys.readouterr().out)

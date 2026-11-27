@@ -352,6 +352,17 @@ LIST_PARAMETERS = (
         '\'{"field":"status","op":"eq","value":"failed"}\'.',
     ),
 )
+SESSION_LIST_PARAMETERS = (
+    *LIST_PARAMETERS[:2],
+    ParameterSpec(
+        "--sort",
+        "field:direction",
+        "option",
+        False,
+        "Sort by created, started_at, or number, each with :asc or :desc.",
+    ),
+    LIST_PARAMETERS[3],
+)
 VERSION_LIST_PARAMETERS = LIST_PARAMETERS[:-1]
 WAIT_PARAMETERS = (
     ParameterSpec(

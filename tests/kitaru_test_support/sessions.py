@@ -23,6 +23,8 @@ from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.models.tag import TagFilter
+from kitaru.server.application.pagination import decode_cursor, encode_cursor
+from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
@@ -263,6 +265,147 @@ async def create_tag(
         Stored tag.
     """
     return await repository.create(Tag(owner_id=owner_id, name=name))
+
+
+_PG_INT32_MIN = -(2**31)
+_PG_INT32_MAX = 2**31 - 1
+
+
+def _parse_start_cursor(payload: str) -> tuple[datetime | None, uuid.UUID]:
+    """Parse a ``started_at|id`` cursor payload."""
+    started_at, separator, row_id = payload.rpartition("|")
+    if not separator:
+        raise ValidationError("Invalid cursor")
+    try:
+        last_started_at = datetime.fromisoformat(started_at) if started_at else None
+        last_id = uuid.UUID(row_id)
+    except ValueError as exc:
+        raise ValidationError("Invalid cursor") from exc
+    if last_started_at is not None and (
+        last_started_at.tzinfo is None or last_started_at.utcoffset() is None
+    ):
+        raise ValidationError("Invalid cursor")
+    return last_started_at, last_id
+
+
+def _follows_start_cursor(
+    started_at: datetime | None,
+    row_id: uuid.UUID,
+    last_started_at: datetime | None,
+    last_id: uuid.UUID,
+    *,
+    descending: bool,
+) -> bool:
+    """Return whether a row follows the cursor under NULLS LAST start ordering."""
+    if last_started_at is None:
+        if started_at is not None:
+            return False
+        return row_id < last_id if descending else row_id > last_id
+    if started_at is None:
+        return True
+    if descending:
+        return (started_at, row_id) < (last_started_at, last_id)
+    return (started_at, row_id) > (last_started_at, last_id)
+
+
+def _parse_int_cursor(payload: str) -> tuple[int, uuid.UUID]:
+    """Parse an ``int|id`` cursor payload."""
+    raw_value, separator, row_id = payload.rpartition("|")
+    if not separator or not raw_value:
+        raise ValidationError("Invalid cursor")
+    try:
+        last_value = int(raw_value)
+        last_id = uuid.UUID(row_id)
+    except ValueError as exc:
+        raise ValidationError("Invalid cursor") from exc
+    if str(last_value) != raw_value or not (
+        _PG_INT32_MIN <= last_value <= _PG_INT32_MAX
+    ):
+        raise ValidationError("Invalid cursor")
+    return last_value, last_id
+
+
+def _timed_sort_key(session: Session) -> tuple[datetime, uuid.UUID]:
+    """Build the sort key for a session with a non-null start time."""
+    assert session.started_at is not None
+    return session.started_at, session.id
+
+
+def _paginate_fake_sessions(
+    sessions: list[Session], session_filter: SessionFilter
+) -> tuple[list[Session], str | None]:
+    """Apply session-specific cursor pagination to an in-memory session list."""
+    field, _, direction = session_filter.sort.partition(":")
+    if field == "created":
+        return _paginate_fake(sessions, session_filter)
+
+    descending = direction == "desc"
+    filter_hash = session_filter.compute_filter_hash()
+    cursor = None
+    if session_filter.cursor is not None:
+        cursor = decode_cursor(session_filter.cursor, session_filter.sort, filter_hash)
+
+    if field == "started_at":
+        timed = sorted(
+            (s for s in sessions if s.started_at is not None),
+            key=_timed_sort_key,
+            reverse=descending,
+        )
+        untimed = sorted(
+            (s for s in sessions if s.started_at is None),
+            key=lambda s: s.id,
+            reverse=descending,
+        )
+        ordered = [*timed, *untimed]
+        if cursor is not None:
+            last_started_at, last_id = _parse_start_cursor(cursor.id)
+            ordered = [
+                s
+                for s in ordered
+                if _follows_start_cursor(
+                    s.started_at,
+                    s.id,
+                    last_started_at,
+                    last_id,
+                    descending=descending,
+                )
+            ]
+        page = ordered[: session_filter.size + 1]
+        next_cursor = None
+        if len(page) > session_filter.size:
+            page = page[: session_filter.size]
+            last_item = page[-1]
+            encoded_start = (
+                last_item.started_at.isoformat()
+                if last_item.started_at is not None
+                else ""
+            )
+            next_cursor = encode_cursor(
+                session_filter.sort, f"{encoded_start}|{last_item.id}", filter_hash
+            )
+        return page, next_cursor
+
+    ordered = sorted(sessions, key=lambda s: (s.number, s.id), reverse=descending)
+    if cursor is not None:
+        last_number, last_id = _parse_int_cursor(cursor.id)
+        ordered = [
+            s
+            for s in ordered
+            if (
+                (s.number, s.id) < (last_number, last_id)
+                if descending
+                else (s.number, s.id) > (last_number, last_id)
+            )
+        ]
+    page = ordered[: session_filter.size + 1]
+    next_cursor = None
+    if len(page) > session_filter.size:
+        page = page[: session_filter.size]
+        last_item = page[-1]
+        next_cursor = encode_cursor(
+            session_filter.sort, f"{last_item.number}|{last_item.id}", filter_hash
+        )
+    return page, next_cursor
 
 
 class FakeSessionRepository:
@@ -525,7 +668,7 @@ class FakeSessionRepository:
                 for s in sessions
                 if _evaluate_filter_expression(s, session_filter.expression, resolvers)
             ]
-        page, next_cursor = _paginate_fake(sessions, session_filter)
+        page, next_cursor = _paginate_fake_sessions(sessions, session_filter)
         return [self._copy(s, include_payloads) for s in page], next_cursor
 
     def _evaluate_tag_condition(

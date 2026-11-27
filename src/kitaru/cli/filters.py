@@ -14,6 +14,7 @@
 """Actionable CLI parsing and validation for JSON filter expressions."""
 
 import re
+from collections.abc import Sequence
 from typing import Any, Literal, TypeVar
 
 from pydantic import TypeAdapter, ValidationError
@@ -261,9 +262,15 @@ def list_params(
     )
 
 
+_DEFAULT_SORT_FIELDS: tuple[str, ...] = ("created",)
+_SORT_FIELDS_BY_REQUEST_TYPE: dict[type[ListParams], tuple[str, ...]] = {
+    SessionListParams: ("created", "started_at", "number"),
+}
+
+
 def version_list_params(*, size: int, cursor: str | None, sort: str) -> ListParams:
     """Build shared version-list parameters."""
-    _validate_created_sort(sort)
+    _validate_sort(sort)
     try:
         return ListParams(size=size, cursor=cursor, sort=sort)
     except ValidationError as error:
@@ -279,7 +286,8 @@ def build_list_params(
     filter: str | None,
 ) -> ListParamsT:
     """Build filterable list params against the shared server sort contract."""
-    _validate_created_sort(sort)
+    allowed = _SORT_FIELDS_BY_REQUEST_TYPE.get(request_type, _DEFAULT_SORT_FIELDS)
+    _validate_sort(sort, allowed)
     parsed_filter = parse_filter_option(filter) if filter is not None else None
     try:
         return request_type.model_validate(
@@ -291,20 +299,35 @@ def build_list_params(
             }
         )
     except ValidationError as error:
-        raise list_validation_error(error) from None
+        raise list_validation_error(error, allowed) from None
 
 
-def _validate_created_sort(sort: str) -> None:
-    """Validate the shared server sort allowlist used by collection reads."""
-    if sort not in {"created:asc", "created:desc"}:
+def _get_sort_error_message(allowed_fields: Sequence[str]) -> str:
+    """Build a concise CLI error naming the allowed sort fields."""
+    if tuple(allowed_fields) == _DEFAULT_SORT_FIELDS:
+        return "--sort must be created:asc or created:desc."
+    *leading, last = allowed_fields
+    joined = f"{', '.join(leading)}, or {last}" if leading else last
+    return f"--sort must use {joined} with :asc or :desc."
+
+
+def _validate_sort(
+    sort: str, allowed_fields: Sequence[str] = _DEFAULT_SORT_FIELDS
+) -> None:
+    """Validate a CLI sort value against the allowed field names."""
+    field, _, direction = sort.partition(":")
+    if direction not in {"asc", "desc"} or field not in allowed_fields:
         raise CLIError(
             "invalid_arguments",
-            "--sort must be created:asc or created:desc.",
+            _get_sort_error_message(allowed_fields),
             hint="Use --filter to narrow results without changing their order.",
         )
 
 
-def list_validation_error(error: ValidationError) -> CLIError:
+def list_validation_error(
+    error: ValidationError,
+    allowed_fields: Sequence[str] = _DEFAULT_SORT_FIELDS,
+) -> CLIError:
     """Convert list-model validation into a concise option-named error."""
     issue = error.errors(include_url=False)[0]
     field = str(issue["loc"][0]) if issue["loc"] else "parameters"
@@ -313,7 +336,7 @@ def list_validation_error(error: ValidationError) -> CLIError:
     elif field == "size":
         message = "--size must be between 1 and 1000."
     elif field == "sort":
-        message = "--sort must be created:asc or created:desc."
+        message = _get_sort_error_message(allowed_fields)
     else:
         message = f"Invalid --{field.replace('_', '-')}: {issue['msg']}."
     return CLIError(
