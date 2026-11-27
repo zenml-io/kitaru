@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Say how to fix a missing OpenAI key for insights: set `OPENAI_API_KEY` and run the analysis again.
+
 ## 0.5.0 - 2026-11-25
 
 - Accept any sessions that belong to one agent, including live-recorded sessions and sessions from several imports. When every session comes from the same import, the cards and copied investigation prompt still name that import and its provider; otherwise the prompt omits the import line.
