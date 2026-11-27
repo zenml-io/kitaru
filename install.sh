@@ -20,7 +20,10 @@
 #      Kitaru MCP server with Claude Code, Codex, Cursor, and Windsurf when
 #      found (printing the JSON for everything else). Re-run `kitaru setup`
 #      after installing a new coding agent. Kitaru releases before `setup`
-#      existed get the same steps done by this script instead.
+#      existed get the same steps done by this script instead. That setup
+#      run also sends one anonymous install event (a random id, the Kitaru
+#      version, and project or global); DO_NOT_TRACK=1 or
+#      KITARU_DISABLE_CLIENT_ANALYTICS=1 turns it off.
 #   4. Stops there and prints the two ways to get a server: local in Docker or Podman
 #      (`kitaru login --local`) or the managed cloud (`kitaru login`). Login
 #      is a decision, so the script does not make it for you.
@@ -87,6 +90,9 @@ Environment equivalents: KITARU_VERSION, KITARU_PRE=1, KITARU_SERVER,
 KITARU_SCOPE=project|global, KITARU_SKIP_SKILLS=1, KITARU_SKIP_MCP=1,
 KITARU_NO_MODIFY_PATH=1, KITARU_QUIET=1, KITARU_VERBOSE=1,
 KITARU_PYTHON (default 3.12), NO_COLOR.
+
+The installer reports one anonymous install event. Set DO_NOT_TRACK=1 or
+KITARU_DISABLE_CLIENT_ANALYTICS=1 to turn that off.
 USAGE
 }
 
@@ -506,6 +512,13 @@ elif "$KITARU_BIN" schema setup >/dev/null 2>&1; then
   KITARU_HELP="$("$KITARU_BIN" --help 2>/dev/null || true)"
   case "$KITARU_HELP" in *--output*) SETUP_SERVER_ARGS+=(--output text) ;; esac
   [ -n "$KITARU_SERVER" ] && SETUP_SERVER_ARGS+=(--server "$KITARU_SERVER")
+  # Marks this setup run as an install, so the CLI sends one anonymous install
+  # event. The CLI sends nothing when either opt-out variable is set.
+  export KITARU_INSTALL_METHOD=script
+  analytics_disabled() { case "$1" in 1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]) return 0 ;; esac; return 1; }
+  if ! analytics_disabled "${DO_NOT_TRACK:-}" && ! analytics_disabled "${KITARU_DISABLE_CLIENT_ANALYTICS:-}"; then
+    note "Kitaru reports this install anonymously. To turn that off, set DO_NOT_TRACK=1."
+  fi
   if [ "$KITARU_QUIET" = "1" ]; then
     quiet "$KITARU_BIN" "${SETUP_SERVER_ARGS[@]:+${SETUP_SERVER_ARGS[@]}}" setup "${SETUP_ARGS[@]}" || warn "kitaru setup failed; run it again later: $KITARU_BIN setup"
   else
