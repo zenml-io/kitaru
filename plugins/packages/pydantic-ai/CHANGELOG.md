@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Support PydanticAI 2.67 through 2.71 in addition to the existing 2.14 through 2.66 minor lines, and allow genai-prices 0.2, which PydanticAI 2.68 requires.
+
 ## 0.5.0 - 2026-11-25
 
 - Raise a clear `ValueError` before calling the server when `KitaruAgent` runs outside a Kitaru worker task without `agent_id` or `agent_version_id`.

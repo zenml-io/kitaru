@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Allow genai-prices 0.2 so the adapter installs alongside PydanticAI 2.68 and later.
+
 ## 0.4.0 - 2026-11-25
 
 - Raise a clear `ValueError` before calling the server when `KitaruGraphRunner` runs outside a Kitaru worker task without `agent_id` or `agent_version_id`.
