@@ -355,7 +355,9 @@ async def call_fetcher(
 
     Raises:
         SessionImportError: The fetcher raised while starting or advancing,
-            or yielded an item that is not bytes.
+            or yielded an item that is not bytes. A SessionImportError raised
+            by the fetcher is re-raised unchanged so user-facing messages stay
+            intact.
 
     Yields:
         Fetched payloads.
@@ -363,6 +365,8 @@ async def call_fetcher(
     try:
         result = fetcher(query)
         iterator = result if isinstance(result, AsyncIterator) else iter(result)
+    except SessionImportError:
+        raise
     except Exception as exc:
         raise SessionImportError(
             f"Fetcher raised an error: {type(exc).__name__}: {exc}"
@@ -373,6 +377,8 @@ async def call_fetcher(
                 payload = await _advance(iterator)
             except StopAsyncIteration:
                 return
+            except SessionImportError:
+                raise
             except Exception as exc:
                 raise SessionImportError(
                     f"Fetcher raised an error: {type(exc).__name__}: {exc}"

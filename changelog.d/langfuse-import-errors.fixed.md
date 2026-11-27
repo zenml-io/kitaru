@@ -1,0 +1,1 @@
+- Failed Langfuse imports now store a short, host-specific error such as rejected API keys or an unreachable host, instead of the importer process exit and stderr tail.

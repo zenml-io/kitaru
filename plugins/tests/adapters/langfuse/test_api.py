@@ -23,11 +23,12 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from langfuse.api import UnauthorizedError
 from langfuse.api.client import AsyncLangfuseAPI
 from langfuse.api.core import ApiError
 
 import kitaru_langfuse_importer.api as api_module
-from kitaru.task.importer import ImportedNode, ImportedSession
+from kitaru.task.importer import ImportedNode, ImportedSession, SessionImportError
 from kitaru_langfuse_importer.api import fetch, fetch_trace
 from kitaru_langfuse_importer.importer import importer, parse
 
@@ -318,9 +319,57 @@ async def test_rate_limits_retry_observation_pages(fake_langfuse, monkeypatch):
     assert sleeps == [3.0]
 
 
-async def test_non_rate_limit_api_errors_propagate(fake_langfuse):
-    fake_langfuse.trace_builders = [ApiError(status_code=500, body={})]
-    with pytest.raises(ApiError):
+async def test_non_rate_limit_api_errors_become_session_import_errors(
+    fake_langfuse, monkeypatch
+):
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
+    fake_langfuse.trace_builders = [
+        ApiError(status_code=500, body={"message": "upstream failed"})
+    ]
+    with pytest.raises(
+        SessionImportError,
+        match=r"^Langfuse returned an error \(500\): upstream failed\.$",
+    ):
+        await collect_payloads(fetch({"trace_ids": ["trace"]}))
+
+
+async def test_unauthorized_errors_name_the_configured_host(fake_langfuse, monkeypatch):
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "https://us.cloud.langfuse.com")
+    fake_langfuse.trace_builders = [
+        UnauthorizedError(
+            body={
+                "message": (
+                    "Invalid credentials. Confirm that you've configured "
+                    "the correct host."
+                )
+            },
+            headers={"x-request-id": "req-do-not-leak"},
+        )
+    ]
+    with pytest.raises(SessionImportError) as caught:
+        await collect_payloads(fetch({"trace_ids": ["trace"]}))
+    message = str(caught.value)
+    assert message.startswith(
+        "Langfuse rejected the API keys for https://us.cloud.langfuse.com."
+    )
+    assert "same project" in message
+    assert "headers" not in message
+    assert "req-do-not-leak" not in message
+    assert "Invalid credentials" not in message
+
+
+async def test_unreachable_host_errors_name_the_configured_host(
+    fake_langfuse, monkeypatch
+):
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "https://langfuse.example.invalid")
+    fake_langfuse.trace_builders = [httpx.ConnectError("Name or service not known")]
+    with pytest.raises(
+        SessionImportError,
+        match=(
+            r"^Couldn't reach Langfuse at https://langfuse\.example\.invalid\. "
+            r"Check the host URL in the connection\.$"
+        ),
+    ):
         await collect_payloads(fetch({"trace_ids": ["trace"]}))
 
 
