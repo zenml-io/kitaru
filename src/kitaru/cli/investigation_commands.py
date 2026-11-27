@@ -289,14 +289,16 @@ async def insight_delete(
                 "SESSION:KEY=QUESTION[]",
                 "option",
                 False,
-                "Keyed question for a session selected with --session.",
+                "Keyed question for a session selected with --session; repeat for "
+                "each question.",
             ),
             ParameterSpec(
                 "--session-highlights",
                 "SESSION:KEY=JSON_ARRAY[]",
                 "option",
                 False,
-                "Curated highlights for a question added with --session-question.",
+                "Curated highlights for a question added with --session-question; "
+                "repeat for each entry.",
             ),
             IDEMPOTENCY_KEY_PARAMETER,
         ),

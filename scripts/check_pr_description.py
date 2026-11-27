@@ -13,6 +13,10 @@ TITLE_PREFIX = re.compile(
     re.IGNORECASE,
 )
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+DETAILS_BLOCK = re.compile(
+    r"^[ \t]*<details\b[^>]*>.*?</details>[ \t]*$",
+    re.DOTALL | re.IGNORECASE | re.MULTILINE,
+)
 HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*$", re.MULTILINE)
 
 
@@ -31,7 +35,7 @@ def _get_reviewer_notes(body: str) -> str | None:
                 ),
                 len(text),
             )
-            return text[heading.end() : end]
+            return DETAILS_BLOCK.sub("", text[heading.end() : end])
     return None
 
 

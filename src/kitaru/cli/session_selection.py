@@ -96,14 +96,36 @@ def build_session_filter(
     return AndFilter.model_validate({"and": operands})
 
 
-def read_session_file(path: Path) -> list[tuple[int, str]]:
+def read_session_file(
+    path: Path, *, option: str = "--sessions-file"
+) -> list[tuple[int, str]]:
     """Read UTF-8 session UUID lines without accepting stdin or comments."""
-    content = read_utf8_file(path, "--sessions-file")
+    content = read_utf8_file(path, option)
     return [
         (line_number, line.strip())
         for line_number, line in enumerate(content.splitlines(), start=1)
         if line.strip()
     ]
+
+
+def parse_session_uuid_file(path: Path, *, option: str) -> list[uuid.UUID]:
+    """Parse one UTF-8 file containing one session UUID per nonblank line."""
+    lines = read_session_file(path, option=option)
+    if not lines:
+        raise CLIError(
+            "invalid_arguments",
+            f"{option} must contain at least one session UUID.",
+        )
+    session_ids: list[uuid.UUID] = []
+    for line_number, value in lines:
+        try:
+            session_ids.append(uuid.UUID(value))
+        except ValueError as error:
+            raise CLIError(
+                "invalid_arguments",
+                f"{option} line {line_number} must contain an exact UUID.",
+            ) from error
+    return session_ids
 
 
 def parse_session_ids(values: list[str], sessions_file: Path | None) -> list[uuid.UUID]:

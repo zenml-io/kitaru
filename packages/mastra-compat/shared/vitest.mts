@@ -1,8 +1,38 @@
+import { readFileSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vitest/config";
+import { MEMORY_REPLAY_TESTED_VERSIONS } from "../../mastra/src/memory-replay-versions.js";
 
 const PACKAGES_DIR = fileURLToPath(new URL("../..", import.meta.url));
+
+// Heavy payload-budget, large-blob, and Kitaru-API-hang suites skipped on
+// intermediate Mastra compatibility packages during routine CI runs. Both
+// endpoints of the supported range (`packages/mastra` at the oldest tested
+// release and the newest compat package) always run every file, and
+// `release-typescript.yml` sets KITARU_MASTRA_COMPAT_FULL=1 so releases run
+// the full suite against every tested Mastra version. Version-branching suites
+// (`memory-lease-lifecycle.test.ts` and `om-replay-tolerance.test.ts`) stay
+// enabled on every intermediate release.
+const INTERMEDIATE_COMPAT_EXCLUDES = [
+  "mastra/test/file-blob-replay.test.ts",
+  "mastra/test/memory-evidence-budget.test.ts",
+  "mastra/test/memory-slow-kitaru.test.ts",
+  "mastra/test/signed-url-history.test.ts",
+];
+
+const NEWEST_TESTED_CORE = [...MEMORY_REPLAY_TESTED_VERSIONS]
+  .sort((left, right) =>
+    left.core.localeCompare(right.core, undefined, { numeric: true }),
+  )
+  .at(-1)?.core;
+
+function isNewestTestedRelease(packageDirUrl: URL): boolean {
+  const manifest = JSON.parse(
+    readFileSync(new URL("package.json", packageDirUrl), "utf8"),
+  ) as { devDependencies?: Record<string, string> };
+  return manifest.devDependencies?.["@mastra/core"] === NEWEST_TESTED_CORE;
+}
 
 // Node resolves a bare import from the importing file's directory, so the
 // adapter tests and sources would load `packages/mastra`'s own Mastra install.
@@ -19,16 +49,21 @@ function resolveMastraFrom(anchor: string): Plugin {
   };
 }
 
-/** Run every `packages/mastra` test against the Mastra this package installs. */
+/** Run `packages/mastra` tests against the Mastra release this package installs. */
 export function defineMastraCompatConfig(configUrl: string) {
   const anchor = fileURLToPath(configUrl);
-  const packageDir = fileURLToPath(new URL(".", configUrl));
+  const packageDirUrl = new URL(".", configUrl);
+  const packageDir = fileURLToPath(packageDirUrl);
   const packageTests = `${relative(PACKAGES_DIR, packageDir)}/test/**/*.test.ts`;
+  const runFullSuite =
+    process.env.KITARU_MASTRA_COMPAT_FULL === "1" ||
+    isNewestTestedRelease(packageDirUrl);
   return defineConfig({
     plugins: [resolveMastraFrom(anchor)],
     test: {
       dir: PACKAGES_DIR,
       include: [packageTests, "mastra/test/*.test.ts"],
+      exclude: runFullSuite ? [] : INTERMEDIATE_COMPAT_EXCLUDES,
       env: { KITARU_MASTRA_TEST_PACKAGE: packageDir },
       setupFiles: [fileURLToPath(new URL("./setup.mts", import.meta.url))],
     },

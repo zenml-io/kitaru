@@ -50,6 +50,7 @@ from kitaru.api_models.v1.tag import (
 )
 from kitaru.api_models.v1.task import TaskKind, TaskResponse, TaskStatus
 from kitaru.cli import receipts
+from kitaru.cli.filters import list_validation_error, parse_filter_option
 from kitaru.cli.output import CLIError, CommandResult, emit_event
 from kitaru.cli.references import (
     ParentKind,
@@ -768,14 +769,18 @@ async def list_session_nodes(
     filter: str | None = None,
 ) -> CommandResult:
     """List one bounded server page of session nodes in index order."""
-    params = SessionNodeListParams.model_validate(
-        {
-            "size": size,
-            "cursor": cursor,
-            "include_payloads": include_payloads,
-            "filter": filter,
-        }
-    )
+    parsed_filter = parse_filter_option(filter) if filter is not None else None
+    try:
+        params = SessionNodeListParams.model_validate(
+            {
+                "size": size,
+                "cursor": cursor,
+                "include_payloads": include_payloads,
+                "filter": parsed_filter,
+            }
+        )
+    except ValidationError as error:
+        raise list_validation_error(error) from None
     return page_result(await client.sessions.list_nodes(session_id, params), size=size)
 
 

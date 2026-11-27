@@ -35,6 +35,7 @@ from kitaru_test_support import (
     ReplayServices,
     build_replay_services,
     create_agent,
+    create_experiment_run,
     create_plugin,
     override_idempotency,
 )
@@ -422,6 +423,40 @@ async def test_update_experiment_not_found(client: httpx.AsyncClient) -> None:
         f"/api/v1/experiments/{uuid.uuid4()}", json={"description": "x"}
     )
     assert response.status_code == 404
+
+
+async def test_update_experiment_frozen_returns_actionable_conflict(
+    client: httpx.AsyncClient, services: ReplayServices, agent_id: str
+) -> None:
+    """Observe HTTP 409 with next-step guidance when updating a frozen experiment."""
+    created = (
+        await client.post(
+            "/api/v1/experiments",
+            json={
+                "name": "exp1",
+                "agent_id": agent_id,
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
+        )
+    ).json()
+    await create_experiment_run(
+        services.experiment_runs,
+        ACCOUNT.id,
+        experiment_id=uuid.UUID(created["id"]),
+        cohort_version_id=uuid.uuid4(),
+        agent_version_id=uuid.uuid4(),
+    )
+    response = await client.patch(
+        f"/api/v1/experiments/{created['id']}",
+        json={"override": {"prompt": "updated"}},
+    )
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": (
+            f"Experiment {created['id']} has runs and its replay config cannot be "
+            "changed; create a new experiment with the new settings."
+        )
+    }
 
 
 async def test_delete_experiment(client: httpx.AsyncClient, agent_id: str) -> None:

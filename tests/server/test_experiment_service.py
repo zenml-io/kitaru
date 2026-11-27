@@ -683,7 +683,10 @@ async def test_update_experiment_config_frozen_once_it_has_runs(
         cohort_version_id=uuid.uuid4(),
         agent_version_id=uuid.uuid4(),
     )
-    with pytest.raises(ExperimentFrozen):
+    with pytest.raises(
+        ExperimentFrozen,
+        match="cannot be changed; create a new experiment with the new settings",
+    ):
         await service.update_experiment(
             created.id,
             ExperimentUpdate(evaluators=[EvaluatorConfigInput(evaluator="relevance")]),
