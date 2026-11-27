@@ -137,7 +137,12 @@ async def test_skipped_import_analysis_persists_across_requests(
     assert response.status_code == 200
     persisted = response.json()
     assert persisted["status"] == "skipped"
-    assert persisted["result"] is None
+    assert persisted["plugin_version_id"] is not None
+    assert persisted["result"] == {
+        "reason": "insufficient_sessions",
+        "eligible_sessions": 0,
+        "min_sessions": 5,
+    }
     response = await client.get("/api/v1/insights")
     assert response.status_code == 200
     assert response.json()["items"] == []

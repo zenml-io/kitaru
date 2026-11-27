@@ -133,7 +133,7 @@ kitaru session import sessions.jsonl \
   --wait
 ```
 
-The command prints the created import id and the job running it. One evaluator task runs per imported session and evaluator, and one analyzer task runs per analyzer over every session the import created, so a failed evaluator or analyzer marks the job failed while the import itself still records how many sessions it created.
+The command prints the created import id and the job running it. With `--wait`, the receipt also summarizes every follow-up analyzer and evaluator task on the job (including skip reasons, insight or evaluation counts, and warnings when an analyzer is skipped, fails, or produces zero insights). If every record fails to import (`created + skipped == 0` and `failed > 0`), `--wait` exits non-zero; pass `--fail-on-failures` with `--wait` to also exit non-zero when any individual record fails. One evaluator task runs per imported session and evaluator, and one analyzer task runs per analyzer over every session the import created, so a failed evaluator or analyzer marks the job failed while the import itself still records how many sessions it created.
 
 ## Join provider traces into sessions
 

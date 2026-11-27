@@ -102,7 +102,9 @@ def task_to_response(task: Task) -> TaskResponse:
             task.agent_version_id if isinstance(task, AgentTask) else None
         ),
         plugin_version_id=(
-            task.plugin_version_id if isinstance(task, EvaluationTask) else None
+            task.plugin_version_id
+            if isinstance(task, (EvaluationTask, AnalysisTask))
+            else None
         ),
         input_session_id=(
             task.input_session_id if isinstance(task, EvaluationTask) else None

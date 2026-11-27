@@ -304,6 +304,13 @@ async def import_analyze(
                 "Stop the import after creating this many sessions.",
             ),
             *WAIT_PARAMETERS,
+            ParameterSpec(
+                "--fail-on-failures",
+                "boolean",
+                "option",
+                False,
+                "Exit non-zero if any record fails to import; requires --wait.",
+            ),
             IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
@@ -342,6 +349,7 @@ async def session_import(
     wait: bool = False,
     interval: float | None = None,
     timeout: float | None = None,
+    fail_on_failures: bool = False,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Upload a local payload or an API selection, then create one import job."""
@@ -371,6 +379,7 @@ async def session_import(
             wait=wait,
             interval=interval,
             timeout=timeout,
+            fail_on_failures=fail_on_failures,
             idempotency_key=idempotency_key,
         )
 
