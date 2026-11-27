@@ -937,16 +937,19 @@ async def test_analyze_import_skips_without_eligible_sessions(
     if in_progress:
         await _imported_session(services, import_, status=SessionStatus.IN_PROGRESS)
     await _analyzer_version(services, "trends")
+    analysis = ImportAnalyze(analyzers=[AnalyzerConfigInput(analyzer="trends")])
     job = await services.import_service.analyze_import(
-        import_.id,
-        ImportAnalyze(analyzers=[AnalyzerConfigInput(analyzer="trends")]),
-        actor=ACTOR,
+        import_.id, analysis, actor=ACTOR
     )
     assert job.status is JobStatus.COMPLETED
     assert (await services.jobs.get(job.id)).status is JobStatus.COMPLETED
     (task,) = await _analysis_tasks(services, job.id)
     assert task.status is TaskStatus.SKIPPED
-    assert task.result is None
+    assert task.result == {
+        "reason": "insufficient_sessions",
+        "eligible_sessions": 0,
+        "min_sessions": 1,
+    }
 
 
 async def test_analyze_import_mixes_skipped_and_runnable_analyzers(
@@ -980,12 +983,9 @@ async def test_analyze_import_rejects_an_unknown_analyzer(
     """An unknown analyzer name resolves to not found."""
     import_ = await _analyzable_import(services)
 
+    analysis = ImportAnalyze(analyzers=[AnalyzerConfigInput(analyzer="missing")])
     with pytest.raises(PluginNotFound):
-        await services.import_service.analyze_import(
-            import_.id,
-            ImportAnalyze(analyzers=[AnalyzerConfigInput(analyzer="missing")]),
-            actor=ACTOR,
-        )
+        await services.import_service.analyze_import(import_.id, analysis, ACTOR)
 
 
 async def test_analyze_import_rejects_duplicate_analyzer_versions(

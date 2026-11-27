@@ -161,6 +161,94 @@ def _format_evaluation_aggregates(value: Any) -> str:
     return "\n\n".join(summaries)
 
 
+def _format_analyzer_tasks(value: Any) -> str:
+    """Format settled analyzer task summaries as concise one-line entries."""
+    if not isinstance(value, list) or not value:
+        return "-"
+    lines: list[str] = []
+    for task in value:
+        if not isinstance(task, dict):
+            lines.append(str(task))
+            continue
+        label = task.get("analyzer") or task.get("id") or "-"
+        status = task.get("status") or "-"
+        detail: str | None = None
+        if task.get("skip_reason"):
+            detail = str(task["skip_reason"])
+        elif task.get("error"):
+            detail = str(task["error"])
+        elif task.get("insight_count") is not None:
+            count = task["insight_count"]
+            noun = "insight" if count == 1 else "insights"
+            detail = f"{count} {noun}"
+            if task.get("reason"):
+                detail += f": {task['reason']}"
+        summary = f"{label}: {status}"
+        if detail:
+            summary += f" ({detail})"
+        if task.get("analyzer") and task.get("id"):
+            summary += f" [{task['id']}]"
+        lines.append(summary)
+    return "\n".join(lines)
+
+
+def _format_evaluator_summary(value: Any) -> str:
+    """Format aggregate evaluator task counts for a settled import receipt."""
+    if not isinstance(value, dict):
+        return str(value)
+    completed = value.get("completed_tasks", 0)
+    total = value.get("total_tasks", 0)
+    parts = [f"{completed}/{total} completed"]
+    for key, label in (
+        ("failed_tasks", "failed"),
+        ("canceled_tasks", "canceled"),
+        ("skipped_tasks", "skipped"),
+    ):
+        count = value.get(key, 0)
+        if count:
+            parts.append(f"{count} {label}")
+    evaluations = value.get("evaluation_count", 0)
+    noun = "evaluation" if evaluations == 1 else "evaluations"
+    summary = f"{', '.join(parts)} ({evaluations} {noun})"
+    if value.get("truncated"):
+        summary += " [task list truncated]"
+    return summary
+
+
+def _format_evaluator_tasks(value: Any) -> str:
+    """Format settled evaluator task summaries as concise one-line entries."""
+    if not isinstance(value, list) or not value:
+        return "-"
+    lines: list[str] = []
+    for task in value:
+        if not isinstance(task, dict):
+            lines.append(str(task))
+            continue
+        label = task.get("evaluator") or task.get("id") or "-"
+        status = task.get("status") or "-"
+        detail: str | None = None
+        if task.get("skip_reason"):
+            detail = str(task["skip_reason"])
+        elif task.get("error"):
+            detail = str(task["error"])
+        elif task.get("evaluation_count") is not None:
+            count = task["evaluation_count"]
+            noun = "evaluation" if count == 1 else "evaluations"
+            detail = f"{count} {noun}"
+        summary = f"{label}: {status}"
+        if detail:
+            summary += f" ({detail})"
+        refs: list[str] = []
+        if task.get("input_session_id"):
+            refs.append(f"session {task['input_session_id']}")
+        if task.get("evaluator") and task.get("id"):
+            refs.append(f"task {task['id']}")
+        if refs:
+            summary += f" [{', '.join(refs)}]"
+        lines.append(summary)
+    return "\n".join(lines)
+
+
 _ID = HumanField("id", "ID", no_wrap=True)
 _CREATED = HumanField("created", "Created", 110)
 _UPDATED = HumanField("updated", "Updated")
@@ -262,6 +350,26 @@ _JOB_SECTIONS = (
         ),
     ),
     HumanSection(
+        "Follow-up tasks",
+        (
+            HumanField(
+                "analyzer_tasks",
+                "Analyzers",
+                formatter=_format_analyzer_tasks,
+            ),
+            HumanField(
+                "evaluator_summary",
+                "Evaluators",
+                formatter=_format_evaluator_summary,
+            ),
+            HumanField(
+                "evaluator_tasks",
+                "Evaluator tasks",
+                formatter=_format_evaluator_tasks,
+            ),
+        ),
+    ),
+    HumanSection(
         "Request",
         (
             HumanField("experiment", "Experiment"),
@@ -270,6 +378,7 @@ _JOB_SECTIONS = (
             HumanField("importer", "Importer"),
             HumanField("session_ids", "Sessions"),
             HumanField("evaluators", "Evaluators"),
+            HumanField("analyzers", "Analyzers"),
         ),
     ),
 )
