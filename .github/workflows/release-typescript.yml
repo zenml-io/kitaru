@@ -96,6 +96,8 @@ jobs:
       - run: pnpm run lint
       - run: pnpm run typecheck
       - run: pnpm run test:built
+        env:
+          KITARU_MASTRA_COMPAT_FULL: '1'
       - name: Build and test exact package tarballs
         run: pnpm run pack:release:built
       - run: uv sync --frozen --extra server --extra cli --extra worker
