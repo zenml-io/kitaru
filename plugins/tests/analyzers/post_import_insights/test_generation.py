@@ -12,9 +12,11 @@ import pytest
 
 from kitaru.api_models.v1.insight import (
     Bin,
-    BinnedInsightData,
-    CategoricalInsightData,
+    BinnedArtifact,
+    CategoricalArtifact,
     CategoryValue,
+    StatGridArtifact,
+    StatItem,
 )
 from kitaru_post_import_insights.generation import (
     DEFAULT_INTRO_TITLE,
@@ -70,9 +72,7 @@ def profiling_result() -> ProfilingResult:
             eyebrow="Tool behavior",
             title=f"Candidate {index}",
             fallback_description=f"Pattern {index} is worth inspecting.",
-            data=CategoricalInsightData(
-                values=[CategoryValue(label="Observed", value=index + 1)]
-            ),
+            data=StatGridArtifact(items=[StatItem(label="Observed", value=index + 1)]),
             facts=[DeterministicFact(name="count", value=index + 1)],
             coverage=CandidateCoverage(
                 sessions_analyzed=2,
@@ -141,11 +141,7 @@ def test_editor_allows_exact_known_word_quantity_label(
     profiling_result: ProfilingResult,
 ) -> None:
     candidate = profiling_result.candidates[0].model_copy(
-        update={
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="Model Two", value=1)]
-            )
-        }
+        update={"data": StatGridArtifact(items=[StatItem(label="Model Two", value=1)])}
     )
     selection = AnalystPlan(
         selected_candidate_ids=[candidate.id],
@@ -170,11 +166,7 @@ def test_known_label_must_match_at_an_exact_boundary(
     profiling_result: ProfilingResult,
 ) -> None:
     candidate = profiling_result.candidates[0].model_copy(
-        update={
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="gpt-5.4", value=1)]
-            )
-        }
+        update={"data": StatGridArtifact(items=[StatItem(label="gpt-5.4", value=1)])}
     )
     selection = AnalystPlan(
         selected_candidate_ids=[candidate.id],
@@ -350,11 +342,7 @@ def test_editor_allows_exact_known_indefinite_quantity_label(
     profiling_result: ProfilingResult,
 ) -> None:
     candidate = profiling_result.candidates[0].model_copy(
-        update={
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="Model Many", value=1)]
-            )
-        }
+        update={"data": StatGridArtifact(items=[StatItem(label="Model Many", value=1)])}
     )
     selection = AnalystPlan(
         selected_candidate_ids=[candidate.id],
@@ -380,9 +368,7 @@ def test_editor_allows_exact_known_fractional_quantity_label(
 ) -> None:
     candidate = profiling_result.candidates[0].model_copy(
         update={
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="Model Quarter", value=1)]
-            )
+            "data": StatGridArtifact(items=[StatItem(label="Model Quarter", value=1)])
         }
     )
     selection = AnalystPlan(
@@ -412,9 +398,7 @@ def test_editor_allows_friendly_variant_of_grounded_outcome(
             "id": "session-outcomes",
             "family": "outcome",
             "fallback_description": "A session failed.",
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="failed", value=1)]
-            ),
+            "data": StatGridArtifact(items=[StatItem(label="failed", value=1)]),
         }
     )
     selection = AnalystPlan(
@@ -453,9 +437,7 @@ def test_session_outcomes_rejects_unobserved_status_language(
         update={
             "id": "session-outcomes",
             "family": "outcome",
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="failed", value=1)]
-            ),
+            "data": StatGridArtifact(items=[StatItem(label="failed", value=1)]),
         }
     )
     selection = AnalystPlan(
@@ -496,9 +478,7 @@ def test_session_outcomes_allows_observed_completion_synonyms(
         update={
             "id": "session-outcomes",
             "family": "outcome",
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="completed", value=1)]
-            ),
+            "data": StatGridArtifact(items=[StatItem(label="completed", value=1)]),
         }
     )
     selection = AnalystPlan(
@@ -537,9 +517,7 @@ def test_completed_sessions_do_not_authorize_successful_pass_wording(
         update={
             "id": "session-outcomes",
             "family": "outcome",
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="completed", value=1)]
-            ),
+            "data": StatGridArtifact(items=[StatItem(label="completed", value=1)]),
         }
     )
     selection = AnalystPlan(
@@ -589,9 +567,7 @@ def test_completed_sessions_do_not_authorize_business_success_claims(
         update={
             "id": "session-outcomes",
             "family": "outcome",
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="completed", value=1)]
-            ),
+            "data": StatGridArtifact(items=[StatItem(label="completed", value=1)]),
         }
     )
     selection = AnalystPlan(
@@ -693,9 +669,7 @@ def test_session_outcomes_rejects_negated_observed_status(
         update={
             "id": "session-outcomes",
             "family": "outcome",
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="failed", value=1)]
-            ),
+            "data": StatGridArtifact(items=[StatItem(label="failed", value=1)]),
         }
     )
     selection = AnalystPlan(
@@ -748,9 +722,7 @@ def test_editor_allows_negation_in_a_separate_clause_from_an_outcome(
         update={
             "id": "session-outcomes",
             "family": "outcome",
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="failed", value=1)]
-            ),
+            "data": StatGridArtifact(items=[StatItem(label="failed", value=1)]),
         }
     )
     selection = AnalystPlan(
@@ -779,11 +751,7 @@ def test_chart_label_cannot_authorize_outcome_claim(
     profiling_result: ProfilingResult,
 ) -> None:
     candidate = profiling_result.candidates[0].model_copy(
-        update={
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="failed", value=1)]
-            )
-        }
+        update={"data": StatGridArtifact(items=[StatItem(label="failed", value=1)])}
     )
     selection = AnalystPlan(
         selected_candidate_ids=[candidate.id],
@@ -816,9 +784,7 @@ def test_deterministic_tool_failure_authorizes_failure_copy(
             "fallback_description": (
                 "The recorded tool failure may have been recovered later."
             ),
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="lookup_order", value=1)]
-            ),
+            "data": StatGridArtifact(items=[StatItem(label="lookup_order", value=1)]),
             "facts": [DeterministicFact(name="occurrences", value=1)],
         }
     )
@@ -1223,9 +1189,7 @@ def test_card_copy_rejects_numbers_absent_from_the_candidate(
     profiling_result: ProfilingResult, description: str
 ) -> None:
     candidate = profiling_result.candidates[0].model_copy(
-        update={
-            "data": CategoricalInsightData(values=[CategoryValue(label="42%", value=1)])
-        }
+        update={"data": StatGridArtifact(items=[StatItem(label="42%", value=1)])}
     )
     with pytest.raises(ValueError, match="numeric claim absent"):
         validate_editorial_plan(
@@ -1456,9 +1420,7 @@ def test_editor_preserves_selection_and_allows_known_digit_label(
     candidate = profiling_result.candidates[0].model_copy(
         update={
             "title": "gpt-5.4 appears in the model mix",
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="gpt-5.4", value=1)]
-            ),
+            "data": StatGridArtifact(items=[StatItem(label="gpt-5.4", value=1)]),
         }
     )
     selection = AnalystPlan(
@@ -1504,18 +1466,10 @@ def test_editor_validates_numbers_against_each_card_only(
 ) -> None:
     first, second = profiling_result.candidates
     first = first.model_copy(
-        update={
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="gpt-5.4", value=1)]
-            )
-        }
+        update={"data": StatGridArtifact(items=[StatItem(label="gpt-5.4", value=1)])}
     )
     second = second.model_copy(
-        update={
-            "data": CategoricalInsightData(
-                values=[CategoryValue(label="claude-3.7", value=1)]
-            )
-        }
+        update={"data": StatGridArtifact(items=[StatItem(label="claude-3.7", value=1)])}
     )
     selection = AnalystPlan(
         selected_candidate_ids=[first.id, second.id],
@@ -1690,7 +1644,7 @@ def test_card_copy_grounds_time_units_on_the_chart_unit(
 ) -> None:
     candidate = profiling_result.candidates[0].model_copy(
         update={
-            "data": BinnedInsightData(
+            "data": BinnedArtifact(
                 unit="seconds",
                 bins=[
                     Bin(lower_bound=None, upper_bound=0.5, count=1),
@@ -1752,7 +1706,7 @@ def test_card_copy_binds_numbers_to_the_outcome_label_that_follows(
             "id": "session-outcomes",
             "family": "outcome",
             "title": "Sessions are recorded failed and completed",
-            "data": CategoricalInsightData(
+            "data": CategoricalArtifact(
                 values=[
                     CategoryValue(label="failed", value=1),
                     CategoryValue(label="completed", value=3),
@@ -1779,7 +1733,7 @@ def test_card_copy_binds_numbers_only_to_adjacent_chart_labels(
 ) -> None:
     candidate = profiling_result.candidates[0].model_copy(
         update={
-            "data": CategoricalInsightData(
+            "data": CategoricalArtifact(
                 unit="occurrences",
                 values=[
                     CategoryValue(label="prepareRunner", value=39),
@@ -1812,7 +1766,7 @@ def test_card_copy_allows_share_wording_with_accounts_for(
 ) -> None:
     candidate = profiling_result.candidates[0].model_copy(
         update={
-            "data": CategoricalInsightData(
+            "data": CategoricalArtifact(
                 unit="occurrences",
                 values=[
                     CategoryValue(label="prepareRunner", value=39),

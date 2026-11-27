@@ -17,9 +17,13 @@ from collections import Counter
 from uuid import UUID
 
 from kitaru.api_models.v1.insight import (
-    CategoricalInsightData,
+    CategoricalArtifact,
     CategoryValue,
+    InsightCoverage,
+    InsightFinding,
     InsightInput,
+    StatGridArtifact,
+    StatItem,
 )
 from kitaru.client.api_client import KitaruAPIClient
 
@@ -30,16 +34,35 @@ async def analyzer(session_ids: list[UUID], **params) -> InsightInput:
         for session_id in session_ids:
             session = await client.sessions.get(session_id)
             counts[session.status] += 1
+    artifact = (
+        CategoricalArtifact(
+            presentation="ranked_bars",
+            unit="sessions",
+            values=[
+                CategoryValue(label=status, value=count)
+                for status, count in counts.most_common(8)
+            ],
+        )
+        if len(counts) >= 2
+        else StatGridArtifact(
+            items=[
+                StatItem(label=status, value=count, unit="sessions")
+                for status, count in counts.items()
+            ]
+        )
+    )
     return InsightInput(
         name="session_outcomes",
         title="Session outcomes",
-        description="How the imported sessions finished.",
-        data=CategoricalInsightData(
-            values=[
-                CategoryValue(label=status, value=count)
-                for status, count in counts.items()
-            ]
-        ),
+        summary="How the imported sessions finished.",
+        coverage=InsightCoverage(sessions_analyzed=len(session_ids)),
+        findings=[
+            InsightFinding(
+                id="session-outcomes",
+                title="Session outcomes",
+                artifacts=[artifact],
+            )
+        ],
     )
 ```
 

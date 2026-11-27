@@ -325,30 +325,32 @@ def test_review_management_rejects_noop_null_status_and_unknown_verdict() -> Non
         )
 
 
+def _insight_input_dict(name: str, title: str, content: str) -> dict[str, Any]:
+    artifact = {"type": "text", "content": content}
+    return {
+        "name": name,
+        "title": title,
+        "findings": [{"id": "f1", "title": title, "artifacts": [artifact]}],
+    }
+
+
 def test_insight_management_rejects_noop_null_title_and_conflicting_clear() -> None:
     insight_id = uuid.uuid4()
-    with pytest.raises(ValidationError, match="change at least one"):
-        InsightUpdate(operation="update_insight", insight_id=insight_id)
-    with pytest.raises(ValidationError, match="title cannot be null"):
-        InsightUpdate(operation="update_insight", insight_id=insight_id, title=None)
-    with pytest.raises(
-        ValidationError, match="cannot be null without clear_description"
-    ):
-        InsightUpdate(
-            operation="update_insight", insight_id=insight_id, description=None
-        )
-    with pytest.raises(ValidationError, match="description and clear_description"):
-        InsightUpdate(
-            operation="update_insight",
-            insight_id=insight_id,
-            description="set",
-            clear_description=True,
-        )
+    invalid: list[tuple[dict[str, Any], str]] = [
+        ({}, "change at least one"),
+        ({"title": None}, "title cannot be null"),
+        ({"status": None}, "status cannot be null"),
+        ({"summary": None}, "cannot be null without clear_summary"),
+        ({"summary": "set", "clear_summary": True}, "summary and clear_summary"),
+    ]
+    for kwargs, pattern in invalid:
+        with pytest.raises(ValidationError, match=pattern):
+            InsightUpdate(operation="update_insight", insight_id=insight_id, **kwargs)
     InsightUpdate(
         operation="update_insight",
         insight_id=insight_id,
-        description=None,
-        clear_description=True,
+        summary=None,
+        clear_summary=True,
     )
 
 
@@ -358,7 +360,7 @@ def test_insights_create_caps_batch_size() -> None:
             operation="create_insights",
             agent_id=uuid.uuid4(),
             insights=[
-                {"title": f"insight-{index}", "data": {"type": "text", "content": "x"}}
+                _insight_input_dict(f"insight-{index}", f"insight-{index}", "x")
                 for index in range(101)
             ],
         )
@@ -392,11 +394,9 @@ async def test_review_insight_creates_and_updates_forward_typed_sdk_dtos() -> No
             operation="create_insights",
             agent_id=agent_id,
             insights=[
-                {
-                    "name": "latency-regressed",
-                    "title": "Latency regressed",
-                    "data": {"type": "text", "content": "It got slower."},
-                }
+                _insight_input_dict(
+                    "latency-regressed", "Latency regressed", "It got slower."
+                )
             ],
             idempotency_key="retry-insights-1",
         ),
@@ -406,8 +406,8 @@ async def test_review_insight_creates_and_updates_forward_typed_sdk_dtos() -> No
         InsightUpdate(
             operation="update_insight",
             insight_id=insight_id,
-            description=None,
-            clear_description=True,
+            summary=None,
+            clear_summary=True,
         ),
     )
     await handle_review_manage(
@@ -416,39 +416,37 @@ async def test_review_insight_creates_and_updates_forward_typed_sdk_dtos() -> No
             operation="update_insight",
             insight_id=insight_id,
             title="renamed",
+            status="reviewed",
         ),
     )
 
     received_agent_id, insights, idempotency_key = create_calls[0]
     assert received_agent_id == agent_id
-    assert [item.model_dump(mode="json") for item in cast(Any, insights)] == [
-        {
-            "name": "latency-regressed",
-            "title": "Latency regressed",
-            "description": None,
-            "data": {"type": "text", "content": "It got slower."},
-            "metadata": {},
-        }
-    ]
+    assert [item.name for item in cast(Any, insights)] == ["latency-regressed"]
     assert idempotency_key == "retry-insights-1"
     assert cast(Any, update_calls[0][1]).model_dump(exclude_unset=True) == {
-        "description": None
+        "summary": None
     }
     assert cast(Any, update_calls[1][1]).model_dump(exclude_unset=True) == {
-        "title": "renamed"
+        "title": "renamed",
+        "status": "reviewed",
     }
 
 
 def _insight(*, agent_id: uuid.UUID) -> InsightResponse:
     now = datetime.now(UTC)
+    finding = _insight_input_dict(
+        "latency-regressed", "Latency regressed", "It got slower."
+    )["findings"]
     return InsightResponse(
         id=uuid.uuid4(),
         owner_id=uuid.uuid4(),
         agent_id=agent_id,
         name="latency-regressed",
         title="Latency regressed",
-        description=None,
-        data={"type": "text", "content": "It got slower."},
+        summary=None,
+        status="new",
+        findings=finding,
         metadata={},
         created=now,
         updated=now,

@@ -43,7 +43,6 @@ from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.insight import Insight, InsightNotFound
 from kitaru.server.domain.plugin import PluginVersionIdNotFound
-from kitaru.server.filtering import FilterCondition
 from kitaru_test_support.blobs_plugins import (
     FakeBlobRepository,
     FakePluginRepository,
@@ -56,7 +55,6 @@ from kitaru_test_support.cohorts_workers import (
 )
 from kitaru_test_support.common import (
     _evaluate_filter_expression,
-    _matches_condition,
     _paginate_fake,
     _renewed_timestamp,
 )
@@ -144,20 +142,6 @@ class FakeInsightRepository:
             raise InsightNotFound(insight_id)
         return stored.model_copy()
 
-    def _evaluate_type_condition(
-        self, insight: Insight, condition: FilterCondition
-    ) -> bool:
-        """Evaluate a type filter condition against an insight's data type.
-
-        Args:
-            insight: Insight to evaluate.
-            condition: Validated type condition.
-
-        Returns:
-            Whether the insight's data type matches.
-        """
-        return _matches_condition(insight.data.type, condition)
-
     async def query(
         self, insight_filter: InsightFilter
     ) -> tuple[list[Insight], str | None]:
@@ -171,15 +155,10 @@ class FakeInsightRepository:
         """
         insights = list(self._insights.values())
         if insight_filter.expression is not None:
-            resolvers = {
-                "type": self._evaluate_type_condition,
-            }
             insights = [
                 insight
                 for insight in insights
-                if _evaluate_filter_expression(
-                    insight, insight_filter.expression, resolvers
-                )
+                if _evaluate_filter_expression(insight, insight_filter.expression)
             ]
         page, next_cursor = _paginate_fake(insights, insight_filter)
         return [insight.model_copy() for insight in page], next_cursor

@@ -23,7 +23,6 @@ from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.insight import (
     InsightCreate,
     InsightFilter,
-    InsightInput,
     InsightUpdate,
 )
 from kitaru.server.domain.insight import Insight
@@ -40,19 +39,7 @@ def insight_batch_create_to_command(
     Returns:
         Create command.
     """
-    return InsightCreate(
-        agent_id=body.agent_id,
-        insights=[
-            InsightInput(
-                name=item.name,
-                title=item.title,
-                description=item.description,
-                data=item.data,
-                metadata=item.metadata,
-            )
-            for item in body.insights
-        ],
-    )
+    return InsightCreate(agent_id=body.agent_id, insights=body.insights)
 
 
 def insight_to_response(insight: Insight) -> InsightResponse:
@@ -71,12 +58,19 @@ def insight_to_response(insight: Insight) -> InsightResponse:
         owner_id=insight.owner_id,
         agent_id=insight.agent_id,
         import_id=insight.import_id,
+        task_id=insight.task_id,
         analyzer_version_id=insight.analyzer_version_id,
         analyzer_params=insight.analyzer_params,
+        source_provider=insight.source_provider,
         name=insight.name,
         title=insight.title,
-        description=insight.description,
-        data=insight.data,
+        summary=insight.summary,
+        status=insight.status,
+        coverage=insight.coverage,
+        highlight=insight.highlight,
+        next_step=insight.next_step,
+        findings=insight.findings,
+        suggested_questions=insight.suggested_questions,
         metadata=insight.metadata,
         created=insight.created,
         updated=insight.updated,

@@ -281,8 +281,17 @@ async def test_analyzer_writes_one_insight_per_finding(
 
     [insight] = insights
     assert insight.name == "session-finding-1"
-    assert insight.description == "Verified in 1 of 2 imported sessions. Harm: high."
-    assert insight.data.model_dump() == {"type": "text", "content": "Example of high."}
+    assert insight.summary == "Verified in 1 of 2 imported sessions. Harm: high."
+    assert insight.findings[0].artifacts[0].type == "rate"
+    assert insight.findings[0].artifacts[1].model_dump() == {
+        "title": None,
+        "type": "text",
+        "style": "body",
+        "label": None,
+        "content": "Example of high.",
+        "file_path": None,
+        "revision": None,
+    }
     assert insight.metadata[SESSION_FINDINGS_METADATA_KEY] == {
         "harm": "high",
         "checks": ["The session shows final_sale."],

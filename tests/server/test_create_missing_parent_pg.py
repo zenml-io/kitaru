@@ -21,7 +21,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from conftest import pg_session_with_engine, postgres_available
-from kitaru.api_models.v1.insight import TextInsightData
+from kitaru.api_models.v1.insight import InsightFinding, TextArtifact
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
@@ -392,7 +392,13 @@ async def test_insight_missing_agent(setup: Setup) -> None:
         agent_id=uuid.uuid4(),
         name="insight",
         title="insight",
-        data=TextInsightData(content="root cause"),
+        findings=[
+            InsightFinding(
+                id="f1",
+                title="insight",
+                artifacts=[TextArtifact(content="root cause")],
+            )
+        ],
     )
     with pytest.raises(AgentNotFound):
         await SQLInsightRepository(setup.session).create_many([insight])

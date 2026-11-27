@@ -166,10 +166,10 @@ async def handle_review_manage(
         )
     if isinstance(request, InsightUpdate):
         values = request.model_dump(
-            include={"title", "description"}, exclude_unset=True
+            include={"title", "summary", "status"}, exclude_unset=True
         )
-        if request.clear_description:
-            values["description"] = None
+        if request.clear_summary:
+            values["summary"] = None
         return await state.client.insights.update(
             request.insight_id, InsightUpdateRequest.model_validate(values)
         )

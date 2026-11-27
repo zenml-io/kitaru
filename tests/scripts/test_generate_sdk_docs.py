@@ -244,9 +244,28 @@ API_MODELS_DOC_EXCLUSIONS: dict[str, frozenset[str]] = {
     ),
     # Annotated union aliases; the concrete filter models are published.
     "kitaru.api_models.v1.filter": frozenset({"Filter", "FilterParam"}),
-    # Annotated discriminated-union alias plus the batch size cap.
+    # Annotated discriminated-union alias and Literal type aliases; the concrete
+    # artifact models are published.
+    "kitaru.api_models.v1.insight_artifacts": frozenset(
+        {
+            "InsightArtifact",
+            "Tone",
+            "Severity",
+            "ChangeStatus",
+            "FindingKind",
+            "InsightStatus",
+            "Verdict",
+        }
+    ),
+    # Batch and report size caps.
     "kitaru.api_models.v1.insight": frozenset(
-        {"InsightData", "MAX_INSIGHT_BATCH_SIZE"}
+        {
+            "MAX_INSIGHT_BATCH_SIZE",
+            "MAX_FINDINGS_PER_INSIGHT",
+            "MAX_ARTIFACTS_PER_FINDING",
+            "MAX_SUGGESTED_QUESTIONS",
+            "MAX_CONTRIBUTING_SESSIONS_PER_FINDING",
+        }
     ),
 }
 

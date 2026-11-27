@@ -2419,10 +2419,10 @@ export interface paths {
         head?: never;
         /**
          * Update Insight
-         * @description Update an insight's title and description.
+         * @description Update an insight's title, summary, or status.
          *
          *     Clients observe HTTP 200 on success, 404 when no insight has this id,
-         *     and 422 when the update clears the insight title.
+         *     and 422 when the update clears a required field.
          *
          *     Args:
          *         insight_id: Id of the insight.
@@ -4495,6 +4495,29 @@ export interface components {
             run_spec?: components["schemas"]["RunSpec"] | null;
         };
         /**
+         * AlignedStep
+         * @description One slot in a side-by-side session comparison.
+         */
+        AlignedStep: {
+            /**
+             * Label
+             * @description Step name, None for a missing slot.
+             */
+            label?: string | null;
+            /**
+             * Node Id
+             * @description Optional node id.
+             */
+            node_id?: string | null;
+            /**
+             * Status
+             * @description Visual emphasis for this slot.
+             * @default present
+             * @enum {string}
+             */
+            status: "present" | "missing" | "highlight_bad" | "highlight_good";
+        };
+        /**
          * AnalysisCreateRequest
          * @description Analysis create request.
          *
@@ -5098,7 +5121,7 @@ export interface components {
         BaselineEvaluationMode: "none" | "if_missing" | "force";
         /**
          * Bin
-         * @description Bin.
+         * @description Contiguous histogram bin.
          */
         Bin: {
             /**
@@ -5106,6 +5129,12 @@ export interface components {
              * @description Observations in the bin.
              */
             count: number;
+            /**
+             * Focus
+             * @description Highlight this bin.
+             * @default false
+             */
+            focus: boolean;
             /**
              * Lower Bound
              * @description Inclusive lower bound, None on an open-ended first bin.
@@ -5118,15 +5147,35 @@ export interface components {
             upper_bound?: number | null;
         };
         /**
-         * BinnedInsightData
-         * @description Binned insight data.
+         * BinnedArtifact
+         * @description Contiguous histogram for spread across ordered bins.
          */
-        BinnedInsightData: {
+        BinnedArtifact: {
             /**
              * Bins
-             * @description Bins, in ascending order.
+             * @description Bins, in ascending order (2 to 12).
              */
             bins: components["schemas"]["Bin"][];
+            /**
+             * Median
+             * @description Optional median.
+             */
+            median?: number | null;
+            /**
+             * P95
+             * @description Optional p95.
+             */
+            p95?: number | null;
+            /**
+             * Presentation
+             * @description Visual layout hint.
+             */
+            presentation?: ("columns" | "horizontal" | "micro") | null;
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -5240,10 +5289,25 @@ export interface components {
             file: string;
         };
         /**
-         * CategoricalInsightData
-         * @description Categorical insight data.
+         * CategoricalArtifact
+         * @description Ranked bars, focus-within-total, baseline-tick, path bars, split, or donut.
          */
-        CategoricalInsightData: {
+        CategoricalArtifact: {
+            /**
+             * Baseline Value
+             * @description Overall baseline reference tick for baseline_bars.
+             */
+            baseline_value?: number | null;
+            /**
+             * Presentation
+             * @description Visual layout hint.
+             */
+            presentation?: ("ranked_bars" | "focus_bars" | "baseline_bars" | "path_bars" | "split_bar" | "donut") | null;
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -5256,7 +5320,7 @@ export interface components {
             unit?: string | null;
             /**
              * Values
-             * @description Values per category.
+             * @description Values per category (at least 2).
              */
             values: components["schemas"]["CategoryValue"][];
         };
@@ -5266,10 +5330,31 @@ export interface components {
          */
         CategoryValue: {
             /**
+             * Chat Prompt
+             * @description Optional prompt when clicking this count to open chat.
+             */
+            chat_prompt?: string | null;
+            /**
+             * Focus
+             * @description Highlight this category.
+             * @default false
+             */
+            focus: boolean;
+            /**
              * Label
              * @description Category label.
              */
             label: string;
+            /**
+             * Tone
+             * @description Optional semantic tone.
+             */
+            tone?: ("neutral" | "risk" | "danger" | "good" | "warn") | null;
+            /**
+             * Total
+             * @description Optional outer total for focus_bars subset-within-total.
+             */
+            total?: number | null;
             /**
              * Value
              * @description Measured value.
@@ -5475,6 +5560,99 @@ export interface components {
             display_version?: string | null;
         };
         /**
+         * ComparisonArtifact
+         * @description Two-group or two-period comparison across one or more rows.
+         */
+        ComparisonArtifact: {
+            /**
+             * After Label
+             * @description Label for the current or group B.
+             */
+            after_label: string;
+            /**
+             * Before Label
+             * @description Label for the baseline or group A.
+             */
+            before_label: string;
+            /**
+             * Presentation
+             * @description Visual layout hint.
+             */
+            presentation?: ("side_by_side" | "slopegraph" | "dumbbell" | "dot_plot" | "split_pair" | "import_status") | null;
+            /**
+             * Rows
+             * @description Comparison rows.
+             */
+            rows: components["schemas"]["ComparisonRow"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "comparison";
+            /**
+             * Unit
+             * @description Shared unit.
+             */
+            unit?: string | null;
+        };
+        /**
+         * ComparisonRow
+         * @description One before/after or two-group comparison row.
+         */
+        ComparisonRow: {
+            /**
+             * After
+             * @description Current or second-group value.
+             */
+            after: number;
+            /**
+             * After Detail
+             * @description Exact current detail for tooltips (e.g. '21 of 190').
+             */
+            after_detail?: string | null;
+            /**
+             * Before
+             * @description Baseline or first-group value.
+             */
+            before: number;
+            /**
+             * Before Detail
+             * @description Exact baseline detail for tooltips (e.g. '8 of 210').
+             */
+            before_detail?: string | null;
+            /**
+             * Chat Prompt
+             * @description Optional prompt when clicking this row to open chat.
+             */
+            chat_prompt?: string | null;
+            /**
+             * Focus
+             * @description Highlight this row.
+             * @default false
+             */
+            focus: boolean;
+            /**
+             * Label
+             * @description Row label.
+             */
+            label: string;
+            /**
+             * Status
+             * @description Status badge for import_status rows.
+             */
+            status?: ("new" | "recurring" | "narrowed" | "resolved") | null;
+            /**
+             * Tone
+             * @description Optional semantic tone.
+             */
+            tone?: ("neutral" | "risk" | "danger" | "good" | "warn") | null;
+        };
+        /**
          * ConnectionCreateRequest
          * @description Connection create request.
          */
@@ -5608,6 +5786,24 @@ export interface components {
              * @enum {string}
              */
             type: "copy_workdir";
+        };
+        /**
+         * CycleStep
+         * @description One tool in a repeating cycle.
+         */
+        CycleStep: {
+            /**
+             * Name
+             * @description Tool name.
+             */
+            name: string;
+            /**
+             * Status
+             * @description Call status.
+             * @default ok
+             * @enum {string}
+             */
+            status: "ok" | "error";
         };
         /**
          * DeviceAuthorizationResponse
@@ -6380,6 +6576,87 @@ export interface components {
             display_version?: string | null;
         };
         /**
+         * EvidenceArtifact
+         * @description Concrete sessions proving a finding as a step table or compact rows.
+         */
+        EvidenceArtifact: {
+            /**
+             * Presentation
+             * @description 'table' for full R1 evidence, 'compact' for dots.
+             * @default table
+             * @enum {string}
+             */
+            presentation: "table" | "compact";
+            /**
+             * Rows
+             * @description Example evidence rows.
+             */
+            rows: components["schemas"]["EvidenceRow"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
+             * Total Sessions
+             * @description Total sessions behind this finding for 'Open all N'.
+             */
+            total_sessions: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "evidence";
+        };
+        /**
+         * EvidenceRow
+         * @description One session/node citation proving a finding.
+         */
+        EvidenceRow: {
+            /**
+             * Counterexample Note
+             * @description Why this counterexample differs.
+             */
+            counterexample_note?: string | null;
+            /**
+             * Is Counterexample
+             * @description Marks a passing counterexample row.
+             * @default false
+             */
+            is_counterexample: boolean;
+            /**
+             * Node Id
+             * @description Optional node id.
+             */
+            node_id?: string | null;
+            /**
+             * Session Id
+             * Format: uuid
+             * @description Session id.
+             */
+            session_id: string;
+            /**
+             * Session Label
+             * @description Short display label.
+             */
+            session_label?: string | null;
+            /**
+             * Signal
+             * @description Tool or short signal label.
+             */
+            signal?: string | null;
+            /**
+             * Step Label
+             * @description Short step label (e.g. 'step 7').
+             */
+            step_label?: string | null;
+            /**
+             * Verdict
+             * @description Optional verdict.
+             */
+            verdict?: ("pass" | "fail" | "unclear") | null;
+        };
+        /**
          * ExperimentCreateRequest
          * @description Experiment create request.
          */
@@ -6640,6 +6917,80 @@ export interface components {
             tool_policy?: components["schemas"]["ToolPolicy"] | null;
         };
         /**
+         * FailureMatrixArtifact
+         * @description 2D last-good x first-wrong transition heatmap, strictly max 6x6.
+         */
+        FailureMatrixArtifact: {
+            /**
+             * Cells
+             * @description Populated transition cells.
+             */
+            cells: components["schemas"]["FailureMatrixCell"][];
+            /**
+             * Cols
+             * @description First wrong states (max 6; fold rare steps into 'Other').
+             */
+            cols: string[];
+            /**
+             * Rows
+             * @description Last good states (max 6; fold rare steps into 'Other').
+             */
+            rows: string[];
+            /**
+             * State By
+             * @description Granularity of matrix states.
+             * @default tool
+             * @enum {string}
+             */
+            state_by: "tool" | "span" | "node" | "step";
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
+             * Total Failed
+             * @description Total failed sessions.
+             */
+            total_failed: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "failure_matrix";
+        };
+        /**
+         * FailureMatrixCell
+         * @description One populated transition cell in a failure matrix.
+         */
+        FailureMatrixCell: {
+            /**
+             * Attempts
+             * @description Total sessions traversing this transition.
+             */
+            attempts?: number | null;
+            /**
+             * Count
+             * @description Failed sessions on this transition.
+             */
+            count: number;
+            /**
+             * From State
+             * @description Last good step or tool.
+             */
+            from_state: string;
+            /**
+             * Sessions
+             * @description Drill-down sessions.
+             */
+            sessions?: components["schemas"]["MatrixSessionRef"][];
+            /**
+             * To State
+             * @description First wrong step or tool.
+             */
+            to_state: string;
+        };
+        /**
          * FilterCondition
          * @description Filter condition.
          */
@@ -6663,6 +7014,32 @@ export interface components {
          * @enum {string}
          */
         FilterOp: "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "in" | "is_null" | "startswith" | "endswith" | "contains";
+        /**
+         * FlowSankeyArtifact
+         * @description Session split flow; strictly max 3 stages and 8 nodes, else use path_bars.
+         */
+        FlowSankeyArtifact: {
+            /**
+             * Links
+             * @description Links between nodes.
+             */
+            links: components["schemas"]["SankeyLink"][];
+            /**
+             * Stages
+             * @description 2 to 3 flow stages; past 3 use categorical path_bars.
+             */
+            stages: components["schemas"]["SankeyStage"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "flow_sankey";
+        };
         /**
          * HistoryConfig
          * @description History tool config.
@@ -7182,6 +7559,27 @@ export interface components {
             display_version?: string | null;
         };
         /**
+         * InsightAction
+         * @description Actionable handoff button attached to a finding or top-level next step.
+         */
+        InsightAction: {
+            /**
+             * Label
+             * @description Short button label.
+             */
+            label: string;
+            /**
+             * Prompt
+             * @description Handoff briefing sent when the button is clicked.
+             */
+            prompt: string;
+            /**
+             * Summary
+             * @description Short banner copy paired with the action.
+             */
+            summary?: string | null;
+        };
+        /**
          * InsightBatchCreateRequest
          * @description Insight batch create request.
          */
@@ -7194,28 +7592,159 @@ export interface components {
             agent_id: string;
             /**
              * Insights
-             * @description Insights to create, in input order.
+             * @description Insight reports to create, in input order.
              */
             insights: components["schemas"]["InsightInput"][];
         };
         /**
+         * InsightCoverage
+         * @description Honest accounting of the sessions inspected by an insight report.
+         */
+        InsightCoverage: {
+            /**
+             * Caveats
+             * @description Coverage caveats.
+             */
+            caveats?: string[];
+            /**
+             * Failed
+             * @description Sessions that failed to parse.
+             * @default 0
+             */
+            failed: number;
+            /**
+             * Sessions Analyzed
+             * @description Sessions read for the report.
+             */
+            sessions_analyzed: number;
+            /**
+             * Sessions Available
+             * @description Total sessions in scope before limits.
+             */
+            sessions_available?: number | null;
+            /**
+             * Skipped
+             * @description Sessions skipped.
+             * @default 0
+             */
+            skipped: number;
+            /**
+             * Started After
+             * @description Inclusive start of the analyzed time window.
+             */
+            started_after?: string | null;
+            /**
+             * Started Before
+             * @description Exclusive end of the analyzed time window.
+             */
+            started_before?: string | null;
+        };
+        /**
+         * InsightFinding
+         * @description One ranked section inside an insight report.
+         */
+        InsightFinding: {
+            /** @description Optional investigate handoff button. */
+            action?: components["schemas"]["InsightAction"] | null;
+            /**
+             * Artifacts
+             * @description Ordered typed visual and evidence blocks.
+             */
+            artifacts?: (components["schemas"]["StatGridArtifact"] | components["schemas"]["RateArtifact"] | components["schemas"]["CategoricalArtifact"] | components["schemas"]["ComparisonArtifact"] | components["schemas"]["TableArtifact"] | components["schemas"]["BinnedArtifact"] | components["schemas"]["SessionDotsArtifact"] | components["schemas"]["TimeSeriesArtifact"] | components["schemas"]["StepStripArtifact"] | components["schemas"]["FailureMatrixArtifact"] | components["schemas"]["FlowSankeyArtifact"] | components["schemas"]["StepStoryArtifact"] | components["schemas"]["ToolCycleArtifact"] | components["schemas"]["SessionComparisonArtifact"] | components["schemas"]["SessionTimelineArtifact"] | components["schemas"]["EvidenceArtifact"] | components["schemas"]["TextArtifact"])[];
+            /**
+             * Body
+             * @description Markdown narrative with concrete details.
+             */
+            body?: string | null;
+            /**
+             * Change Status
+             * @description Status relative to earlier runs.
+             */
+            change_status?: ("new" | "recurring" | "narrowed" | "resolved") | null;
+            /**
+             * Check First
+             * @description First thing a human should verify.
+             */
+            check_first?: string | null;
+            /**
+             * Contributing Session Ids
+             * @description Session UUIDs supporting this finding.
+             */
+            contributing_session_ids?: string[];
+            /**
+             * Id
+             * @description Stable slug within the report.
+             */
+            id: string;
+            /**
+             * Kind
+             * @description Finding category.
+             * @default finding
+             * @enum {string}
+             */
+            kind: "finding" | "bright_spot" | "opportunity" | "coverage_gap";
+            /**
+             * Severity
+             * @description Optional harm level.
+             */
+            severity?: ("high" | "medium" | "low") | null;
+            /**
+             * Suggested Questions
+             * @description Follow-up chat questions scoped to this finding.
+             */
+            suggested_questions?: components["schemas"]["SuggestedQuestion"][];
+            /**
+             * Summary
+             * @description Plain-text one-sentence claim for compact lists and sidebar.
+             */
+            summary?: string | null;
+            /**
+             * Tier
+             * @description 'primary' for main findings, 'secondary' for baseline metrics.
+             * @default primary
+             * @enum {string}
+             */
+            tier: "primary" | "secondary";
+            /**
+             * Title
+             * @description Finding headline.
+             */
+            title: string;
+        };
+        /**
+         * InsightHighlight
+         * @description Selects which finding and artifact power the Grid view card.
+         */
+        InsightHighlight: {
+            /**
+             * Artifact Index
+             * @description Zero-based index into that finding's artifacts.
+             * @default 0
+             */
+            artifact_index: number;
+            /**
+             * Finding Id
+             * @description Finding id.
+             */
+            finding_id: string;
+        };
+        /**
          * InsightInput
-         * @description Insight input.
+         * @description Structured insight report input.
          */
         InsightInput: {
+            /** @description Session coverage accounting. */
+            coverage?: components["schemas"]["InsightCoverage"] | null;
             /**
-             * Data
-             * @description Insight data.
+             * Findings
+             * @description Ordered findings inside this report.
              */
-            data: components["schemas"]["TextInsightData"] | components["schemas"]["CategoricalInsightData"] | components["schemas"]["BinnedInsightData"];
-            /**
-             * Description
-             * @description Insight description.
-             */
-            description?: string | null;
+            findings: components["schemas"]["InsightFinding"][];
+            /** @description Finding and artifact shown on the grid tile. */
+            highlight?: components["schemas"]["InsightHighlight"] | null;
             /**
              * Metadata
-             * @description Arbitrary metadata.
+             * @description Opaque producer metadata (run receipts, seeds, versions).
              */
             metadata?: {
                 [key: string]: unknown;
@@ -7225,15 +7754,32 @@ export interface components {
              * @description Insight name.
              */
             name: string;
+            /** @description Top-of-report recommended next step. */
+            next_step?: components["schemas"]["InsightAction"] | null;
+            /**
+             * Source Provider
+             * @description Trace source label (e.g. langfuse, langsmith, recorded).
+             */
+            source_provider?: string | null;
+            /**
+             * Suggested Questions
+             * @description Report-level follow-up chat questions for the sidebar.
+             */
+            suggested_questions?: components["schemas"]["SuggestedQuestion"][];
+            /**
+             * Summary
+             * @description One-sentence plain summary for grid and list views.
+             */
+            summary?: string | null;
             /**
              * Title
-             * @description Insight title.
+             * @description Report title.
              */
             title: string;
         };
         /**
          * InsightResponse
-         * @description Insight response.
+         * @description Structured insight report response.
          */
         InsightResponse: {
             /**
@@ -7254,6 +7800,8 @@ export interface components {
              * @description Analyzer version that produced the insight.
              */
             analyzer_version_id?: string | null;
+            /** @description Session coverage accounting. */
+            coverage?: components["schemas"]["InsightCoverage"] | null;
             /**
              * Created
              * Format: date-time
@@ -7261,15 +7809,12 @@ export interface components {
              */
             created: string;
             /**
-             * Data
-             * @description Insight data.
+             * Findings
+             * @description Ordered findings inside this report.
              */
-            data: components["schemas"]["TextInsightData"] | components["schemas"]["CategoricalInsightData"] | components["schemas"]["BinnedInsightData"];
-            /**
-             * Description
-             * @description Insight description.
-             */
-            description: string | null;
+            findings: components["schemas"]["InsightFinding"][];
+            /** @description Finding and artifact shown on the grid tile. */
+            highlight?: components["schemas"]["InsightHighlight"] | null;
             /**
              * Id
              * Format: uuid
@@ -7283,7 +7828,7 @@ export interface components {
             import_id?: string | null;
             /**
              * Metadata
-             * @description Arbitrary metadata.
+             * @description Opaque producer metadata.
              */
             metadata: {
                 [key: string]: unknown;
@@ -7293,12 +7838,41 @@ export interface components {
              * @description Insight name.
              */
             name: string;
+            /** @description Top-of-report recommended next step. */
+            next_step?: components["schemas"]["InsightAction"] | null;
             /**
              * Owner Id
              * Format: uuid
              * @description Id of the owning account.
              */
             owner_id: string;
+            /**
+             * Source Provider
+             * @description Trace source label.
+             */
+            source_provider?: string | null;
+            /**
+             * Status
+             * @description Review status.
+             * @default new
+             * @enum {string}
+             */
+            status: "new" | "reviewed" | "archived";
+            /**
+             * Suggested Questions
+             * @description Report-level follow-up chat questions.
+             */
+            suggested_questions?: components["schemas"]["SuggestedQuestion"][];
+            /**
+             * Summary
+             * @description One-sentence summary.
+             */
+            summary?: string | null;
+            /**
+             * Task Id
+             * @description Analysis task that produced the insight.
+             */
+            task_id?: string | null;
             /**
              * Title
              * @description Insight title.
@@ -7317,10 +7891,15 @@ export interface components {
          */
         InsightUpdateRequest: {
             /**
-             * Description
-             * @description New insight description.
+             * Status
+             * @description New review status.
              */
-            description?: string | null;
+            status?: ("new" | "reviewed" | "archived") | null;
+            /**
+             * Summary
+             * @description New insight summary.
+             */
+            summary?: string | null;
             /**
              * Title
              * @description New insight title.
@@ -7715,6 +8294,33 @@ export interface components {
              * @description Annotation value.
              */
             value: unknown;
+        };
+        /**
+         * MatrixSessionRef
+         * @description Session reference inside a failure matrix cell.
+         */
+        MatrixSessionRef: {
+            /**
+             * Node Id
+             * @description Failing node id.
+             */
+            node_id?: string | null;
+            /**
+             * Session Id
+             * Format: uuid
+             * @description Session id.
+             */
+            session_id: string;
+            /**
+             * Session Label
+             * @description Short display label.
+             */
+            session_label?: string | null;
+            /**
+             * Step Label
+             * @description Short step label (e.g. 'step 7').
+             */
+            step_label?: string | null;
         };
         /**
          * NodeLink
@@ -8236,6 +8842,74 @@ export interface components {
             type: "passthrough";
         };
         /**
+         * RateArtifact
+         * @description Single rate with optional confidence range, or an x-of-y share bar.
+         */
+        RateArtifact: {
+            /**
+             * Basis
+             * @description Sampling basis note.
+             */
+            basis?: string | null;
+            /**
+             * Chat Prompt
+             * @description Optional prompt when clicking the number to open chat.
+             */
+            chat_prompt?: string | null;
+            /**
+             * Ci High
+             * @description Upper confidence bound.
+             */
+            ci_high?: number | null;
+            /**
+             * Ci Low
+             * @description Lower confidence bound.
+             */
+            ci_low?: number | null;
+            /**
+             * Denominator
+             * @description Total count behind the rate.
+             */
+            denominator?: number | null;
+            /**
+             * Label
+             * @description Short rate label.
+             */
+            label?: string | null;
+            /**
+             * Numerator
+             * @description Matching count (renders 'x of y' when small).
+             */
+            numerator?: number | null;
+            /**
+             * Presentation
+             * @description Use 'range' for sampled rates with CI, 'share_bar' for x of y.
+             */
+            presentation?: ("range" | "share_bar") | null;
+            /**
+             * Rate
+             * @description Rate between 0 and 1.
+             */
+            rate: number;
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
+             * Tone
+             * @description Semantic tone.
+             * @default risk
+             * @enum {string}
+             */
+            tone: "neutral" | "risk" | "danger" | "good" | "warn";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "rate";
+        };
+        /**
          * ReplayCreateRequest
          * @description Replay create request.
          */
@@ -8472,6 +9146,78 @@ export interface components {
             agent_id: string;
         };
         /**
+         * SankeyLink
+         * @description Directed flow link between two Sankey nodes.
+         */
+        SankeyLink: {
+            /**
+             * Count
+             * @description Sessions following this link.
+             */
+            count: number;
+            /**
+             * Source
+             * @description Source node id.
+             */
+            source: string;
+            /**
+             * Target
+             * @description Target node id.
+             */
+            target: string;
+            /**
+             * Tone
+             * @description Semantic tone.
+             * @default neutral
+             * @enum {string}
+             */
+            tone: "neutral" | "risk" | "danger" | "good" | "warn";
+        };
+        /**
+         * SankeyNode
+         * @description One node inside a Sankey stage.
+         */
+        SankeyNode: {
+            /**
+             * Count
+             * @description Sessions at this node.
+             */
+            count: number;
+            /**
+             * Id
+             * @description Unique node id.
+             */
+            id: string;
+            /**
+             * Label
+             * @description Display label.
+             */
+            label: string;
+            /**
+             * Tone
+             * @description Semantic tone.
+             * @default neutral
+             * @enum {string}
+             */
+            tone: "neutral" | "risk" | "danger" | "good" | "warn";
+        };
+        /**
+         * SankeyStage
+         * @description One vertical stage in a Sankey flow.
+         */
+        SankeyStage: {
+            /**
+             * Label
+             * @description Stage label.
+             */
+            label?: string | null;
+            /**
+             * Nodes
+             * @description Nodes in this stage.
+             */
+            nodes: components["schemas"]["SankeyNode"][];
+        };
+        /**
          * ScriptPluginSource
          * @description Script plugin source.
          */
@@ -8649,6 +9395,22 @@ export interface components {
             };
         };
         /**
+         * SeriesAnnotation
+         * @description Event marker placed at one x_labels index.
+         */
+        SeriesAnnotation: {
+            /**
+             * Label
+             * @description Marker label.
+             */
+            label: string;
+            /**
+             * X Index
+             * @description Zero-based index into x_labels.
+             */
+            x_index: number;
+        };
+        /**
          * ServerInfoResponse
          * @description Server info response.
          */
@@ -8739,6 +9501,26 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * SessionComparisonArtifact
+         * @description Failing session side by side with a passing counterexample or replay.
+         */
+        SessionComparisonArtifact: {
+            /** @description Left session (typically failing). */
+            left: components["schemas"]["SessionSide"];
+            /** @description Right session (counterexample or replay). */
+            right: components["schemas"]["SessionSide"];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "session_comparison";
         };
         /**
          * SessionCreateRequest
@@ -8987,6 +9769,70 @@ export interface components {
             evaluations: components["schemas"]["EvaluationResponse"][];
             /** @description Session. */
             session: components["schemas"]["SessionDetailResponse"];
+        };
+        /**
+         * SessionDot
+         * @description One session point on a dot strip.
+         */
+        SessionDot: {
+            /**
+             * Highlight
+             * @description Highlight as outlier/focus.
+             * @default false
+             */
+            highlight: boolean;
+            /**
+             * Session Id
+             * Format: uuid
+             * @description Session id.
+             */
+            session_id: string;
+            /**
+             * Session Label
+             * @description Short display label.
+             */
+            session_label?: string | null;
+            /**
+             * Value
+             * @description Measured value for this session.
+             */
+            value: number;
+        };
+        /**
+         * SessionDotsArtifact
+         * @description Dot strip showing every session when n <= 100; past 100 use binned.
+         */
+        SessionDotsArtifact: {
+            /**
+             * Points
+             * @description At most 100 sessions; past 100 switch to 'binned'.
+             */
+            points: components["schemas"]["SessionDot"][];
+            /**
+             * Scale Max
+             * @description Optional max.
+             */
+            scale_max?: number | null;
+            /**
+             * Scale Min
+             * @description Optional min.
+             */
+            scale_min?: number | null;
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "session_dots";
+            /**
+             * Unit
+             * @description Value unit.
+             */
+            unit?: string | null;
         };
         /**
          * SessionEvaluationsRequest
@@ -9459,11 +10305,76 @@ export interface components {
             name?: string | null;
         };
         /**
+         * SessionSide
+         * @description One side (failing or counterexample/replay) of a session comparison.
+         */
+        SessionSide: {
+            /**
+             * Session Id
+             * Format: uuid
+             * @description Session id.
+             */
+            session_id: string;
+            /**
+             * Session Label
+             * @description Short display label.
+             */
+            session_label?: string | null;
+            /**
+             * Steps
+             * @description Aligned steps.
+             */
+            steps: components["schemas"]["AlignedStep"][];
+            /**
+             * Verdict
+             * @description Outcome verdict.
+             * @enum {string}
+             */
+            verdict: "pass" | "fail" | "unclear";
+        };
+        /**
          * SessionStatus
          * @description Session status.
          * @enum {string}
          */
         SessionStatus: "in_progress" | "completed" | "failed";
+        /**
+         * SessionTimelineArtifact
+         * @description Duration waterfall for one session; never use for aggregate failure location.
+         */
+        SessionTimelineArtifact: {
+            /**
+             * Session Id
+             * Format: uuid
+             * @description Session id.
+             */
+            session_id: string;
+            /**
+             * Session Label
+             * @description Short display label.
+             */
+            session_label?: string | null;
+            /**
+             * Spans
+             * @description Ordered spans.
+             */
+            spans: components["schemas"]["TimelineSpan"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
+             * Total Duration Ms
+             * @description Total session duration in milliseconds.
+             */
+            total_duration_ms: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "session_timeline";
+        };
         /**
          * SessionUpdateRequest
          * @description Session update request.
@@ -9552,6 +10463,60 @@ export interface components {
             type: "setup_command";
         };
         /**
+         * StatGridArtifact
+         * @description One to six headline counts at a glance.
+         */
+        StatGridArtifact: {
+            /**
+             * Items
+             * @description Headline stat tiles.
+             */
+            items: components["schemas"]["StatItem"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "stat_grid";
+        };
+        /**
+         * StatItem
+         * @description Single headline count or value inside a stat grid.
+         */
+        StatItem: {
+            /**
+             * Chat Prompt
+             * @description Optional prompt when clicking this number to open chat.
+             */
+            chat_prompt?: string | null;
+            /**
+             * Label
+             * @description Metric label.
+             */
+            label: string;
+            /**
+             * Tone
+             * @description Semantic emphasis tone.
+             * @default neutral
+             * @enum {string}
+             */
+            tone: "neutral" | "risk" | "danger" | "good" | "warn";
+            /**
+             * Unit
+             * @description Optional unit.
+             */
+            unit?: string | null;
+            /**
+             * Value
+             * @description Measured count or formatted value.
+             */
+            value: number | string;
+        };
+        /**
          * StaticCase
          * @description Static tool call case.
          */
@@ -9593,6 +10558,221 @@ export interface components {
          * @enum {string}
          */
         StaticMatchMode: "exact" | "subset";
+        /**
+         * StepStoryArtifact
+         * @description Numbered step-by-step story of a failure, with optional session link.
+         */
+        StepStoryArtifact: {
+            /**
+             * Session Id
+             * @description Optional example session id.
+             */
+            session_id?: string | null;
+            /**
+             * Session Label
+             * @description Short display label.
+             */
+            session_label?: string | null;
+            /**
+             * Steps
+             * @description Ordered story steps.
+             */
+            steps: components["schemas"]["StoryStep"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "step_story";
+        };
+        /**
+         * StepStripArtifact
+         * @description Where in a run failures start, as stacked rows or per-agent small multiples.
+         */
+        StepStripArtifact: {
+            /**
+             * Presentation
+             * @description Stacked rows or 2x3 small multiples grid.
+             * @default rows
+             * @enum {string}
+             */
+            presentation: "rows" | "small_multiples";
+            /**
+             * Rows
+             * @description Step strip rows.
+             */
+            rows: components["schemas"]["StepStripRow"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
+             * Total Steps
+             * @description Number of step blocks on the shared scale.
+             */
+            total_steps: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "step_strip";
+        };
+        /**
+         * StepStripRow
+         * @description One row of step blocks pinpointing last good and first wrong step.
+         */
+        StepStripRow: {
+            /**
+             * Chat Prompt
+             * @description Optional prompt when clicking this count to open chat.
+             */
+            chat_prompt?: string | null;
+            /**
+             * First Wrong Step
+             * @description 1-based first wrong step.
+             */
+            first_wrong_step?: number | null;
+            /**
+             * Label
+             * @description Cause or agent name.
+             */
+            label: string;
+            /**
+             * Last Good Step
+             * @description 1-based last good step.
+             */
+            last_good_step?: number | null;
+            /**
+             * Session Count
+             * @description Matching session count.
+             */
+            session_count?: number | null;
+            /**
+             * Session Ids
+             * @description Example sessions.
+             */
+            session_ids?: string[];
+            /**
+             * Severity
+             * @description Optional severity.
+             */
+            severity?: ("high" | "medium" | "low") | null;
+        };
+        /**
+         * StoryStep
+         * @description One numbered step in a step story.
+         */
+        StoryStep: {
+            /**
+             * Node Id
+             * @description Optional node id.
+             */
+            node_id?: string | null;
+            /**
+             * Note
+             * @description Optional inline annotation.
+             */
+            note?: string | null;
+            /**
+             * Number
+             * @description 1-based step number.
+             */
+            number: number;
+            /**
+             * Role
+             * @description Optional actor role.
+             */
+            role?: ("user" | "agent" | "tool" | "system") | null;
+            /**
+             * Text
+             * @description What happened.
+             */
+            text: string;
+            /**
+             * Tone
+             * @description Use 'danger' for the bad step.
+             * @default neutral
+             * @enum {string}
+             */
+            tone: "neutral" | "risk" | "danger" | "good" | "warn";
+            /**
+             * Tool Name
+             * @description Optional tool name.
+             */
+            tool_name?: string | null;
+        };
+        /**
+         * SuggestedQuestion
+         * @description Suggested follow-up chat prompt shown in the report sidebar.
+         */
+        SuggestedQuestion: {
+            /**
+             * Label
+             * @description Short pill text.
+             */
+            label: string;
+            /**
+             * Prompt
+             * @description Optional fuller prompt sent to chat (defaults to label).
+             */
+            prompt?: string | null;
+        };
+        /**
+         * TableArtifact
+         * @description Structured table with optional inline rate bars and session links.
+         */
+        TableArtifact: {
+            /**
+             * Columns
+             * @description Ordered table columns.
+             */
+            columns: components["schemas"]["TableColumn"][];
+            /**
+             * Rows
+             * @description Row records keyed by column key.
+             */
+            rows: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "table";
+        };
+        /**
+         * TableColumn
+         * @description Typed column definition for a structured table.
+         */
+        TableColumn: {
+            /**
+             * Format
+             * @description Cell formatting hint.
+             * @default text
+             * @enum {string}
+             */
+            format: "text" | "mono" | "number" | "percent" | "percent_bar" | "delta" | "badge" | "session_link";
+            /**
+             * Key
+             * @description Row dict key.
+             */
+            key: string;
+            /**
+             * Label
+             * @description Column heading.
+             */
+            label: string;
+        };
         /**
          * TagCreateRequest
          * @description Tag create request.
@@ -10062,20 +11242,148 @@ export interface components {
             type: "teardown_command";
         };
         /**
-         * TextInsightData
-         * @description Text insight data.
+         * TextArtifact
+         * @description Markdown prose, R2 callout banner, or labeled code/prompt hypothesis.
          */
-        TextInsightData: {
+        TextArtifact: {
             /**
              * Content
              * @description Markdown content.
              */
             content: string;
             /**
+             * File Path
+             * @description Optional source file for hypothesis.
+             */
+            file_path?: string | null;
+            /**
+             * Label
+             * @description Optional banner/hypothesis label.
+             */
+            label?: string | null;
+            /**
+             * Revision
+             * @description Optional git SHA for hypothesis.
+             */
+            revision?: string | null;
+            /**
+             * Style
+             * @description Visual style.
+             * @default body
+             * @enum {string}
+             */
+            style: "body" | "callout" | "hypothesis";
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
             type: "text";
+        };
+        /**
+         * TimeSeriesArtifact
+         * @description Change over 3+ points in time or versions on one shared scale.
+         */
+        TimeSeriesArtifact: {
+            /**
+             * Annotations
+             * @description Optional event markers.
+             */
+            annotations?: components["schemas"]["SeriesAnnotation"][];
+            /**
+             * Presentation
+             * @description Visual layout hint.
+             */
+            presentation?: ("line" | "highlight_line" | "ordered_columns" | "stacked_columns" | "sparkline" | "small_multiples") | null;
+            /**
+             * Series
+             * @description One or more series.
+             */
+            series: components["schemas"]["TimeSeriesLine"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "time_series";
+            /**
+             * Unit
+             * @description Single shared unit (no dual axes).
+             */
+            unit?: string | null;
+            /**
+             * X Labels
+             * @description Ordered time or version labels (3+ points; use comparison for 2).
+             */
+            x_labels: string[];
+        };
+        /**
+         * TimeSeriesLine
+         * @description One named series over the shared x_labels.
+         */
+        TimeSeriesLine: {
+            /**
+             * Focus
+             * @description Highlight this series.
+             * @default false
+             */
+            focus: boolean;
+            /**
+             * Label
+             * @description Series label.
+             */
+            label: string;
+            /**
+             * Tone
+             * @description Optional semantic tone.
+             */
+            tone?: ("neutral" | "risk" | "danger" | "good" | "warn") | null;
+            /**
+             * Values
+             * @description Values aligned with x_labels.
+             */
+            values: (number | null)[];
+        };
+        /**
+         * TimelineSpan
+         * @description One timed span in a single session's waterfall.
+         */
+        TimelineSpan: {
+            /**
+             * Duration Ms
+             * @description Duration in milliseconds.
+             */
+            duration_ms: number;
+            /**
+             * Name
+             * @description Step or tool name.
+             */
+            name: string;
+            /**
+             * Node Id
+             * @description Optional node id.
+             */
+            node_id?: string | null;
+            /**
+             * Start Ms
+             * @description Start offset in milliseconds.
+             */
+            start_ms: number;
+            /**
+             * Tone
+             * @description Semantic tone.
+             * @default neutral
+             * @enum {string}
+             */
+            tone: "neutral" | "risk" | "danger" | "good" | "warn";
         };
         /**
          * TokenErrorCode
@@ -10152,6 +11460,42 @@ export interface components {
              * @description Reasoning tokens.
              */
             reasoning_tokens?: number | null;
+        };
+        /**
+         * ToolCycleArtifact
+         * @description Repeating tool loop and its count.
+         */
+        ToolCycleArtifact: {
+            /**
+             * Note
+             * @description Optional impact note.
+             */
+            note?: string | null;
+            /**
+             * Repeat Count
+             * @description Maximum or typical repeat count.
+             */
+            repeat_count: number;
+            /**
+             * Session Count
+             * @description Sessions showing this loop.
+             */
+            session_count: number;
+            /**
+             * Steps
+             * @description Tools in the repeating cycle.
+             */
+            steps: components["schemas"]["CycleStep"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "tool_cycle";
         };
         /**
          * ToolLookupMatch

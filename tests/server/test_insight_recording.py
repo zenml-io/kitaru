@@ -126,7 +126,13 @@ def _insight_result(name: str) -> dict[str, Any]:
     return {
         "name": name,
         "title": name.title(),
-        "data": {"type": "text", "content": "ok"},
+        "findings": [
+            {
+                "id": "f1",
+                "title": name.title(),
+                "artifacts": [{"type": "text", "content": "ok"}],
+            }
+        ],
     }
 
 

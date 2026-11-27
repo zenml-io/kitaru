@@ -2,7 +2,7 @@
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
-#  You may obtain a copy of the License at
+#  You may obtain a copy of the License at:
 #
 #       https://www.apache.org/licenses/LICENSE-2.0
 #
@@ -24,6 +24,7 @@ from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
 from kitaru.api_models.v1.insight import (
     InsightInput,
     InsightListParams,
+    InsightStatus,
     InsightUpdateRequest,
 )
 from kitaru.cli.input_files import read_utf8_file
@@ -88,7 +89,7 @@ async def create_insights(
     insight_file: Path | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
-    """Create a batch of insights for one agent in one shot."""
+    """Create one or more structured insight reports for one agent."""
     if insight_file is not None:
         if insight:
             raise CLIError(
@@ -121,7 +122,8 @@ async def list_insights(
     filter: str | None,
     agent: str | None,
     name: str | None,
-    type: str | None,
+    status: InsightStatus | None,
+    source_provider: str | None,
 ) -> CommandResult:
     """List one server page of insights."""
     params = list_params("insight", size=size, cursor=cursor, sort=sort, filter=filter)
@@ -138,8 +140,14 @@ async def list_insights(
         )
     if name is not None:
         conditions.append(FilterCondition(field="name", op=FilterOp.EQ, value=name))
-    if type is not None:
-        conditions.append(FilterCondition(field="type", op=FilterOp.EQ, value=type))
+    if status is not None:
+        conditions.append(FilterCondition(field="status", op=FilterOp.EQ, value=status))
+    if source_provider is not None:
+        conditions.append(
+            FilterCondition(
+                field="source_provider", op=FilterOp.EQ, value=source_provider
+            )
+        )
     if conditions:
         expression = (
             conditions[0]
@@ -161,22 +169,25 @@ async def update_insight(
     insight_id: uuid.UUID,
     *,
     title: str | None,
-    description: str | None,
-    clear_description: bool,
+    summary: str | None,
+    clear_summary: bool,
+    status: InsightStatus | None,
 ) -> CommandResult:
     """Update only explicitly selected insight fields."""
-    if description is not None and clear_description:
+    if summary is not None and clear_summary:
         raise CLIError(
             "invalid_arguments",
-            "--description and --clear-description cannot be used together.",
+            "--summary and --clear-summary cannot be used together.",
         )
     fields: dict[str, Any] = {}
     if title is not None:
         fields["title"] = title
-    if description is not None:
-        fields["description"] = description
-    elif clear_description:
-        fields["description"] = None
+    if summary is not None:
+        fields["summary"] = summary
+    elif clear_summary:
+        fields["summary"] = None
+    if status is not None:
+        fields["status"] = status
     if not fields:
         raise CLIError("invalid_arguments", "Select at least one insight update.")
     insight = await client.insights.update(insight_id, InsightUpdateRequest(**fields))

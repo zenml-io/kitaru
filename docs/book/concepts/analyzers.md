@@ -20,9 +20,13 @@ from collections import Counter
 from uuid import UUID
 
 from kitaru.api_models.v1.insight import (
-    CategoricalInsightData,
+    CategoricalArtifact,
     CategoryValue,
+    InsightCoverage,
+    InsightFinding,
     InsightInput,
+    StatGridArtifact,
+    StatItem,
 )
 from kitaru.client.api_client import KitaruAPIClient
 
@@ -33,15 +37,34 @@ async def analyzer(session_ids: list[UUID], **params) -> InsightInput:
         for session_id in session_ids:
             session = await client.sessions.get(session_id)
             counts[session.status] += 1
+    artifact = (
+        CategoricalArtifact(
+            presentation="ranked_bars",
+            unit="sessions",
+            values=[
+                CategoryValue(label=status, value=count)
+                for status, count in counts.most_common(8)
+            ],
+        )
+        if len(counts) >= 2
+        else StatGridArtifact(
+            items=[
+                StatItem(label=status, value=count, unit="sessions")
+                for status, count in counts.items()
+            ]
+        )
+    )
     return InsightInput(
         name="session_outcomes",
         title="Session outcomes",
-        data=CategoricalInsightData(
-            values=[
-                CategoryValue(label=status, value=count)
-                for status, count in counts.items()
-            ]
-        ),
+        coverage=InsightCoverage(sessions_analyzed=len(session_ids)),
+        findings=[
+            InsightFinding(
+                id="session-outcomes",
+                title="Session outcomes",
+                artifacts=[artifact],
+            )
+        ],
     )
 ```
 
@@ -49,17 +72,20 @@ The first argument is `list[UUID]`. `KitaruAPIClient()` uses the server URL and 
 
 Analyzers are versioned like evaluators: registering again under the same name creates the next version, and every generated insight records which version wrote it. Deleting that version clears the reference without deleting the insight. The walkthrough from a question about a batch of sessions to a registered analyzer is in [Write an analyzer](../guides/write-an-analyzer.md).
 
-## The insight row
+## The insight report
 
-One insight is one named observation about the set of sessions an analyzer ran over. Unlike an evaluation, whose type is inferred from what you set, an insight's data shape is explicit:
+One insight is a structured report about the set of sessions an analyzer ran over. A report holds one or more ordered `findings`, optional session `coverage`, a `highlight` pointer for grid cards, an optional `next_step` handoff action, report-level `suggested_questions`, a triage `status` (`new`, `reviewed`, or `archived`), and an optional `source_provider`.
 
-| Data type     | Shape                                              | Use it for                                     |
-| ------------- | --------------------------------------------------- | ----------------------------------------------- |
-| `text`        | `content`: Markdown                                | A written summary or narrative                 |
-| `categorical` | `values`: label and value pairs                    | A split across a finite set of labels          |
-| `binned`      | `bins`: ascending, contiguous ranges with a count  | A distribution across an ordered numeric range |
+Each finding carries one or more typed visual or evidence blocks (`artifacts`):
 
-Every insight also has a `name`, a `title`, an optional `description`, and free-form `metadata`. Names must be unique within one analyzer run, but a later run, even of the same analyzer, can reuse a name without conflicting with the insights an earlier run wrote.
+| Artifact family | Types | Use it for |
+| --- | --- | --- |
+| Single numbers | `stat_grid`, `rate` | Headline counts, rates with confidence ranges, and `x of y` share bars |
+| Comparisons & tables | `categorical`, `comparison`, `table` | Ranked bars, path bars, split bars, donuts, dot plots, slopegraphs, dumbbells, and inline-bar tables |
+| Distributions & trends | `binned`, `session_dots`, `time_series` | Ordered histograms, per-session dot strips (up to 100 sessions), and trends across 3+ points |
+| Steps, flow & evidence | `step_strip`, `failure_matrix`, `flow_sankey`, `step_story`, `tool_cycle`, `session_comparison`, `session_timeline`, `evidence`, `text` | Failure-start strips, 6x6 transition heatmaps, 3-stage flow Sankeys, tool loops, side-by-side sessions, single-session timelines, session evidence rows, and Markdown prose or callouts |
+
+Every insight also has a `name`, a `title`, an optional `summary`, and free-form `metadata`. Names must be unique within one analyzer run, but a later run, even of the same analyzer, can reuse a name without conflicting with the insights an earlier run wrote.
 
 ## Running analyzers
 

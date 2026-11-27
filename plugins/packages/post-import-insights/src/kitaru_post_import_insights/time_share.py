@@ -19,13 +19,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from itertools import islice
 
-from kitaru.api_models.v1.insight import CategoricalInsightData, CategoryValue
 from kitaru.api_models.v1.session_node import SessionNodeResponse
 from kitaru_post_import_insights.findings import (
     CandidateCoverage,
     CandidateFinding,
     ContributionSelector,
     DeterministicFact,
+    build_categorical,
     calculate_percent,
     format_briefing,
     pluralize,
@@ -287,12 +287,9 @@ class ComponentTimeShare:
                     "another when they could overlap."
                 ),
                 caveat=caveat,
-                data=CategoricalInsightData(
+                data=build_categorical(
+                    [(label, _to_seconds(value)) for label, value in ranked],
                     unit="seconds",
-                    values=[
-                        CategoryValue(label=label, value=_to_seconds(value))
-                        for label, value in ranked
-                    ],
                 ),
                 facts=[
                     DeterministicFact(

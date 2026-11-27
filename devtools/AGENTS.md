@@ -8,6 +8,7 @@ Everything is deterministic. The same seed and flags produce the same sessions, 
 |---|---|
 | `stack.py` | Server, database, and worker lifecycle |
 | `seed.py` | One-command end-to-end stack with data |
+| `seed_insights.py` | Seed realistic structured Insight reports (H1/R1/R2 + all 17 artifacts) |
 | `traces.py` | Generate JSONL traces to import |
 | `agent.py` | Dummy agent, runs as a worker task or records directly |
 | `fixtures.py` | Register the agent, importer, and evaluators |

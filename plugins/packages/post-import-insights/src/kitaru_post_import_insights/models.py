@@ -21,9 +21,10 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from kitaru.api_models.v1.insight import (
-    BinnedInsightData,
-    CategoricalInsightData,
+    BinnedArtifact,
+    CategoricalArtifact,
     InsightInput,
+    StatGridArtifact,
 )
 
 INSIGHT_METADATA_KEY = "kitaru.insights/v1"
@@ -312,8 +313,17 @@ class InsightGenerationResult(_InsightGenerationModel):
                 raise ValueError("Insight name violates domain name constraints")
             if not 1 <= len(insight.title) <= MAX_NAME_LENGTH:
                 raise ValueError("Insight title violates domain title constraints")
-            if not isinstance(insight.data, CategoricalInsightData | BinnedInsightData):
-                raise ValueError("generated Insight data must be categorical or binned")
+            if not insight.findings or not insight.findings[0].artifacts:
+                raise ValueError("generated Insight must contain at least one artifact")
+            primary_artifact = insight.findings[0].artifacts[0]
+            if not isinstance(
+                primary_artifact,
+                CategoricalArtifact | BinnedArtifact | StatGridArtifact,
+            ):
+                raise ValueError(
+                    "generated Insight primary artifact must be categorical, binned, "
+                    "or stat_grid"
+                )
 
             metadata = self.card_metadata(insight)
             if metadata.context != self.context:

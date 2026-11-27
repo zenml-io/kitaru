@@ -24,7 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from conftest import db_settings, lifespan_client
-from kitaru.api_models.v1.insight import TextInsightData
+from kitaru.api_models.v1.insight import InsightFinding, TextArtifact
 from kitaru.api_models.v1.job import JobKind
 from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
 from kitaru.server.adapters.db.repositories.import_repository import SQLImportRepository
@@ -87,7 +87,7 @@ async def agent_id(client: httpx.AsyncClient) -> str:
 async def _create_insights(
     client: httpx.AsyncClient, agent_id: str
 ) -> list[dict[str, object]]:
-    """Store two text insights on the given agent and return their responses."""
+    """Store two structured insights on the given agent and return their responses."""
     response = await client.post(
         "/api/v1/insights",
         json={
@@ -96,12 +96,28 @@ async def _create_insights(
                 {
                     "name": "first",
                     "title": "first",
-                    "data": {"type": "text", "content": "Latency regressed."},
+                    "findings": [
+                        {
+                            "id": "f1",
+                            "title": "first",
+                            "artifacts": [
+                                {"type": "text", "content": "Latency regressed."}
+                            ],
+                        }
+                    ],
                 },
                 {
                     "name": "second",
                     "title": "second",
-                    "data": {"type": "text", "content": "Error rate dropped."},
+                    "findings": [
+                        {
+                            "id": "f1",
+                            "title": "second",
+                            "artifacts": [
+                                {"type": "text", "content": "Error rate dropped."}
+                            ],
+                        }
+                    ],
                 },
             ],
         },
@@ -142,12 +158,16 @@ async def test_list_by_agent_persists_across_requests(
 async def test_update_persists_across_requests(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
-    """Persist a title and description update across requests."""
+    """Persist title, summary, and status updates across requests."""
     created = await _create_insights(client, agent_id)
 
     response = await client.patch(
         f"/api/v1/insights/{created[0]['id']}",
-        json={"title": "renamed", "description": "updated rationale"},
+        json={
+            "title": "renamed",
+            "summary": "updated rationale",
+            "status": "reviewed",
+        },
     )
     assert response.status_code == 200
 
@@ -155,7 +175,8 @@ async def test_update_persists_across_requests(
     assert response.status_code == 200
     body = response.json()
     assert body["title"] == "renamed"
-    assert body["description"] == "updated rationale"
+    assert body["summary"] == "updated rationale"
+    assert body["status"] == "reviewed"
     assert body["updated"] > created[0]["updated"]
 
 
@@ -182,7 +203,13 @@ async def test_create_insights_missing_agent(client: httpx.AsyncClient) -> None:
                 {
                     "name": "insight",
                     "title": "insight",
-                    "data": {"type": "text", "content": "x"},
+                    "findings": [
+                        {
+                            "id": "f1",
+                            "title": "insight",
+                            "artifacts": [{"type": "text", "content": "x"}],
+                        }
+                    ],
                 }
             ],
         },
@@ -242,7 +269,13 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight()
                         agent_id=uuid.UUID(agent["id"]),
                         name="insight",
                         title="insight",
-                        data=TextInsightData(content="Latency regressed."),
+                        findings=[
+                            InsightFinding(
+                                id="f1",
+                                title="insight",
+                                artifacts=[TextArtifact(content="Latency regressed.")],
+                            )
+                        ],
                         analyzer_version_id=version.id,
                         task_id=task.id,
                         import_id=import_id,
@@ -256,6 +289,7 @@ async def test_get_insight_carries_analyzer_provenance_for_a_task_born_insight()
         assert response.status_code == 200
         body = response.json()
         assert body["analyzer_version_id"] == str(version.id)
+        assert body["task_id"] == str(task.id)
         assert body["analyzer_params"] == {"window_days": 7}
         assert body["import_id"] == str(import_id)
         # Job cleanup cascades to the analysis task, but leaves its insights.

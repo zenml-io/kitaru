@@ -17,10 +17,20 @@ import json
 import uuid
 from collections.abc import Iterable, Sequence
 from itertools import combinations
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from kitaru.api_models.v1.insight import BinnedInsightData, InsightInput
+from kitaru.api_models.v1.insight import (
+    BinnedArtifact,
+    EvidenceArtifact,
+    EvidenceRow,
+    InsightAction,
+    InsightCoverage,
+    InsightFinding,
+    InsightHighlight,
+    InsightInput,
+)
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
 from kitaru_post_import_insights.generation import (
     InsightModelGenerator,
@@ -166,7 +176,7 @@ def _get_distribution_evidence_scope(
     candidate: CandidateFinding, evidence: Sequence[EvidenceLocator]
 ) -> dict[str, object] | None:
     """Describe the highlighted subset of the highest occupied chart bin."""
-    if not isinstance(candidate.data, BinnedInsightData) or not any(
+    if not isinstance(candidate.data, BinnedArtifact) or not any(
         item.signal == DISTRIBUTION_TOP_BIN_SIGNAL for item in candidate.evidence
     ):
         return None
@@ -429,6 +439,7 @@ def _assemble_result(
         candidate = by_id[candidate_id]
         copy = copy_by_id[candidate_id]
         contributing_ids, evidence, investigation_prompt = prepared[candidate_id]
+        cta_label = _CTA_LABELS.get(candidate_id, DEFAULT_CTA_LABEL)
         metadata = InsightCardMetadata(
             eyebrow=copy.eyebrow,
             check_first=candidate.caveat,
@@ -438,19 +449,56 @@ def _assemble_result(
             evidence=evidence,
             coverage=coverage,
             investigation_prompt=investigation_prompt,
-            cta_label=_CTA_LABELS.get(candidate_id, DEFAULT_CTA_LABEL),
+            cta_label=cta_label,
             context=context,
             generation=GenerationVersions(
                 analysis=profiling.analysis_version,
                 prompt=PROMPT_VERSION,
             ),
         )
+        artifacts: list[Any] = [candidate.data]
+        if evidence:
+            artifacts.append(
+                EvidenceArtifact(
+                    presentation="table",
+                    total_sessions=max(len(contributing_ids), len(evidence), 1),
+                    rows=[
+                        EvidenceRow(
+                            session_id=item.session_id,
+                            node_id=item.node_id,
+                            signal=item.signal,
+                        )
+                        for item in evidence[:25]
+                    ],
+                )
+            )
+        finding = InsightFinding(
+            id=candidate.id,
+            title=candidate.title,
+            summary=copy.description[:320],
+            body=copy.description,
+            artifacts=artifacts,
+            contributing_session_ids=contributing_ids,
+            check_first=candidate.caveat,
+            action=InsightAction(label=cta_label, prompt=investigation_prompt),
+        )
         insights.append(
             InsightInput(
                 name=candidate.id,
                 title=candidate.title,
-                description=copy.description,
-                data=candidate.data,
+                summary=copy.description[:320],
+                source_provider=(
+                    context.source_import.provider
+                    if context.source_import is not None
+                    else None
+                ),
+                coverage=InsightCoverage(
+                    sessions_analyzed=coverage.sessions_analyzed,
+                    sessions_available=coverage.sessions_available,
+                    caveats=list(coverage.caveats),
+                ),
+                highlight=InsightHighlight(finding_id=candidate.id, artifact_index=0),
+                findings=[finding],
                 metadata={INSIGHT_METADATA_KEY: metadata.model_dump(mode="json")},
             )
         )
@@ -520,11 +568,11 @@ def _get_oversize_result(
             prompts_fit = True
             for position, insight in enumerate(retained):
                 original_metadata = result.card_metadata(insight)
-                assert insight.description is not None
+                card_description = insight.findings[0].body or insight.summary or ""
                 try:
                     investigation_prompt = _build_investigation_prompt(
                         candidates[insight.name],
-                        card_description=insight.description,
+                        card_description=card_description,
                         context=result.context,
                         coverage=coverage,
                         contributing_session_ids=(
@@ -543,12 +591,26 @@ def _get_oversize_result(
                         "investigation_prompt": investigation_prompt,
                     }
                 )
+                updated_finding = insight.findings[0].model_copy(
+                    update={
+                        "action": InsightAction(
+                            label=original_metadata.cta_label or DEFAULT_CTA_LABEL,
+                            prompt=investigation_prompt,
+                        )
+                    }
+                )
                 bounded_insights.append(
                     insight.model_copy(
                         update={
+                            "coverage": InsightCoverage(
+                                sessions_analyzed=coverage.sessions_analyzed,
+                                sessions_available=coverage.sessions_available,
+                                caveats=list(coverage.caveats),
+                            ),
+                            "findings": [updated_finding],
                             "metadata": {
                                 INSIGHT_METADATA_KEY: metadata.model_dump(mode="json")
-                            }
+                            },
                         }
                     )
                 )

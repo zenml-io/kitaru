@@ -9,6 +9,7 @@ from uuid import UUID
 
 import pytest
 
+from kitaru.api_models.v1.insight import BinnedArtifact
 from kitaru.api_models.v1.session import (
     SessionDetailResponse,
     SessionOrigin,
@@ -184,6 +185,7 @@ def test_observed_zero_stays_in_a_varying_request_distribution() -> None:
     result = profile_sessions([_session(1), _session(2, requests=4)])
     candidate = next(x for x in result.candidates if x.id == "tool-call-distribution")
 
+    assert isinstance(candidate.data, BinnedArtifact)
     assert candidate.data.unit == "requests"
     assert {fact.name: fact.value for fact in candidate.facts} == {
         "observations": 2,

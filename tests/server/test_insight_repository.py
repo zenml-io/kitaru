@@ -23,9 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.insight import (
-    CategoricalInsightData,
-    CategoryValue,
-    TextInsightData,
+    InsightFinding,
+    TextArtifact,
 )
 from kitaru.api_models.v1.job import JobKind
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -216,7 +215,13 @@ def _insight(owner_id: uuid.UUID, agent_id: uuid.UUID, **overrides: Any) -> Insi
         "agent_id": agent_id,
         "name": "insight",
         "title": "insight",
-        "data": TextInsightData(content="root cause"),
+        "findings": [
+            InsightFinding(
+                id="f1",
+                title="insight",
+                artifacts=[TextArtifact(content="root cause")],
+            )
+        ],
     }
     values.update(overrides)
     return Insight(**values)
@@ -521,39 +526,80 @@ async def test_negated_import_filter_excludes_null_imports(setup: Setup) -> None
 
 
 async def test_query_filters_by_name(setup: Setup) -> None:
-    """Filter insights scoped to one exact name."""
+    """Filter insights by exact name and substring ops on name and title."""
     matching = await _create_insight(
-        setup.insights, setup.owner_id, setup.agent_id, name="first"
-    )
-    await _create_insight(setup.insights, setup.owner_id, setup.agent_id, name="second")
-    insights, _ = await setup.insights.query(
-        InsightFilter(
-            expression=FilterCondition(field="name", op=FilterOp.EQ, value="first")
-        )
-    )
-    assert [insight.id for insight in insights] == [matching.id]
-
-
-async def test_query_filters_by_type(setup: Setup) -> None:
-    """Filter insights scoped to one data type."""
-    text = await _create_insight(
         setup.insights,
         setup.owner_id,
         setup.agent_id,
-        data=TextInsightData(content="root cause"),
+        name="post-import-insights",
+        title="Refunded final-sale item",
     )
     await _create_insight(
         setup.insights,
         setup.owner_id,
         setup.agent_id,
-        data=CategoricalInsightData(values=[CategoryValue(label="a", value=1)]),
+        name="session-audit",
+        title="Slow lookup tool",
     )
-    insights, _ = await setup.insights.query(
+    by_exact, _ = await setup.insights.query(
         InsightFilter(
-            expression=FilterCondition(field="type", op=FilterOp.EQ, value="text")
+            expression=FilterCondition(
+                field="name", op=FilterOp.EQ, value="post-import-insights"
+            )
         )
     )
-    assert [insight.id for insight in insights] == [text.id]
+    assert [insight.id for insight in by_exact] == [matching.id]
+
+    by_name_contains, _ = await setup.insights.query(
+        InsightFilter(
+            expression=FilterCondition(
+                field="name", op=FilterOp.CONTAINS, value="import"
+            )
+        )
+    )
+    assert [insight.id for insight in by_name_contains] == [matching.id]
+
+    by_title_contains, _ = await setup.insights.query(
+        InsightFilter(
+            expression=FilterCondition(
+                field="title", op=FilterOp.CONTAINS, value="final-sale"
+            )
+        )
+    )
+    assert [insight.id for insight in by_title_contains] == [matching.id]
+
+
+async def test_query_filters_by_status_and_source_provider(setup: Setup) -> None:
+    """Filter insights by status and source_provider."""
+    langfuse = await _create_insight(
+        setup.insights,
+        setup.owner_id,
+        setup.agent_id,
+        status="reviewed",
+        source_provider="Langfuse",
+    )
+    await _create_insight(
+        setup.insights,
+        setup.owner_id,
+        setup.agent_id,
+        status="new",
+        source_provider="LangSmith",
+    )
+    by_status, _ = await setup.insights.query(
+        InsightFilter(
+            expression=FilterCondition(field="status", op=FilterOp.EQ, value="reviewed")
+        )
+    )
+    assert [insight.id for insight in by_status] == [langfuse.id]
+
+    by_provider, _ = await setup.insights.query(
+        InsightFilter(
+            expression=FilterCondition(
+                field="source_provider", op=FilterOp.EQ, value="Langfuse"
+            )
+        )
+    )
+    assert [insight.id for insight in by_provider] == [langfuse.id]
 
 
 async def test_query_walks_pages(setup: Setup) -> None:
@@ -582,13 +628,15 @@ async def test_query_walks_pages(setup: Setup) -> None:
 
 
 async def test_update(setup: Setup) -> None:
-    """Persist a title and description change and renew the updated timestamp."""
+    """Persist title, summary, and status changes and renew the updated timestamp."""
     created = await _create_insight(setup.insights, setup.owner_id, setup.agent_id)
     created.update_title("renamed")
-    created.update_description("new description")
+    created.update_summary("new summary")
+    created.update_status("reviewed")
     updated = await setup.insights.update(created)
     assert updated.title == "renamed"
-    assert updated.description == "new description"
+    assert updated.summary == "new summary"
+    assert updated.status == "reviewed"
     assert updated.created == created.created
     assert updated.updated is not None
     assert created.updated is not None

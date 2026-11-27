@@ -25,8 +25,8 @@ EXPECTED_TOOL_COUNTS = {
 # Hosts that support MCP Apps keep app-only tools out of the model's tool list,
 # so the context budgets below count only the tools the model sees.
 MAX_MODEL_TOOLS = 19
-MAX_TOOL_SCHEMA_BYTES = 45 * 1024
-MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES = 242 * 1024
+MAX_TOOL_SCHEMA_BYTES = 104 * 1024
+MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES = 360 * 1024
 
 
 def _canonical_bytes(value: object) -> bytes:

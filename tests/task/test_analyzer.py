@@ -24,7 +24,7 @@ import pytest
 from task_fixtures import TaskAppFixture, build_task_app
 
 from kitaru.api_models.v1.base import Page
-from kitaru.api_models.v1.insight import InsightInput, TextInsightData
+from kitaru.api_models.v1.insight import InsightFinding, InsightInput, TextArtifact
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
     SessionListParams,
@@ -50,15 +50,27 @@ async def task_app() -> AsyncGenerator[TaskAppFixture, None]:
         yield value
 
 
+def _text_insight(name: str, title: str, content: str) -> InsightInput:
+    return InsightInput(
+        name=name,
+        title=title,
+        findings=[
+            InsightFinding(
+                id="f1",
+                title=title,
+                artifacts=[TextArtifact(content=content)],
+            )
+        ],
+    )
+
+
 async def test_call_analyzer_single_result() -> None:
     """Normalize a single InsightInput into a one-element list."""
     session_ids = [uuid.uuid4()]
 
     def analyze(sessions: list[uuid.UUID], **params: object) -> InsightInput:
         assert sessions is session_ids
-        return InsightInput(
-            name="summary", title="Summary", data=TextInsightData(content="ok")
-        )
+        return _text_insight("summary", "Summary", "ok")
 
     results = await call_analyzer("summary-check", analyze, session_ids, {})
     assert [item.name for item in results] == ["summary"]
@@ -70,8 +82,8 @@ async def test_call_analyzer_list_result() -> None:
 
     def analyze(sessions: list[uuid.UUID], **params: object) -> list[InsightInput]:
         return [
-            InsightInput(name="a", title="A", data=TextInsightData(content="1")),
-            InsightInput(name="b", title="B", data=TextInsightData(content="2")),
+            _text_insight("a", "A", "1"),
+            _text_insight("b", "B", "2"),
         ]
 
     results = await call_analyzer("multi", analyze, session_ids, {})
@@ -94,8 +106,8 @@ async def test_call_analyzer_duplicate_names_raise() -> None:
 
     def analyze(sessions: list[uuid.UUID], **params: object) -> list[InsightInput]:
         return [
-            InsightInput(name="a", title="A", data=TextInsightData(content="1")),
-            InsightInput(name="a", title="A2", data=TextInsightData(content="2")),
+            _text_insight("a", "A", "1"),
+            _text_insight("a", "A2", "2"),
         ]
 
     with pytest.raises(AnalysisError, match="duplicate"):
@@ -131,7 +143,7 @@ async def test_call_analyzer_passes_params() -> None:
 
     def analyze(sessions: list[uuid.UUID], threshold: float) -> InsightInput:
         received["threshold"] = threshold
-        return InsightInput(name="a", title="A", data=TextInsightData(content="ok"))
+        return _text_insight("a", "A", "ok")
 
     await call_analyzer("with-params", analyze, session_ids, {"threshold": 0.5})
     assert received["threshold"] == 0.5
@@ -143,9 +155,7 @@ async def test_call_analyzer_awaits_an_async_analyzer() -> None:
 
     async def analyze(sessions: list[uuid.UUID], **params: object) -> InsightInput:
         assert sessions is session_ids
-        return InsightInput(
-            name="summary", title="Summary", data=TextInsightData(content="ok")
-        )
+        return _text_insight("summary", "Summary", "ok")
 
     results = await call_analyzer("summary-check", analyze, session_ids, {})
     assert [item.name for item in results] == ["summary"]
@@ -208,11 +218,7 @@ async def test_run_passes_all_session_ids_without_fetching_details(
     def analyze(received_ids: list[uuid.UUID], **params: object) -> InsightInput:
         assert received_ids == session_ids
         assert params == {"field": "answer"}
-        return InsightInput(
-            name="spread",
-            title="Spread",
-            data=TextInsightData(content=str(len(received_ids))),
-        )
+        return _text_insight("spread", "Spread", str(len(received_ids)))
 
     monkeypatch.setattr(analyzer_module, "load_source_ref", lambda ref, label: analyze)
     monkeypatch.setattr(analyzer_module, "write_task_result", captured.append)
@@ -228,13 +234,7 @@ async def test_run_passes_all_session_ids_without_fetching_details(
             "op": "eq",
             "value": str(import_id),
         }
-    assert captured == [
-        [
-            InsightInput(
-                name="spread", title="Spread", data=TextInsightData(content="1001")
-            )
-        ]
-    ]
+    assert captured == [[_text_insight("spread", "Spread", "1001")]]
 
 
 async def test_run_lists_the_sessions_of_a_session_group(
@@ -355,7 +355,7 @@ async def test_analyzer_flow_end_to_end(
     definition = "async def" if async_callable else "def"
     plugin_path.write_text(
         "import uuid\n"
-        "from kitaru.api_models.v1.insight import TextInsightData\n"
+        "from kitaru.api_models.v1.insight import InsightFinding, TextArtifact\n"
         "from kitaru.task.analyzer import InsightInput\n\n\n"
         f"{definition} analyze(\n"
         "    session_ids: list[uuid.UUID], prefix: str\n"
@@ -366,7 +366,13 @@ async def test_analyzer_flow_end_to_end(
         "    return InsightInput(\n"
         "        name='session-ids',\n"
         "        title='Session IDs',\n"
-        "        data=TextInsightData(content=content),\n"
+        "        findings=[\n"
+        "            InsightFinding(\n"
+        "                id='f1',\n"
+        "                title='Session IDs',\n"
+        "                artifacts=[TextArtifact(content=content)],\n"
+        "            )\n"
+        "        ],\n"
         "    )\n"
     )
     result_path = tmp_path / "result.json"
@@ -376,19 +382,20 @@ async def test_analyzer_flow_end_to_end(
     await run(client, str(task_id))
 
     written = json.loads(result_path.read_text())
-    assert written == [
-        {
-            "name": "session-ids",
-            "title": "Session IDs",
-            "description": None,
-            "data": {
-                "type": "text",
-                "content": "imported:"
-                + ",".join(sorted(str(session.id) for session in sessions[:2])),
-            },
-            "metadata": {},
-        }
-    ]
+    expected_content = "imported:" + ",".join(
+        sorted(str(session.id) for session in sessions[:2])
+    )
+    assert len(written) == 1
+    assert written[0]["name"] == "session-ids"
+    assert written[0]["title"] == "Session IDs"
+    assert written[0]["findings"][0]["artifacts"][0] == {
+        "type": "text",
+        "style": "body",
+        "label": None,
+        "content": expected_content,
+        "file_path": None,
+        "revision": None,
+    }
 
 
 async def test_analyzer_flow_rejects_non_analyzer_task(

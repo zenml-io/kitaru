@@ -416,7 +416,17 @@ def build_insight_created_properties(insight: Insight) -> dict[str, Any]:
     Returns:
         Event properties.
     """
-    return {"insight_type": insight.data.type}
+    artifact_types = sorted(
+        {
+            artifact.type
+            for finding in insight.findings
+            for artifact in finding.artifacts
+        }
+    )
+    return {
+        "finding_count": len(insight.findings),
+        "artifact_types": artifact_types,
+    }
 
 
 def build_annotation_created_properties(annotation: Annotation) -> dict[str, Any]:

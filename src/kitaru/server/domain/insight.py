@@ -19,7 +19,14 @@ from typing import Annotated, Any
 
 from pydantic import AfterValidator, Field
 
-from kitaru.api_models.v1.insight import InsightData
+from kitaru.api_models.v1.insight import (
+    InsightAction,
+    InsightCoverage,
+    InsightFinding,
+    InsightHighlight,
+    InsightStatus,
+    SuggestedQuestion,
+)
 from kitaru.server.domain.base import DomainModel, NotFoundError, ValidationError
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import MAX_NAME_LENGTH, Name
@@ -60,7 +67,7 @@ Title = Annotated[str, AfterValidator(validate_title)]
 
 
 class Insight(DomainModel):
-    """Insight."""
+    """Structured insight report."""
 
     id: uuid.UUID = Field(default_factory=uuid7)
     owner_id: uuid.UUID
@@ -69,10 +76,16 @@ class Insight(DomainModel):
     task_id: uuid.UUID | None = None
     import_id: uuid.UUID | None = None
     invocation_id: uuid.UUID | None = None
+    source_provider: str | None = None
     name: Name
     title: Title
-    description: str | None = None
-    data: InsightData
+    summary: str | None = None
+    status: InsightStatus = "new"
+    coverage: InsightCoverage | None = None
+    highlight: InsightHighlight | None = None
+    next_step: InsightAction | None = None
+    findings: list[InsightFinding] = Field(min_length=1)
+    suggested_questions: list[SuggestedQuestion] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     analyzer_params: dict[str, Any] | None = None
     params_hash: str | None = None
@@ -87,10 +100,18 @@ class Insight(DomainModel):
         """
         self.title = title
 
-    def update_description(self, description: str | None) -> None:
-        """Set a new insight description.
+    def update_summary(self, summary: str | None) -> None:
+        """Set a new insight summary.
 
         Args:
-            description: New description.
+            summary: New summary, or None to clear it.
         """
-        self.description = description
+        self.summary = summary
+
+    def update_status(self, status: InsightStatus) -> None:
+        """Set a new insight review status.
+
+        Args:
+            status: New review status.
+        """
+        self.status = status

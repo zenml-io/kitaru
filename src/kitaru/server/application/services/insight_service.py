@@ -56,7 +56,7 @@ class InsightService:
     async def create_insights(
         self, command: InsightCreate, actor: AuthContext
     ) -> list[Insight]:
-        """Create a batch of insights for one agent in one shot.
+        """Create a batch of structured insight reports for one agent.
 
         Args:
             command: Agent and insights to create, in input order.
@@ -73,10 +73,15 @@ class InsightService:
             Insight(
                 owner_id=actor.account.id,
                 agent_id=command.agent_id,
+                source_provider=item.source_provider,
                 name=item.name,
                 title=item.title,
-                description=item.description,
-                data=item.data,
+                summary=item.summary,
+                coverage=item.coverage,
+                highlight=item.highlight,
+                next_step=item.next_step,
+                findings=item.findings,
+                suggested_questions=item.suggested_questions,
                 metadata=item.metadata,
             )
             for item in command.insights
@@ -125,7 +130,7 @@ class InsightService:
     async def update_insight(
         self, insight_id: uuid.UUID, command: InsightUpdate, actor: AuthContext
     ) -> Insight:
-        """Partially update an insight's title and description.
+        """Partially update an insight's title, summary, or status.
 
         Args:
             insight_id: Id of the insight.
@@ -134,7 +139,7 @@ class InsightService:
 
         Raises:
             InsightNotFound: No insight has this id.
-            ValidationError: The command clears the insight title.
+            ValidationError: The command clears a required field.
 
         Returns:
             Updated insight.
@@ -146,8 +151,12 @@ class InsightService:
             if command.title is None:
                 raise ValidationError("Insight title cannot be cleared")
             insight.update_title(command.title)
-        if "description" in fields:
-            insight.update_description(command.description)
+        if "summary" in fields:
+            insight.update_summary(command.summary)
+        if "status" in fields:
+            if command.status is None:
+                raise ValidationError("Insight status cannot be cleared")
+            insight.update_status(command.status)
         return await self._repository.update(insight)
 
     async def delete_insight(self, insight_id: uuid.UUID, actor: AuthContext) -> None:
