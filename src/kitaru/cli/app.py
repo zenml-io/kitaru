@@ -16,6 +16,7 @@
 import asyncio
 import inspect
 import math
+import shlex
 import sys
 from collections.abc import Callable, Sequence
 from contextlib import suppress
@@ -23,7 +24,7 @@ from typing import Annotated, Any
 
 import httpx
 from cyclopts import Parameter
-from cyclopts.exceptions import CycloptsError
+from cyclopts.exceptions import CycloptsError, UnusedCliTokensError
 from pydantic import ValidationError as PydanticValidationError
 
 # Importing each command module runs its decorators, which register the
@@ -147,7 +148,7 @@ async def _launch(
         command, bound, _ = app.parse_args(tokens)
     except CycloptsError as error:
         return _emit_early_error(
-            CLIError("invalid_arguments", str(error)),
+            _cyclopts_error(error, tokens),
             tokens=tokens,
             output=output,
             machine=bool(machine),
@@ -343,7 +344,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         except CycloptsError as exception:
             return _emit_unparsed_error(
-                CLIError("invalid_arguments", str(exception)),
+                _cyclopts_error(exception, tokens),
                 tokens=tokens,
                 exception=exception,
             )
@@ -443,8 +444,10 @@ def _convert_error(
         detail = exception.detail.strip() or (
             f"The server returned HTTP {exception.status_code} with no detail."
         )
-        if exception.status_code in {401, 403}:
+        if exception.status_code == 401:
             return CLIError("authentication_failed", detail, details=details)
+        if exception.status_code == 403:
+            return CLIError("forbidden", detail, details=details)
         if exception.status_code == 404:
             return CLIError("not_found", detail, details=details)
         if exception.status_code == 409:
@@ -587,8 +590,109 @@ def _is_root_help_invocation(tokens: Sequence[str]) -> bool:
     return help_requested
 
 
-def _guess_command(tokens: Sequence[str]) -> str:
-    """Best-effort dotted command name for failures before command parsing."""
+_SENSITIVE_OPTION_MARKERS = (
+    "secret",
+    "password",
+    "token",
+    "credential",
+    "api-key",
+    "apikey",
+    "env",
+)
+
+
+def _is_sensitive_repeatable_option(option: str) -> bool:
+    """Return whether a repeatable option may carry raw secret values."""
+    normalized = option.lstrip("-").lower()
+    if normalized == "secret-id":
+        return False
+    return any(marker in normalized for marker in _SENSITIVE_OPTION_MARKERS)
+
+
+def _cyclopts_error(error: CycloptsError, tokens: Sequence[str] = ()) -> CLIError:
+    """Convert a Cyclopts parsing failure, explaining repeated options when relevant."""
+    if isinstance(error, UnusedCliTokensError) and error.unused_tokens:
+        match = _find_repeated_option_overflow(tokens, error.unused_tokens)
+        if match is not None:
+            option, first_value, extra_values = match
+            if _is_sensitive_repeatable_option(option):
+                return CLIError(
+                    "invalid_arguments",
+                    f"Unexpected extra argument(s) after {option}. "
+                    f"{option} takes one value per flag and must be repeated for "
+                    "multiple values.",
+                    hint=(
+                        f"Repeat {option} for each value, for example: "
+                        f"{option} <value1> {option} <value2>"
+                    ),
+                )
+            formatted_extras = ", ".join(repr(value) for value in extra_values)
+            example = " ".join(
+                f"{option} {shlex.quote(value)}"
+                for value in (first_value, extra_values[0])
+            )
+            return CLIError(
+                "invalid_arguments",
+                f"Unexpected argument(s) {formatted_extras} after {option}. "
+                f"{option} takes one value per flag and must be repeated for "
+                "multiple values.",
+                hint=f"Repeat {option} for each value, for example: {example}",
+            )
+    return CLIError("invalid_arguments", str(error))
+
+
+def _find_repeated_option_overflow(
+    tokens: Sequence[str], unused_tokens: Sequence[str]
+) -> tuple[str, str, list[str]] | None:
+    """Locate unused tokens immediately following a repeatable option's value."""
+    spec = _guess_command_spec(tokens)
+    if spec is None:
+        return None
+    repeatable_options = {
+        alias
+        for parameter in spec.parameters
+        if parameter.kind == "option" and parameter.type.endswith("[]")
+        for alias in parameter.name.split("/")
+    }
+    if not repeatable_options:
+        return None
+    unused_set = set(unused_tokens)
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "--":
+            break
+        option: str | None = None
+        first_value: str | None = None
+        next_index = index + 1
+        if token in repeatable_options and index + 1 < len(tokens):
+            option = token
+            first_value = tokens[index + 1]
+            next_index = index + 2
+        elif "=" in token:
+            candidate, _, value = token.partition("=")
+            if candidate in repeatable_options:
+                option = candidate
+                first_value = value
+                next_index = index + 1
+        if option is not None and first_value is not None:
+            extras: list[str] = []
+            cursor = next_index
+            while (
+                cursor < len(tokens)
+                and tokens[cursor] in unused_set
+                and not tokens[cursor].startswith("-")
+            ):
+                extras.append(tokens[cursor])
+                cursor += 1
+            if extras:
+                return option, first_value, extras
+        index = next_index
+    return None
+
+
+def _guess_command_spec(tokens: Sequence[str]) -> CommandSpec | None:
+    """Best-effort command spec lookup for failures before command parsing."""
     names: list[str] = []
     skip_value = False
     options_with_values = {
@@ -610,5 +714,10 @@ def _guess_command(tokens: Sequence[str]) -> str:
         if is_command_group(tuple(names)):
             continue
         break
-    candidate = tuple(names)
-    return ".".join(names) if candidate and get_spec(candidate) is not None else "cli"
+    return get_spec(tuple(names)) if names else None
+
+
+def _guess_command(tokens: Sequence[str]) -> str:
+    """Best-effort dotted command name for failures before command parsing."""
+    spec = _guess_command_spec(tokens)
+    return spec.command if spec is not None else "cli"

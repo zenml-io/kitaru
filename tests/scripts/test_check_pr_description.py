@@ -43,6 +43,15 @@ def test_plain_titles_pass(title: str) -> None:
         "#### Reviewer Notes\n\nText.\n",
         "## Reviewer Notes\n\n<!-- Write a walkthrough. -->\n\n## Reproduction\n",
         "## Reviewer Notes\n\n## Local checks run\n\nTests.\n",
+        (
+            "## Reviewer Notes\n\n<!-- Write a walkthrough. -->\n\n"
+            "<details>\n<summary>Reproduction</summary>\n\n"
+            "<!-- Steps. -->\n\n</details>\n"
+        ),
+        (
+            "## Reviewer Notes\n\n"
+            "<details>\n<summary>Local checks run</summary>\n\nTests.\n\n</details>\n"
+        ),
     ],
 )
 def test_body_needs_reviewer_notes_heading(body: str) -> None:
@@ -56,6 +65,17 @@ def test_body_needs_reviewer_notes_heading(body: str) -> None:
         "## Why\n\n### Reviewer Notes\n\nText.\n",
         "## Reviewer Notes\n\nStory.\n\n### Reproduction\n\nSteps.\n",
         "## Reviewer Notes\n\n### Reproduction\n\nSteps.\n",
+        (
+            "## Reviewer Notes\n\nStory.\n\n"
+            "<details>\n<summary>Reproduction</summary>\n\nSteps.\n\n</details>\n\n"
+            "<details>\n<summary>Local checks run (all passed)</summary>\n\n"
+            "- `just check`\n\n</details>\n"
+        ),
+        (
+            "## What changed?\n\nWrap sections in `<details>` blocks.\n\n"
+            "## Reviewer Notes\n\nStrips `<details>...</details>` blocks.\n\n"
+            "<details>\n<summary>Reproduction</summary>\n\nSteps.\n\n</details>\n"
+        ),
     ],
 )
 def test_filled_reviewer_notes_pass(body: str) -> None:

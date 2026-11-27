@@ -148,3 +148,63 @@ kitaru worker start --job-id "$JOB_ID" --concurrency 1 --timeout 1800
 An exact-job worker will not claim unrelated work. This is claim filtering, not a global reservation: another already-running broad worker can still claim the job first. On a shared server, stop broad workers or give them an appropriate server-side scope before submitting a workflow that requires a particular runtime or working directory.
 
 The canonical TypeScript and Mastra examples keep a local manifest, commit remote IDs before handing them to a worker, and distinguish `awaiting_worker`, failed, and ambiguous recovery states. Those manifests are example workflow code, not automatic behavior in the client.
+
+## Filtering lists
+
+List endpoints in the CLI (`--filter`), Python SDK, TypeScript SDK, and REST API accept a JSON filter expression. Each expression is either a leaf condition or a boolean combinator:
+
+- **Condition:** `{"field": "<name>", "op": "<operator>", "value": <json>}`. Field names must match `^[a-z][a-z0-9_]*$`. Omit `value` (or set it to `null`) when `op` is `is_null`.
+- **Combinators:** `{"and": [<filter>, ...]}`, `{"or": [<filter>, ...]}`, and `{"not": <filter>}`. `and` and `or` require at least one operand. Expressions may nest up to 5 levels deep and hold at most 30 conditions, and `in` accepts 1 to 100 items.
+
+Supported operators across filterable fields:
+
+| Operator | Meaning |
+| --- | --- |
+| `eq`, `ne` | Equal / not equal |
+| `lt`, `le`, `gt`, `ge` | Less than, less than or equal, greater than, greater than or equal (ordered fields) |
+| `in` | Matches any value in a JSON array of 1–100 items |
+| `is_null` | Field is null (takes no `value`; wrap in `{"not": ...}` for non-null) |
+| `startswith`, `endswith`, `contains` | Substring matching on string fields |
+
+```bash
+kitaru session list --filter '{"and":[{"field":"status","op":"eq","value":"failed"},{"field":"cost","op":"ge","value":"0.05"}]}'
+```
+
+### Session filterable fields
+
+| Field | Value type | Supported operators |
+| --- | --- | --- |
+| `id`, `agent_id` | UUID | `eq`, `ne`, `in` |
+| `agent_version_id`, `task_id`, `import_id` | UUID | `eq`, `ne`, `in`, `is_null` |
+| `origin` | `recorded`, `imported`, `replay` | `eq`, `ne`, `in` |
+| `status` | `in_progress`, `completed`, `failed` | `eq`, `ne`, `in` |
+| `imported_from`, `framework`, `external_id`, `name` | string | `eq`, `ne`, `in`, `startswith`, `endswith`, `contains`, `is_null` |
+| `tag` | string | `eq`, `in` |
+| `cohort_version_id`, `session_group_id`, `experiment_run_id` | UUID | `eq`, `in` |
+| `has_evaluation` | boolean | `eq`, `ne` |
+| `started_at`, `ended_at` | ISO 8601 timestamp with timezone | `eq`, `ne`, `in`, `lt`, `le`, `gt`, `ge`, `is_null` |
+| `cost` | decimal | `eq`, `ne`, `in`, `lt`, `le`, `gt`, `ge`, `is_null` |
+| `llm_call_count`, `tool_call_count` | integer | `eq`, `ne`, `in`, `lt`, `le`, `gt`, `ge` |
+| `created` | ISO 8601 timestamp with timezone | `eq`, `ne`, `in`, `lt`, `le`, `gt`, `ge` |
+
+## Paging through lists
+
+Every list operation returns opaque cursor-based pages, and the cursor field lives in a different place in the CLI JSON envelope than in the raw REST response:
+
+- **CLI JSON (`--output json`):** list responses wrap pagination metadata under `page`, so the next cursor is at `page.next_cursor` (alongside `page.limit` and `page.truncated`). Pass that value back with `--cursor` until `page.next_cursor` is `null`.
+- **REST API:** list responses return `items` and `next_cursor` at the top level of the JSON object. Pass `next_cursor` as the `cursor` query parameter until it is `null`.
+- **Python SDK (recommended for scripts):** prefer `async for item in client.<resource>.iter(params):` instead of managing cursors manually. `iter()` (plus `iter_versions()` and `iter_nodes()`) follows `next_cursor` automatically without mutating your parameter object.
+
+```bash
+# CLI JSON pagination: read page.next_cursor
+cursor=$(kitaru session list --size 50 --output json | jq -r '.page.next_cursor // empty')
+if [ -n "$cursor" ]; then
+  kitaru session list --size 50 --cursor "$cursor" --output json
+fi
+```
+
+```python
+# Python SDK: prefer iter() over manual cursor loops
+async for session in client.sessions.iter(SessionListParams(size=50)):
+    print(session.id, session.status)
+```
