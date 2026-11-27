@@ -1,0 +1,1 @@
+- `kitaru-logfire-importer` now supports Logfire 6 in addition to Logfire 4.35+ and 5.
