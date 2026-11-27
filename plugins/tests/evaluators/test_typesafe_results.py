@@ -16,7 +16,13 @@
 from typing import Literal
 
 import pytest
-from typesafe_sdk import ChoiceAnswer, NoulAnswer, ScoreAnswer
+from typesafe_sdk import (
+    BoxAnswer,
+    BoxCoordinates,
+    ChoiceAnswer,
+    NoulAnswer,
+    ScoreAnswer,
+)
 
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru_typesafe_evaluator.params import ChoiceQuestion, NoulQuestion, ScoreQuestion
@@ -144,3 +150,14 @@ def test_unavailable_results_name_every_question() -> None:
         ("a", "unavailable", "too large"),
         ("b", "unavailable", "too large"),
     ]
+
+
+def test_box_answer_to_a_score_question_is_rejected() -> None:
+    question = ScoreQuestion(
+        type="score", instructions="x", criteria=["curt", "neutral", "warm"]
+    )
+    answer = BoxAnswer(
+        box=BoxCoordinates(top=0.1, bottom=0.9, left=0.2, right=0.8), confidence=0.9
+    )
+    with pytest.raises(TypeError, match="BoxAnswer"):
+        build_result("tone", question, answer, "jev-1.13.0")

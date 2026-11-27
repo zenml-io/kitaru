@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Support TypeSafe SDK 0.7.5. A Box answer to a yes/no, choice, or score question is reported as a type mismatch.
+
 ## 0.1.1 - 2026-10-08
 
 - Map `decline_request` to the `reject` action in the example `action_executed` question, so jev no longer fails sessions that correctly declined a request.

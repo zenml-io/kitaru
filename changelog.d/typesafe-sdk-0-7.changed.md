@@ -1,0 +1,1 @@
+- `kitaru-typesafe-evaluator` now requires TypeSafe SDK 0.7.5, which replaces `msgspec` with `pydantic` and adds Box answers.
