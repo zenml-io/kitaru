@@ -172,7 +172,7 @@ class ContextSize:
                 "history."
             ),
             caveat=caveat,
-            data=build_binned(self._ratios, unit="times"),
+            data=build_binned(self._ratios, unit="times", focus_top_bin=True),
             facts=[
                 DeterministicFact(name="growing_sessions", value=growing),
                 DeterministicFact(

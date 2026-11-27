@@ -37,7 +37,6 @@ from kitaru.api_models.v1.session_node import (
 from kitaru_post_import_insights import resource_profile
 from kitaru_post_import_insights.copy_validation import validate_card_copy
 from kitaru_post_import_insights.models import (
-    INSIGHT_METADATA_KEY,
     InsightGenerationContext,
     SourceImportContext,
 )
@@ -684,9 +683,10 @@ async def test_full_resource_prompts_fit_the_length_bound() -> None:
             profile.model_copy(update={"candidates": [candidate]}), context=context
         )
         assert result.insights, candidate.id
-        metadata = result.card_metadata(result.insights[0])
-        assert len(metadata.contributing_session_ids) == 200, candidate.id
-        assert len(metadata.investigation_prompt) < 16_000, candidate.id
+        finding = result.insights[0].findings[0]
+        assert len(finding.contributing_session_ids) == 200, candidate.id
+        assert finding.action is not None
+        assert len(finding.action.prompt) < 16_000, candidate.id
 
 
 def test_resource_findings_ignore_arrival_order_and_spilling(
@@ -755,13 +755,15 @@ async def test_resource_cards_carry_investigation_labels() -> None:
         ),
     )
     labels = {
-        insight.name: insight.metadata[INSIGHT_METADATA_KEY]["cta_label"]
-        for insight in result.insights
+        finding.id: finding.action.label
+        for finding in result.insights[0].findings
+        if finding.action is not None
     }
     assert labels == {
         "cost-concentration": "Investigate cost concentration",
         "component-time-share": "Investigate where time goes",
         "context-growth": "Investigate context growth",
+        "context-outliers": "Investigate oversized model inputs",
         "prompt-cache": "Investigate prompt cache use",
         "tool-paths": "Investigate tool paths",
     }

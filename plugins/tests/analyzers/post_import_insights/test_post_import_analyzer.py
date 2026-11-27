@@ -28,7 +28,12 @@ import httpx
 import pytest
 
 from kitaru.api_models.v1.agent import AgentResponse
-from kitaru.api_models.v1.insight import InsightInput
+from kitaru.api_models.v1.insight import (
+    EvidenceArtifact,
+    EvidenceRow,
+    InsightFinding,
+    InsightInput,
+)
 from kitaru.api_models.v1.session import (
     SessionDetailResponse,
     SessionListParams,
@@ -192,35 +197,56 @@ def consumed(monkeypatch: pytest.MonkeyPatch) -> list[uuid.UUID]:
     return session_ids
 
 
+def _evidence_rows(finding: InsightFinding) -> list[EvidenceRow]:
+    return [
+        row
+        for artifact in finding.artifacts
+        if isinstance(artifact, EvidenceArtifact)
+        for row in artifact.rows
+    ]
+
+
+def _prompt(finding: InsightFinding) -> str:
+    assert finding.action is not None
+    assert finding.action.prompt is not None
+    return finding.action.prompt
+
+
 async def test_analyzer_returns_self_contained_insight_inputs(
     client: StubClient,
 ) -> None:
-    """Return cards that retain evidence and copy-prompt context after persistence."""
+    """Return one structured report retaining evidence and copy-prompt context."""
     views = [_view(1, failed_tool=True), _view(2)]
 
     insights = await analyze_post_import_sessions(
         client.add(views), agent_name="returns-agent"
     )
 
-    assert insights
-    metadata = [InsightGenerationResult.card_metadata(item) for item in insights]
-    assert sum(item.recommended for item in metadata) == 1
-    for item in metadata:
-        assert item.context.agent_id == AGENT_ID
-        assert item.context.agent_name == "returns-agent"
-        assert item.context.server_url == "https://stub-api.example.test"
-        assert item.context.source_import == SourceImportContext(
-            import_id=IMPORT_ID, provider="langfuse"
-        )
-        assert item.contributing_session_ids
-        assert item.coverage.sessions_analyzed == 2
-        assert str(IMPORT_ID) in item.investigation_prompt
+    assert len(insights) == 1
+    report = insights[0]
+    metadata = InsightGenerationResult.report_metadata(report)
+    assert report.source_provider == "langfuse"
+    assert report.findings
+    assert sum(item.recommended for item in metadata.findings.values()) == 1
+    assert metadata.context.agent_id == AGENT_ID
+    assert metadata.context.agent_name == "returns-agent"
+    assert metadata.context.server_url == "https://stub-api.example.test"
+    assert metadata.context.source_import == SourceImportContext(
+        import_id=IMPORT_ID, provider="langfuse"
+    )
+    assert metadata.coverage.sessions_analyzed == 2
+    for finding in report.findings:
+        assert finding.id in metadata.findings
+        assert finding.contributing_session_ids
+        prompt = _prompt(finding)
+        assert str(IMPORT_ID) in prompt
         assert all(
-            str(session_id) in item.investigation_prompt
-            for session_id in item.contributing_session_ids
+            str(session_id) in prompt for session_id in finding.contributing_session_ids
         )
     assert any(
-        evidence.node_id is not None for item in metadata for evidence in item.evidence
+        row.node_id is not None
+        for finding in report.findings
+        for row in _evidence_rows(finding)
     )
     assert client.fetched == [view.session.id for view in views]
     assert client.agent_lookups == []
@@ -235,12 +261,14 @@ async def test_analyzer_looks_up_the_agent_name_when_not_supplied(
 
     insights = await analyze_post_import_sessions(client.add(views))
 
-    assert insights
+    assert len(insights) == 1
     assert client.agent_lookups == [AGENT_ID]
-    for item in insights:
-        metadata = InsightGenerationResult.card_metadata(item)
-        assert metadata.context.agent_name == "stub-agent"
-        assert "Agent: stub-agent (id " in metadata.investigation_prompt
+    report = insights[0]
+    metadata = InsightGenerationResult.report_metadata(report)
+    assert metadata.context.agent_name == "stub-agent"
+    assert report.findings
+    for finding in report.findings:
+        assert "Agent: stub-agent (id " in _prompt(finding)
 
 
 @pytest.mark.parametrize(
@@ -260,13 +288,16 @@ async def test_analyzer_tolerates_a_failed_agent_lookup(
         client.add([_view(1, failed_tool=True), _view(2)])
     )
 
-    assert insights
+    assert len(insights) == 1
     assert client.agent_lookups == [AGENT_ID]
-    for item in insights:
-        metadata = InsightGenerationResult.card_metadata(item)
-        assert metadata.context.agent_name is None
-        assert f"Agent id: {AGENT_ID}" in metadata.investigation_prompt
-        assert "Agent: " not in metadata.investigation_prompt
+    report = insights[0]
+    metadata = InsightGenerationResult.report_metadata(report)
+    assert metadata.context.agent_name is None
+    assert report.findings
+    for finding in report.findings:
+        prompt = _prompt(finding)
+        assert f"Agent id: {AGENT_ID}" in prompt
+        assert "Agent: " not in prompt
 
 
 async def test_analyzer_propagates_unexpected_agent_lookup_errors(
@@ -333,25 +364,20 @@ async def test_analyzer_fetches_full_sessions_using_task_credentials(
             await analyze_post_import_sessions(session_ids)
     else:
         insights = await analyze_post_import_sessions(session_ids)
-        assert insights
-        metadata = [InsightGenerationResult.card_metadata(item) for item in insights]
-        assert all(item.coverage.sessions_analyzed == 2 for item in metadata)
-        assert all(item.context.agent_id == AGENT_ID for item in metadata)
-        assert all(item.context.agent_name == "task-agent" for item in metadata)
-        assert all(
-            item.context.server_url == "https://task-api.example.test"
-            for item in metadata
-        )
-        assert all(
-            item.context.source_import
-            == SourceImportContext(import_id=IMPORT_ID, provider="langfuse")
-            for item in metadata
+        assert len(insights) == 1
+        metadata = InsightGenerationResult.report_metadata(insights[0])
+        assert metadata.coverage.sessions_analyzed == 2
+        assert metadata.context.agent_id == AGENT_ID
+        assert metadata.context.agent_name == "task-agent"
+        assert metadata.context.server_url == "https://task-api.example.test"
+        assert metadata.context.source_import == SourceImportContext(
+            import_id=IMPORT_ID, provider="langfuse"
         )
         assert any(
-            evidence.node_id == views[0].nodes[0].id
-            and evidence.session_id == views[0].session.id
-            for item in metadata
-            for evidence in item.evidence
+            row.node_id == views[0].nodes[0].id
+            and row.session_id == views[0].session.id
+            for finding in insights[0].findings
+            for row in _evidence_rows(finding)
         )
     assert len(requests) == (3 if last_status == 200 else 2)
 
@@ -454,15 +480,20 @@ async def test_both_analyzers_generate_independent_cards_for_the_same_import(
 
     assert len(requests) == 2
     assert all(request["model"] == "gpt-test" for request in requests)
+    assert len(deterministic) == 1
     assert len(openai) == 1
-    original = next(card for card in deterministic if card.name == openai[0].name)
-    assert original is not openai[0]
-    assert original.findings[0].artifacts[0] == openai[0].findings[0].artifacts[0]
-    assert openai[0].summary == "This pattern is worth a closer look."
-    assert original.summary != openai[0].summary
-    assert InsightGenerationResult.card_metadata(original).evidence == (
-        InsightGenerationResult.card_metadata(openai[0]).evidence
+    det_report = deterministic[0]
+    openai_report = openai[0]
+    openai_primary = [item for item in openai_report.findings if item.tier == "primary"]
+    assert len(openai_primary) == 1
+    original = next(
+        item for item in det_report.findings if item.id == openai_primary[0].id
     )
+    assert original is not openai_primary[0]
+    assert original.artifacts[0] == openai_primary[0].artifacts[0]
+    assert openai_primary[0].summary == "This pattern is worth a closer look."
+    assert original.summary != openai_primary[0].summary
+    assert _evidence_rows(original) == _evidence_rows(openai_primary[0])
 
 
 async def test_openai_analyzer_fails_instead_of_falling_back(
@@ -681,13 +712,11 @@ async def test_provider_must_match_across_the_full_stream(
     views = [_view(number, failed_tool=number == 1) for number in range(1, 302)]
     views[-1].session.imported_from = "another-provider"
 
-    cards = await analyze_post_import_sessions(client.add(views))
-    assert cards
-    assert all(
-        InsightGenerationResult.card_metadata(card).context.source_import
-        == SourceImportContext(import_id=IMPORT_ID)
-        for card in cards
-    )
+    reports = await analyze_post_import_sessions(client.add(views))
+    assert len(reports) == 1
+    metadata = InsightGenerationResult.report_metadata(reports[0])
+    assert metadata.context.source_import == SourceImportContext(import_id=IMPORT_ID)
+    assert reports[0].source_provider == "mixed"
 
 
 @pytest.mark.parametrize("provider", ["", "p" * 256, "broken-\ud800-provider"])
@@ -700,8 +729,8 @@ async def test_analyzer_omits_invalid_optional_provider(
 
     insights = await analyze_post_import_sessions(client.add([view]))
 
-    assert insights
-    metadata = InsightGenerationResult.card_metadata(insights[0])
+    assert len(insights) == 1
+    metadata = InsightGenerationResult.report_metadata(insights[0])
     assert metadata.context.source_import == SourceImportContext(import_id=IMPORT_ID)
 
 
@@ -774,12 +803,14 @@ async def test_analyzer_accepts_live_recorded_sessions(
 
     insights = await analyze_post_import_sessions(client.add(views))
 
-    assert insights
-    for item in insights:
-        metadata = InsightGenerationResult.card_metadata(item)
-        assert metadata.context.source_import is None
-        assert metadata.coverage.sessions_analyzed == 2
-        assert "Import id: " not in metadata.investigation_prompt
+    assert len(insights) == 1
+    report = insights[0]
+    metadata = InsightGenerationResult.report_metadata(report)
+    assert report.source_provider == "recorded"
+    assert metadata.context.source_import is None
+    assert metadata.coverage.sessions_analyzed == 2
+    assert report.findings
+    assert all("Import id: " not in _prompt(item) for item in report.findings)
 
 
 @pytest.mark.parametrize("mixed", ["second_import", "live_first", "live_last"])
@@ -797,13 +828,20 @@ async def test_analyzer_omits_the_import_for_mixed_sources(
 
     insights = await analyze_post_import_sessions(client.add(views))
 
-    assert insights
-    for item in insights:
-        metadata = InsightGenerationResult.card_metadata(item)
-        assert metadata.context.source_import is None
-        assert metadata.coverage.sessions_analyzed == 3
-        assert "Import id: " not in metadata.investigation_prompt
-        assert str(IMPORT_ID) not in metadata.investigation_prompt
+    assert len(insights) == 1
+    report = insights[0]
+    metadata = InsightGenerationResult.report_metadata(report)
+    assert metadata.context.source_import is None
+    assert metadata.coverage.sessions_analyzed == 3
+    if mixed == "second_import":
+        assert report.source_provider == "langfuse"
+    else:
+        assert report.source_provider == "mixed"
+    assert report.findings
+    for item in report.findings:
+        prompt = _prompt(item)
+        assert "Import id: " not in prompt
+        assert str(IMPORT_ID) not in prompt
 
 
 async def test_task_runner_loads_analyzer_and_writes_cards(
@@ -883,50 +921,42 @@ async def test_task_runner_loads_analyzer_and_writes_cards(
     monkeypatch.setattr(analyzer_module, "KitaruAPIClient", plugin_client)
     await task_analyzer.run(task_client, str(task_id))
 
-    cards = [
+    reports = [
         InsightInput.model_validate(item)
         for item in json.loads(result_path.read_text())
     ]
     assert fetched == [view.session.id for view in views]
     assert consumed == fetched
-    assert cards
-    metadata = [InsightGenerationResult.card_metadata(card) for card in cards]
-    assert all(
-        item.context.source_import
-        == SourceImportContext(import_id=IMPORT_ID, provider="langfuse")
-        for item in metadata
+    assert len(reports) == 1
+    report = reports[0]
+    metadata = InsightGenerationResult.report_metadata(report)
+    assert metadata.context.source_import == SourceImportContext(
+        import_id=IMPORT_ID, provider="langfuse"
     )
-    assert all(item.context.agent_name == "returns-agent" for item in metadata)
-    assert any(evidence.node_id for item in metadata for evidence in item.evidence)
-    assert all(item.coverage.sessions_available == 301 for item in metadata)
-    assert all(item.coverage.sessions_analyzed == 301 for item in metadata)
-    assert all(item.coverage.nodes_available == 1 for item in metadata)
-    timing = next(
-        card for card in cards if card.name == "recorded-duration-distribution"
+    assert metadata.context.agent_name == "returns-agent"
+    assert any(row.node_id for item in report.findings for row in _evidence_rows(item))
+    assert metadata.coverage.sessions_available == 301
+    assert metadata.coverage.sessions_analyzed == 301
+    assert metadata.coverage.nodes_available == 1
+    timing_finding = next(
+        item for item in report.findings if item.id == "recorded-duration-distribution"
     )
-    timing_metadata = InsightGenerationResult.card_metadata(timing)
+    assert timing_finding.tier == "secondary"
+    timing_rows = _evidence_rows(timing_finding)
     expected = [view.session.id for view in views[:5]]
-    assert [item.session_id for item in timing_metadata.evidence] == expected
-    finding = json.loads(
-        timing_metadata.investigation_prompt.split("Finding data: ", 1)[1]
-    )
-    assert finding["evidence_locators"] == [
-        item.model_dump(mode="json") for item in timing_metadata.evidence
-    ]
+    assert [row.session_id for row in timing_rows] == expected
+    finding = json.loads(_prompt(timing_finding).split("Finding data: ", 1)[1])
+    assert [
+        uuid.UUID(item["session_id"]) for item in finding["evidence_locators"]
+    ] == expected
     assert finding["evidence_scope"]["supplied_session_count"] == 5
     assert finding["evidence_scope"]["bin_session_count"] == 242
     assert finding["evidence_scope"]["truncated"] is True
     assert all(
-        all(
-            truncation.dimension != "sessions"
-            for truncation in item.coverage.truncations
-        )
-        for item in metadata
+        truncation.dimension != "sessions"
+        for truncation in metadata.coverage.truncations
     )
-    assert all(
-        all("sample" not in caveat for caveat in item.coverage.caveats)
-        for item in metadata
-    )
+    assert all("sample" not in caveat for caveat in metadata.coverage.caveats)
 
 
 async def test_task_runner_accepts_no_eligible_findings(
@@ -942,3 +972,19 @@ async def test_task_runner_accepts_no_eligible_findings(
         )
         == []
     )
+
+
+async def test_task_runner_forwards_max_findings_and_focus(
+    client: StubClient,
+) -> None:
+    """Forward max_findings and focus task parameters through call_analyzer."""
+    reports = await task_analyzer.call_analyzer(
+        "post-import-insights",
+        analyze_post_import_sessions,
+        client.add([_view(1, failed_tool=True), _view(2)]),
+        {"max_findings": 1, "focus": "outcomes"},
+    )
+    assert len(reports) == 1
+    primary = [item for item in reports[0].findings if item.tier == "primary"]
+    assert len(primary) == 1
+    assert primary[0].id == "session-outcomes"

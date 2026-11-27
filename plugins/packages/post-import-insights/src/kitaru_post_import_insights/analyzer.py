@@ -23,8 +23,10 @@ from kitaru.client.exceptions import KitaruClientError
 from kitaru.task.importer import stream_bounded
 from kitaru_post_import_insights.generation import ModelGenerationConfig
 from kitaru_post_import_insights.models import (
+    DEFAULT_MAX_PRIMARY_FINDINGS,
     MAX_NAME_LENGTH,
     MAX_SERVER_URL_LENGTH,
+    FocusArea,
     GenerationMode,
     InsightGenerationContext,
     SourceImportContext,
@@ -44,6 +46,15 @@ DEFAULT_OPENAI_REASONING_EFFORT = "low"
 SESSION_PREFETCH_WINDOW = 4
 
 
+def _get_session_provider(item: SessionWithNodesResponse) -> str | None:
+    """Return a clean provider label for one session, or 'recorded' for live runs."""
+    imported = _get_provider(item.session.imported_from)
+    if imported is not None:
+        return imported
+    origin = item.session.origin.value
+    return origin if origin == "recorded" else None
+
+
 def _get_context(
     first: SessionWithNodesResponse,
     *,
@@ -52,6 +63,7 @@ def _get_context(
 ) -> InsightGenerationContext:
     """Derive the identity available on the first normalized analyzer session."""
     import_id = first.session.import_id
+    provider = _get_session_provider(first)
     return InsightGenerationContext(
         agent_id=first.session.agent_id,
         agent_name=agent_name,
@@ -63,6 +75,7 @@ def _get_context(
                 provider=_get_provider(first.session.imported_from),
             )
         ),
+        source_provider=provider[:80] if provider else None,
         server_url=server_url,
     )
 
@@ -114,17 +127,28 @@ async def analyze_post_import_sessions(
     session_ids: list[UUID],
     *,
     agent_name: str | None = None,
+    max_findings: int = DEFAULT_MAX_PRIMARY_FINDINGS,
+    focus: FocusArea | None = None,
 ) -> list[InsightInput]:
-    """Generate deterministic insight cards without provider credentials.
+    """Generate a structured deterministic insight report without model credentials.
 
     Args:
         session_ids: IDs of sessions for one agent, recorded live or imported.
         agent_name: Optional display name included in copied prompt context.
+        max_findings: Maximum primary findings to retain in the report (1 to 15).
+        focus: Optional focus area boosting matching families (`tools`, `cost`,
+            `language`, `latency`, `outcomes`).
 
     Returns:
-        Insight inputs ready for the analyzer task to persist.
+        Structured insight report ready for the analyzer task to persist.
     """
-    return await _analyze_sessions(session_ids, agent_name=agent_name, model=None)
+    return await _analyze_sessions(
+        session_ids,
+        agent_name=agent_name,
+        model=None,
+        max_findings=max_findings,
+        focus=focus,
+    )
 
 
 async def analyze_openai_post_import_sessions(
@@ -132,17 +156,21 @@ async def analyze_openai_post_import_sessions(
     *,
     model: str | None = None,
     agent_name: str | None = None,
+    max_findings: int = DEFAULT_MAX_PRIMARY_FINDINGS,
+    focus: FocusArea | None = None,
 ) -> list[InsightInput]:
-    """Generate insight cards selected and edited by OpenAI.
+    """Generate a structured insight report selected and edited by OpenAI.
 
     Args:
         session_ids: IDs of sessions for one agent, recorded live or imported.
         model: OpenAI model for the bounded analyst and editor calls. Defaults
             to `gpt-5.6-luna` with low reasoning effort.
         agent_name: Optional display name included in copied prompt context.
+        max_findings: Maximum primary findings to retain in the report (1 to 15).
+        focus: Optional focus area boosting matching families.
 
     Returns:
-        Insight inputs ready for the analyzer task to persist.
+        Structured insight report ready for the analyzer task to persist.
 
     Raises:
         MissingOpenAICredential: OPENAI_API_KEY is unavailable.
@@ -157,6 +185,8 @@ async def analyze_openai_post_import_sessions(
                 DEFAULT_OPENAI_REASONING_EFFORT if model is None else None
             ),
         ),
+        max_findings=max_findings,
+        focus=focus,
     )
 
 
@@ -165,12 +195,16 @@ async def _analyze_sessions(
     *,
     agent_name: str | None,
     model: ModelGenerationConfig | None,
+    max_findings: int = DEFAULT_MAX_PRIMARY_FINDINGS,
+    focus: FocusArea | None = None,
 ) -> list[InsightInput]:
-    """Profile normalized sessions and generate cards using the selected analyzer."""
+    """Profile normalized sessions and generate a structured report."""
     if not session_ids:
         return []
     context: InsightGenerationContext | None = None
     source_import: SourceImportContext | None = None
+    shared_provider: str | None = None
+    mixed_providers = False
     with SessionProfiler() as profiler:
         async with (
             KitaruAPIClient() as client,
@@ -185,6 +219,7 @@ async def _analyze_sessions(
             ) as sessions,
         ):
             async for normalized in sessions:
+                session_provider = _get_session_provider(normalized)
                 if context is None:
                     context = _get_context(
                         normalized,
@@ -192,8 +227,12 @@ async def _analyze_sessions(
                         server_url=_get_server_url(client),
                     )
                     source_import = context.source_import
-                elif source_import is not None:
-                    source_import = _narrow_source_import(source_import, normalized)
+                    shared_provider = session_provider
+                else:
+                    if source_import is not None:
+                        source_import = _narrow_source_import(source_import, normalized)
+                    if session_provider != shared_provider:
+                        mixed_providers = True
                 validate_session(normalized, context=context)
                 profiler.consume(normalized)
                 del normalized
@@ -202,8 +241,17 @@ async def _analyze_sessions(
         profiling = profiler.finish()
     if context is None:
         return []
+    resolved_provider = (
+        "mixed"
+        if mixed_providers
+        else (shared_provider[:80] if shared_provider else None)
+    )
     context = context.model_copy(
-        update={"agent_name": agent_name, "source_import": source_import}
+        update={
+            "agent_name": agent_name,
+            "source_import": source_import,
+            "source_provider": resolved_provider,
+        }
     )
     generator = None
     if model is not None:
@@ -213,13 +261,12 @@ async def _analyze_sessions(
     result = await generate_insights_from_profile(
         profiling,
         context=context,
-        config=InsightGenerationConfig(model=model),
+        config=InsightGenerationConfig(
+            model=model, max_findings=max_findings, focus=focus
+        ),
         generator=generator,
     )
     if model is not None and result.mode is GenerationMode.DETERMINISTIC_FALLBACK:
-        # The deterministic analyzer already covers the no-model case, so a
-        # model-backed run that could not use the model fails the task instead
-        # of silently returning deterministic cards under the OpenAI analyzer.
         raise RuntimeError(
             "OpenAI insight generation could not use the model: "
             f"{result.diagnostics.fallback_reason or 'unknown reason'}"

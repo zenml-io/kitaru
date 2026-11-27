@@ -5,7 +5,17 @@
 
 import re
 
-from kitaru.api_models.v1.insight import CategoricalArtifact, StatGridArtifact
+from kitaru.api_models.v1.insight import (
+    BinnedArtifact,
+    CategoricalArtifact,
+    FailureMatrixArtifact,
+    InsightArtifact,
+    RateArtifact,
+    StatGridArtifact,
+    StepStripArtifact,
+    TableArtifact,
+    ToolCycleArtifact,
+)
 from kitaru_post_import_insights.profiling import CandidateFinding
 
 # A numeric token is a number plus an optional unit, so the number parser can
@@ -261,14 +271,31 @@ def _validate_copy_safety(value: str) -> None:
         raise ValueError("editor copy contains an unsupported claim")
 
 
+def _iter_candidate_artifacts(candidate: CandidateFinding) -> list[InsightArtifact]:
+    """Return the candidate's primary and companion artifacts."""
+    return [candidate.data, *candidate.extra_artifacts]
+
+
 def _get_quantified_labels(candidate: CandidateFinding) -> set[str]:
     """Return quantity-bearing labels that also contain an identity token."""
-    if isinstance(candidate.data, CategoricalArtifact):
-        labels = [item.label for item in candidate.data.values]
-    elif isinstance(candidate.data, StatGridArtifact):
-        labels = [item.label for item in candidate.data.items]
-    else:
-        return set()
+    labels: list[str] = []
+    for data in _iter_candidate_artifacts(candidate):
+        if isinstance(data, CategoricalArtifact):
+            labels.extend(item.label for item in data.values)
+        elif isinstance(data, StatGridArtifact):
+            labels.extend(item.label for item in data.items)
+        elif isinstance(data, TableArtifact):
+            for row in data.rows:
+                for value in row.values():
+                    if isinstance(value, str):
+                        labels.append(value)
+        elif isinstance(data, ToolCycleArtifact):
+            labels.extend(step.name for step in data.steps)
+        elif isinstance(data, FailureMatrixArtifact):
+            labels.extend(data.rows)
+            labels.extend(data.cols)
+        elif isinstance(data, StepStripArtifact):
+            labels.extend(row.label for row in data.rows)
     return {label for label in labels if _is_identity_bearing_quantified_label(label)}
 
 
@@ -413,6 +440,76 @@ def _classify_unit(unit: str | None) -> tuple[str, float]:
     return "count", 1.0
 
 
+def _get_artifact_unit(data: InsightArtifact) -> str | None:
+    """Return the declared measurement unit of an artifact when it has one."""
+    if isinstance(data, StatGridArtifact):
+        return data.items[0].unit or "count"
+    if isinstance(data, (CategoricalArtifact, BinnedArtifact)):
+        return data.unit
+    if isinstance(data, RateArtifact):
+        return "percent"
+    return None
+
+
+def _add_artifact_numbers(
+    data: InsightArtifact, numbers: dict[str, set[float]]
+) -> None:
+    """Collect grounded numeric quantities from one artifact."""
+    chart_kind, chart_scale = _classify_unit(_get_artifact_unit(data))
+    if isinstance(data, CategoricalArtifact):
+        numbers[chart_kind].update(
+            float(item.value) * chart_scale for item in data.values
+        )
+    elif isinstance(data, StatGridArtifact):
+        for item in data.items:
+            if isinstance(item.value, (int, float)):
+                item_kind, item_scale = _classify_unit(item.unit or "count")
+                numbers[item_kind].add(float(item.value) * item_scale)
+    elif isinstance(data, BinnedArtifact):
+        for bin_ in data.bins:
+            numbers["count"].add(float(bin_.count))
+            numbers[chart_kind].update(
+                float(bound) * chart_scale
+                for bound in (bin_.lower_bound, bin_.upper_bound)
+                if bound is not None
+            )
+    elif isinstance(data, RateArtifact):
+        numbers["percent"].add(float(data.rate) * 100.0)
+        for bound in (data.ci_low, data.ci_high):
+            if bound is not None:
+                numbers["percent"].add(float(bound) * 100.0)
+        for count in (data.numerator, data.denominator):
+            if count is not None:
+                numbers["count"].add(float(count))
+    elif isinstance(data, TableArtifact):
+        col_formats = {col.key: col.format for col in data.columns}
+        for row in data.rows:
+            for key, value in row.items():
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    fmt = col_formats.get(key, "number")
+                    if fmt in ("percent", "percent_bar"):
+                        numbers["percent"].add(float(value) * 100.0)
+                        numbers["percent"].add(float(value))
+                    else:
+                        numbers["count"].add(float(value))
+    elif isinstance(data, ToolCycleArtifact):
+        numbers["count"].add(float(data.repeat_count))
+        numbers["count"].add(float(data.session_count))
+        numbers["count"].add(float(len(data.steps)))
+    elif isinstance(data, FailureMatrixArtifact):
+        numbers["count"].add(float(data.total_failed))
+        for cell in data.cells:
+            numbers["count"].add(float(cell.count))
+            if cell.attempts is not None:
+                numbers["count"].add(float(cell.attempts))
+    elif isinstance(data, StepStripArtifact):
+        numbers["count"].add(float(data.total_steps))
+        for row in data.rows:
+            for value in (row.session_count, row.last_good_step, row.first_wrong_step):
+                if value is not None:
+                    numbers["count"].add(float(value))
+
+
 def _get_grounded_numbers(candidate: CandidateFinding) -> dict[str, set[float]]:
     """Return every quantity the candidate states about itself, by kind.
 
@@ -424,12 +521,7 @@ def _get_grounded_numbers(candidate: CandidateFinding) -> dict[str, set[float]]:
         "percent": set(),
         "seconds": set(),
     }
-    data = candidate.data
-    if isinstance(data, StatGridArtifact):
-        chart_unit = data.items[0].unit or "count"
-    else:
-        chart_unit = data.unit
-    chart_kind, chart_scale = _classify_unit(chart_unit)
+    chart_kind, chart_scale = _classify_unit(_get_artifact_unit(candidate.data))
     for fact in candidate.facts:
         # A statistic of the chart's values, such as "maximum", is measured in
         # the chart's unit; every other fact keeps the unit its name declares.
@@ -446,22 +538,8 @@ def _get_grounded_numbers(candidate: CandidateFinding) -> dict[str, set[float]]:
         else:
             values = [float(fact.value)]
         numbers[kind].update(value * scale for value in values)
-    kind, scale = chart_kind, chart_scale
-    if isinstance(data, CategoricalArtifact):
-        numbers[kind].update(float(item.value) * scale for item in data.values)
-    elif isinstance(data, StatGridArtifact):
-        for item in data.items:
-            if isinstance(item.value, (int, float)):
-                item_kind, item_scale = _classify_unit(item.unit or chart_unit)
-                numbers[item_kind].add(float(item.value) * item_scale)
-    else:
-        for bin_ in data.bins:
-            numbers["count"].add(float(bin_.count))
-            numbers[kind].update(
-                float(bound) * scale
-                for bound in (bin_.lower_bound, bin_.upper_bound)
-                if bound is not None
-            )
+    for artifact in _iter_candidate_artifacts(candidate):
+        _add_artifact_numbers(artifact, numbers)
     coverage = candidate.coverage
     numbers["count"].update(
         float(count)
@@ -486,16 +564,16 @@ def _matches_grounded(value: float, decimals: int, grounded: set[float]) -> bool
 
 def _get_label_values(candidate: CandidateFinding) -> dict[str, float]:
     """Map each categorical label, and its outcome category, to its own value."""
-    if isinstance(candidate.data, CategoricalArtifact):
-        pairs = [(item.label, float(item.value)) for item in candidate.data.values]
-    elif isinstance(candidate.data, StatGridArtifact):
-        pairs = [
-            (item.label, float(item.value))
-            for item in candidate.data.items
-            if isinstance(item.value, (int, float))
-        ]
-    else:
-        return {}
+    pairs: list[tuple[str, float]] = []
+    for data in _iter_candidate_artifacts(candidate):
+        if isinstance(data, CategoricalArtifact):
+            pairs.extend((item.label, float(item.value)) for item in data.values)
+        elif isinstance(data, StatGridArtifact):
+            pairs.extend(
+                (item.label, float(item.value))
+                for item in data.items
+                if isinstance(item.value, (int, float))
+            )
     values: dict[str, float] = {}
     for label, value in pairs:
         values[label.lower()] = value
@@ -607,10 +685,16 @@ def _is_grounded_number(
 
 def _get_declared_units(candidate: CandidateFinding) -> set[str]:
     """Return the chart unit and the unit suffix of each fact name, lowercased."""
-    if isinstance(candidate.data, StatGridArtifact):
-        chart_units = {(item.unit or "").lower() for item in candidate.data.items}
-    else:
-        chart_units = {(candidate.data.unit or "").lower()}
+    chart_units: set[str] = set()
+    for data in _iter_candidate_artifacts(candidate):
+        if isinstance(data, StatGridArtifact):
+            chart_units.update((item.unit or "").lower() for item in data.items)
+        elif isinstance(data, (CategoricalArtifact, BinnedArtifact)):
+            chart_units.add((data.unit or "").lower())
+        elif isinstance(data, RateArtifact):
+            chart_units.add("percent")
+        elif isinstance(data, ToolCycleArtifact):
+            chart_units.update({"x", "times"})
     return chart_units | {
         fact.name.lower().rsplit("_", 1)[-1] for fact in candidate.facts
     }

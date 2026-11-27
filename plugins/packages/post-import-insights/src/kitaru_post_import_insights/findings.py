@@ -11,12 +11,12 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
-"""Candidate finding model and the wording rules every finding briefing shares."""
+"""Candidate finding model and shared chart/wording helpers."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Protocol, Self
+from typing import Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -25,8 +25,13 @@ from kitaru.api_models.v1.insight import (
     BinnedArtifact,
     CategoricalArtifact,
     CategoryValue,
+    FindingKind,
+    InsightArtifact,
+    Severity,
     StatGridArtifact,
     StatItem,
+    SuggestedQuestion,
+    Tone,
 )
 from kitaru_post_import_insights.models import (
     MAX_CONTRIBUTING_SESSIONS,
@@ -35,6 +40,8 @@ from kitaru_post_import_insights.models import (
     EvidenceLocator,
 )
 from kitaru_post_import_insights.profiling_state import Histogram, SessionReferences
+
+_SPLIT_BAR_MIN_SHARE = 0.02
 
 
 class _FindingModel(BaseModel):
@@ -74,16 +81,20 @@ class CandidateCoverage(_FindingModel):
 
 
 class CandidateFinding(_FindingModel):
-    """One chart-backed finding eligible for model selection."""
+    """One chart-backed finding eligible for report inclusion."""
 
     id: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     family: str = Field(min_length=1, max_length=80)
     rank: int = Field(ge=0)
+    tier: Literal["primary", "secondary"] = "primary"
+    kind: FindingKind = "finding"
+    severity: Severity | None = None
     eyebrow: str = Field(min_length=1, max_length=80)
     title: str = Field(min_length=1, max_length=255)
     fallback_description: str = Field(min_length=1, max_length=1000)
     caveat: str | None = Field(default=None, min_length=1, max_length=1000)
-    data: CategoricalArtifact | BinnedArtifact | StatGridArtifact
+    data: InsightArtifact
+    extra_artifacts: list[InsightArtifact] = Field(default_factory=list, max_length=6)
     facts: list[DeterministicFact] = Field(default_factory=list, max_length=20)
     coverage: CandidateCoverage
     contributing_session_ids: list[uuid.UUID] = Field(
@@ -94,6 +105,9 @@ class CandidateFinding(_FindingModel):
     )
     investigation_prompt: str = Field(
         min_length=1, max_length=MAX_INVESTIGATION_PROMPT_LENGTH
+    )
+    suggested_questions: list[SuggestedQuestion] = Field(
+        default_factory=list, max_length=5
     )
 
     @model_validator(mode="after")
@@ -170,12 +184,16 @@ def build_categorical(
     items: Sequence[tuple[str, int | float]],
     *,
     unit: str,
+    presentation: Literal["ranked_bars", "path_bars"] = "ranked_bars",
+    tones: Mapping[str, Tone] | None = None,
+    highlight_top_tone: Tone | None = None,
 ) -> CategoricalArtifact | StatGridArtifact:
-    """Build ranked bars (max 8, folding excess into 'Other') or a stat tile."""
+    """Build ranked or path bars (max 8, folding excess into 'Other') or a stat tile."""
     if len(items) == 1:
         label, value = items[0]
+        tone = (tones or {}).get(label) or highlight_top_tone or "neutral"
         return StatGridArtifact(
-            items=[StatItem(label=label[:60], value=value, unit=unit)]
+            items=[StatItem(label=label[:60], value=value, unit=unit, tone=tone)]
         )
     if len(items) > 8:
         top = list(items[:7])
@@ -190,22 +208,69 @@ def build_categorical(
         else:
             top.append((other_label, other_total))
         items = top
+    values = []
+    for index, (label, value) in enumerate(items):
+        tone = (tones or {}).get(label)
+        if tone is None and index == 0 and highlight_top_tone is not None:
+            tone = highlight_top_tone
+        values.append(
+            CategoryValue(
+                label=label,
+                value=value,
+                tone=tone,
+                focus=(index == 0 and highlight_top_tone is not None),
+            )
+        )
     return CategoricalArtifact(
-        presentation="ranked_bars",
+        presentation=presentation,
         unit=unit,
-        values=[CategoryValue(label=label, value=value) for label, value in items],
+        values=values,
     )
 
 
-def build_binned(values: Histogram, *, unit: str) -> BinnedArtifact:
+def build_split_bar(
+    items: Sequence[tuple[str, int | float]],
+    *,
+    unit: str,
+    tones: Mapping[str, Tone] | None = None,
+) -> CategoricalArtifact | StatGridArtifact:
+    """Build a split bar when 2-4 segments each meet the 2% floor, else ranked bars."""
+    if len(items) == 1:
+        return build_categorical(items, unit=unit, tones=tones)
+    total = sum(float(v) for _, v in items)
+    if (
+        2 <= len(items) <= 4
+        and total > 0
+        and all(v == 0 or (float(v) / total) >= _SPLIT_BAR_MIN_SHARE for _, v in items)
+    ):
+        return CategoricalArtifact(
+            presentation="split_bar",
+            unit=unit,
+            values=[
+                CategoryValue(label=label, value=value, tone=(tones or {}).get(label))
+                for label, value in items
+            ],
+        )
+    return build_categorical(items, unit=unit, tones=tones)
+
+
+def build_binned(
+    values: Histogram,
+    *,
+    unit: str,
+    presentation: Literal["columns", "horizontal", "micro"] = "columns",
+    focus_top_bin: bool = False,
+) -> BinnedArtifact:
     """Count values into contiguous half-open bins."""
     bounds = values.bounds
+    highest = values.get_highest_occupied_bin() if focus_top_bin else None
     bins = [
         Bin(
             lower_bound=None if index == 0 else bounds[index - 1],
             upper_bound=bounds[index] if index < len(bounds) else None,
             count=count,
+            focus=(highest is not None and index == highest),
         )
         for index, count in enumerate(values.bins)
     ]
-    return BinnedArtifact(presentation="columns", unit=unit, bins=bins)
+    return BinnedArtifact(presentation=presentation, unit=unit, bins=bins)

@@ -996,7 +996,8 @@ async def test_editor_unsafe_copy_uses_deterministic_copy(
     assert result.mode == GenerationMode.MODEL_BACKED
     assert result.diagnostics.fallback_reason is None
     assert result.diagnostics.warnings == [
-        f"Card copy for {candidate.id} failed validation and uses deterministic text."
+        f"Finding copy for {candidate.id} failed validation "
+        "and uses deterministic text."
     ]
     assert result.diagnostics.provider_receipts == [
         _receipt("analyst"),
@@ -1278,7 +1279,7 @@ async def test_partially_rejected_editor_copy_keeps_model_backed_mode(
     assert result.editorial.insights[0].description == "Fresh wording."
     assert result.editorial.insights[1].description == second.fallback_description
     assert result.diagnostics.warnings == [
-        f"Card copy for {second.id} failed validation and uses deterministic text."
+        f"Finding copy for {second.id} failed validation and uses deterministic text."
     ]
 
 
@@ -1377,7 +1378,7 @@ def test_analyst_plan_requires_known_unique_ids(
         )
 
 
-async def test_analyst_selection_keeps_recommendation_and_diversifies_families(
+async def test_analyst_selection_keeps_recommendation_first_and_allows_same_family(
     profiling_result: ProfilingResult,
 ) -> None:
     first, second = profiling_result.candidates
@@ -1395,7 +1396,7 @@ async def test_analyst_selection_keeps_recommendation_and_diversifies_families(
         recommended_candidate_id=duplicate.id,
         rationale="Useful.",
     )
-    expected_ids = [duplicate.id, second.id, unused.id]
+    expected_ids = [duplicate.id, first.id, second.id]
 
     result = await generate_model_plan(
         profiling,
@@ -1405,13 +1406,7 @@ async def test_analyst_selection_keeps_recommendation_and_diversifies_families(
 
     assert result.selection.selected_candidate_ids == expected_ids
     assert result.selection.recommended_candidate_id == duplicate.id
-    candidates = {candidate.id: candidate for candidate in profiling.candidates}
-    assert len(
-        {
-            candidates[candidate_id].family
-            for candidate_id in result.selection.selected_candidate_ids
-        }
-    ) == len(result.selection.selected_candidate_ids)
+    assert result.omitted_candidate_ids == [unused.id]
 
 
 def test_editor_preserves_selection_and_allows_known_digit_label(
