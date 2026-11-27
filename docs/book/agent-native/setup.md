@@ -182,7 +182,7 @@ export KITARU_API_URL="http://localhost:8000"
 export KITARU_API_KEY="KITKEY_..."
 ```
 
-- **CLI:** the full journey has commands: `kitaru session import`, `kitaru replay create`, `kitaru session evaluate`, `kitaru cohort create`, `kitaru experiment run start`, plus registration, workers, and jobs. Commands take `--output json`, so assistant-driven invocations parse cleanly.
+- **CLI:** the full journey has commands: `kitaru session import`, `kitaru replay create`, `kitaru session evaluate`, `kitaru cohort create`, `kitaru experiment run start`, plus registration, workers, and jobs. Commands take `--output json`, so assistant-driven invocations parse cleanly: successful runs write one JSON document (`ok: true`) to stdout, while failures write one JSON error object (`ok: false`, with `error.kind`, `error.message`, `error.retryable`, and optional `details` or `hint`) to **stderr**, write nothing to stdout, and exit nonzero. Check the exit code and read stderr on failure rather than parsing stdout. See [How to use the SDK](../deploy/sdks.md) for the `--filter` JSON grammar and cursor pagination across the CLI, SDKs, and REST API.
 - **Python client:** `KitaruAPIClient()` reaches everything, including single-session replays. Your assistant writes the same snippets these docs show.
 - **REST:** the server's OpenAPI schema at `/docs` on your server, when the assistant wants the raw contract.
 
@@ -209,7 +209,7 @@ Replay session <id> unchanged with the refund-check evaluator and a baseline his
 ```
 
 ```
-Here are five things our support lead says a good refund reply does: <criteria>. Write a Kitaru evaluator that checks them, test it offline with kitaru evaluator test, and register it as refund-quality.
+Here are five things our support lead says a good refund reply does: <criteria>. Write a Kitaru evaluator that checks them, verify that it loads with kitaru evaluator test, register it as refund-quality, and run kitaru session evaluate on one expected-fail session and one expected-pass session to confirm the verdicts.
 ```
 
 ```

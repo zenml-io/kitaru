@@ -57,7 +57,13 @@ from kitaru.server.adapters.db.orm.session_group import (
     SessionGroupSessionORM,
 )
 from kitaru.server.adapters.db.orm.tag import TagLinkORM, TagORM
-from kitaru.server.adapters.db.pagination import IdOrder, paginate
+from kitaru.server.adapters.db.pagination import (
+    IdOrder,
+    IntegerOrder,
+    PageOrder,
+    StartOrder,
+    paginate,
+)
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.domain.agent import AgentNotFound
@@ -158,6 +164,23 @@ SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "tool_call_count": SessionORM.tool_call_count,
     "created": SessionORM.created,
 }
+
+
+def _build_session_page_order(sort: str) -> PageOrder:
+    """Build the SQL page order for a validated session sort.
+
+    Args:
+        sort: Validated session sort string.
+
+    Returns:
+        Keyset page order matching the requested sort field and direction.
+    """
+    field, _, _ = sort.partition(":")
+    if field == "started_at":
+        return StartOrder(SessionORM.started_at, SessionORM.id, sort)
+    if field == "number":
+        return IntegerOrder(SessionORM.number, SessionORM.id, sort)
+    return IdOrder(SessionORM.id, sort)
 
 
 class SQLSessionRepository(BaseSQLRepository[SessionORM]):
@@ -342,7 +365,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             self._session,
             statement,
             session_filter,
-            IdOrder(SessionORM.id, session_filter.sort),
+            _build_session_page_order(session_filter.sort),
         )
         exclude = {column.key for column in deferred}
         return await self._hydrate_tags(
@@ -528,15 +551,17 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             session_id,
             {
                 COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
-                    session_id
+                    session_id, "a cohort version"
                 ),
                 INVESTIGATION_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
-                    session_id
+                    session_id, "an investigation"
                 ),
                 REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
-                    session_id
+                    session_id, "a replay (as baseline session)"
                 ),
-                REPLAY_RESULT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(session_id),
+                REPLAY_RESULT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
+                    session_id, "a replay (as result session)"
+                ),
             },
         )
 

@@ -1,0 +1,89 @@
+---
+name: TypeScript Cross-Language CI
+on:
+  workflow_dispatch:
+  push:
+    branches: [develop]
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
+    paths:
+      - .github/workflows/ci-typescript-bridge.yml
+      - .node-version
+      - biome.json
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - tsconfig.base.json
+      - pyproject.toml
+      - uv.lock
+      - packages/**
+      - examples/typescript/**
+      - tests/typescript/**
+      - tests/conftest.py
+      - openapi/**
+      - scripts/clean-typescript-dist.mjs
+      - src/kitaru/api_models/**
+      - src/kitaru/client/**
+      - src/kitaru/server/**
+      - src/kitaru/task/**
+      - src/kitaru/worker/**
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions: {}
+env:
+  KITARU_SERVER_ANALYTICS_OPT_IN: false
+  ZENML_ANALYTICS_OPT_IN: false
+  ZENML_LOGGING_VERBOSITY: INFO
+  AUTO_OPEN_DASHBOARD: false
+  ZENML_ENABLE_RICH_TRACEBACK: false
+jobs:
+  typescript-cross-language:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: password
+        ports: [5433:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115  # v6.1.1
+        with:
+          run_install: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          python-version: '3.12'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build:packages
+      - run: uv sync --frozen --extra server --extra cli --extra worker
+      - name: Test compiled TypeScript adapters through Worker
+        run: uv run pytest -q tests/typescript
+      - name: Validate ticket resolver example
+        working-directory: examples/typescript/vercel_ai_ticket_resolver
+        run: |-
+          pnpm build
+          pnpm test
+          pnpm test:evaluator
+          pnpm typecheck
+          pnpm lint
+          pnpm test:e2e

@@ -850,7 +850,7 @@ async def test_analyze_import_returns_skip_without_sessions(
 ) -> None:
     """An empty rerun returns a completed job and a readable skipped task."""
     await _importer_version(services)
-    await _analyzer_version(services, "trends")
+    analyzer_version = await _analyzer_version(services, "trends")
     body = await _import_request(services)
     created = (await client.post("/api/v1/imports", json=body)).json()
 
@@ -869,12 +869,17 @@ async def test_analyze_import_returns_skip_without_sessions(
     assert response.status_code == 200
     skipped = response.json()
     assert skipped["status"] == "skipped"
+    assert skipped["plugin_version_id"] == str(analyzer_version.id)
     assert skipped["attempt"] == 0
     assert skipped["worker_id"] is None
     assert skipped["started_at"] is None
     assert skipped["ended_at"] is not None
     assert skipped["error"] is None
-    assert skipped["result"] is None
+    assert skipped["result"] == {
+        "reason": "insufficient_sessions",
+        "eligible_sessions": 0,
+        "min_sessions": 1,
+    }
 
 
 async def test_analyze_import_rejects_an_empty_analyzer_list(

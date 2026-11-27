@@ -51,7 +51,7 @@ agent_app = App(
 )
 agent_version_app = App(
     name="version",
-    help="Register and inspect agent versions.",
+    help="Register, inspect, and update agent versions.",
     default_parameter=Parameter(negative=False),
 )
 cohort_app = App(
@@ -312,6 +312,7 @@ COLLECTION_READ_ERRORS = (
     "invalid_arguments",
     "invalid_configuration",
     "authentication_failed",
+    "forbidden",
     "network_error",
     "internal_error",
 )
@@ -333,7 +334,7 @@ LIST_PARAMETERS = (
         "string",
         "option",
         False,
-        "Fetch the next page with page.next_cursor from the previous response.",
+        "Cursor from the previous page (page.next_cursor in CLI JSON output).",
     ),
     ParameterSpec(
         "--sort",
@@ -343,8 +344,24 @@ LIST_PARAMETERS = (
         "Sort by created:asc or created:desc (default), preserving cursor pagination.",
     ),
     ParameterSpec(
-        "--filter", "JSON", "option", False, "Advanced JSON filter expression."
+        "--filter",
+        "JSON",
+        "option",
+        False,
+        "JSON filter expression, e.g. "
+        '\'{"field":"status","op":"eq","value":"failed"}\'.',
     ),
+)
+SESSION_LIST_PARAMETERS = (
+    *LIST_PARAMETERS[:2],
+    ParameterSpec(
+        "--sort",
+        "field:direction",
+        "option",
+        False,
+        "Sort by created, started_at, or number, each with :asc or :desc.",
+    ),
+    LIST_PARAMETERS[3],
 )
 VERSION_LIST_PARAMETERS = LIST_PARAMETERS[:-1]
 WAIT_PARAMETERS = (

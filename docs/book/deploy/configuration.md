@@ -38,7 +38,7 @@ Useful global flags and their environment twins:
 
 | Flag | Env | Meaning |
 | --- | --- | --- |
-| `--output/-o json` or `jsonl` | none | Machine-readable output for scripts and assistants; `jsonl` streams progress line by line |
+| `--output/-o json` or `jsonl` | none | Machine-readable output for scripts and assistants (`jsonl` streams progress line by line). On failure, writes one JSON error object to stderr, nothing to stdout, and exits nonzero. |
 | `--non-interactive` | `KITARU_NON_INTERACTIVE` | Never prompt; fail instead |
 | `--machine` | `KITARU_MACHINE_MODE` | Stable, parseable output defaults |
 | `--request-timeout` | none | Per-request timeout (default 30s) |

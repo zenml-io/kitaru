@@ -54,8 +54,16 @@ def evaluate(
     session: SessionView, **params: Any
 ) -> EvaluationResult | list[EvaluationResult]:
     """Evaluate one Kitaru session."""
-    del session, params
-    return EvaluationResult(name="example", passed=True)
+    del params
+    tool_calls = [
+        node for node in session.nodes if node.node_type == "tool_call"
+    ]
+    return EvaluationResult(
+        name="example",
+        score=len(tool_calls),
+        passed=True,
+        explanation=f"Observed {len(tool_calls)} tool call(s).",
+    )
 '''
 
 

@@ -7,10 +7,22 @@
 
 import os
 import time
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from kitaru.api_models.v1.session import (
+    SessionDetailResponse,
+    SessionOrigin,
+    SessionStatus,
+)
+from kitaru.api_models.v1.session_node import (
+    NodeStatus,
+    NodeType,
+    SessionNodeResponse,
+)
 from kitaru.cli import scaffold as scaffold_module
 from kitaru.cli.output import CLIError
 from kitaru.cli.scaffold import (
@@ -22,6 +34,8 @@ from kitaru.cli.scaffold import (
 from kitaru.cli.scaffold import (
     test_importer as run_importer_test,
 )
+from kitaru.task.evaluator import SessionView, call_evaluator
+from kitaru.task.plugins import load_plugin_entrypoint
 
 
 def test_scaffold_refuses_overwrite_and_force_changes_only_target(
@@ -242,3 +256,82 @@ def test_plugin_test_rejects_bad_signature(tmp_path: Path) -> None:
         )
     assert error.value.kind == "invalid_arguments"
     assert error.value.details["returncode"] != 0
+
+
+async def test_evaluator_scaffold_reads_session_nodes_and_validates(
+    tmp_path: Path,
+) -> None:
+    """The scaffolded evaluator validates locally and inspects session.nodes."""
+    target = tmp_path / "quality_evaluator.py"
+
+    scaffolded = scaffold_asset("evaluator", "quality", path=target, force=False)
+    assert scaffolded.item["entrypoint"] == "evaluate"
+
+    tested = run_evaluator_test(target, entrypoint="evaluate", timeout=5)
+    assert tested.item["loaded"] is True
+    assert tested.item["invoked"] is False
+
+    evaluate = load_plugin_entrypoint(target, "evaluate", "Evaluator")
+    now = datetime.now(UTC)
+    session_id = uuid.uuid4()
+    view = SessionView(
+        session=SessionDetailResponse(
+            id=session_id,
+            owner_id=uuid.uuid4(),
+            agent_id=uuid.uuid4(),
+            number=1,
+            origin=SessionOrigin.RECORDED,
+            status=SessionStatus.COMPLETED,
+            inputs={"prompt": "Refund order #42"},
+            outputs={"reply": "Done"},
+            metadata={},
+            llm_call_count=1,
+            tool_call_count=2,
+            created=now,
+            updated=now,
+        ),
+        nodes=[
+            SessionNodeResponse(
+                id=uuid.uuid4(),
+                session_id=session_id,
+                external_id="llm-1",
+                links=[],
+                node_type=NodeType.LLM_CALL,
+                name="chat",
+                status=NodeStatus.COMPLETED,
+                metadata={},
+            ),
+            SessionNodeResponse(
+                id=uuid.uuid4(),
+                session_id=session_id,
+                external_id="tool-1",
+                links=[],
+                node_type=NodeType.TOOL_CALL,
+                name="lookup_order",
+                tool_name="lookup_order",
+                status=NodeStatus.COMPLETED,
+                inputs={"order_id": "42"},
+                outputs={"eligible": True},
+                metadata={},
+            ),
+            SessionNodeResponse(
+                id=uuid.uuid4(),
+                session_id=session_id,
+                external_id="tool-2",
+                links=[],
+                node_type=NodeType.TOOL_CALL,
+                name="refund_payment",
+                tool_name="refund_payment",
+                status=NodeStatus.COMPLETED,
+                inputs={"order_id": "42"},
+                outputs={"accepted": True},
+                metadata={},
+            ),
+        ],
+    )
+
+    [evaluation] = await call_evaluator("quality", evaluate, view, {})
+    assert evaluation.name == "example"
+    assert evaluation.score == 2
+    assert evaluation.passed is True
+    assert evaluation.explanation == "Observed 2 tool call(s)."

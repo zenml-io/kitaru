@@ -85,3 +85,17 @@ def test_negative_blob_limit_is_rejected_at_startup() -> None:
     """Reject invalid settings before the info route can serve requests."""
     with pytest.raises(ValidationError, match="MAX_BLOB_SIZE_BYTES"):
         local_settings(MAX_BLOB_SIZE_BYTES=-1)
+
+
+async def test_evaluation_pair_limit_reports_the_effective_server_limit() -> None:
+    """Report the configured evaluation pair limit to clients."""
+    payload = await _get_info(local_settings(EVALUATION_PAIR_LIMIT=40))
+
+    assert payload["evaluation_pair_limit"] == 40
+
+
+@pytest.mark.parametrize("limit", [0, -5])
+def test_nonpositive_evaluation_pair_limit_is_rejected_at_startup(limit: int) -> None:
+    """Reject nonpositive evaluation pair limits at server startup."""
+    with pytest.raises(ValidationError, match="EVALUATION_PAIR_LIMIT"):
+        local_settings(EVALUATION_PAIR_LIMIT=limit)

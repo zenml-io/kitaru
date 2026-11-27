@@ -21,6 +21,7 @@ from kitaru.api_models.v1.evaluator import EvaluatorCreateRequest
 from kitaru.api_models.v1.importer import ImporterCreateRequest
 from kitaru.cli import app as app_module
 from kitaru.cli import invocation_context
+from kitaru.cli.agents import load_agent_register_spec, normalize_agent_source
 from kitaru.cli.output import CLIError
 from kitaru.cli.registration import (
     PackageSource,
@@ -28,8 +29,6 @@ from kitaru.cli.registration import (
     get_agent_version,
     get_plugin_version,
     list_params,
-    load_agent_register_spec,
-    normalize_agent_source,
     page_result,
     parse_version_reference,
     plugin_parent_request,
@@ -94,7 +93,6 @@ class StubResource:
     async def list(self, params: Any = None) -> Any:
         """Return one configured bounded parent page."""
         assert params is not None
-        assert params.size == 2
         return SimpleNamespace(items=self.items[: params.size], next_cursor=None)
 
     async def get(self, item_id: uuid.UUID) -> StubModel:
@@ -184,6 +182,8 @@ class StubClient:
         self.importers = StubResource()
         self.evaluators = StubResource()
         self.analyzers = StubResource()
+        self.sessions = StubResource()
+        self.cohorts = StubResource()
         self.blobs = StubBlobs()
 
 
@@ -257,17 +257,16 @@ async def test_registration_receipt_returns_fresh_parent(
         assert result.warnings == []
 
 
-def test_agent_source_normalization_accepts_only_explicit_commands() -> None:
-    """Agent registration stores commands and rejects removed entrypoint syntax."""
+def test_agent_source_normalization_accepts_optional_commands() -> None:
+    """Agent registration allows omitting --command and rejects removed entrypoint."""
     assert normalize_agent_source(command="run-agent --fast", entrypoint=None) == (
         "run-agent --fast"
     )
+    assert normalize_agent_source(command=None, entrypoint=None) is None
     with pytest.raises(CLIError, match="not supported"):
         normalize_agent_source(command=None, entrypoint="pkg.agent:run")
     with pytest.raises(CLIError, match="not supported"):
         normalize_agent_source(command="run", entrypoint="pkg.agent:run")
-    with pytest.raises(CLIError, match="requires --command"):
-        normalize_agent_source(command=None, entrypoint=None)
     with pytest.raises(CLIError, match="cannot be blank"):
         normalize_agent_source(command="  ", entrypoint=None)
 
@@ -462,8 +461,79 @@ async def test_uploaded_blob_is_reported_when_version_registration_fails() -> No
         )
 
     assert error.value.kind == "partial_failure"
+    assert "Created the" not in error.value.message
+    assert "Uploaded the importer script blob" in error.value.message
     assert error.value.details["blob"]["id"] == str(client.blobs.blob.id)
-    assert error.value.details["parent"]["id"] == str(parent.id)
+    assert error.value.details["parent"] == {"id": str(parent.id)}
+
+
+@pytest.mark.parametrize("kind", ["importer", "evaluator", "analyzer"])
+async def test_builtin_plugin_version_registration_refuses_before_upload(
+    kind: str,
+) -> None:
+    """Built-in kitaru/ plugins fail as forbidden without uploading a blob."""
+    builtin = StubModel("kitaru/default-plugin")
+    client = StubClient()
+    resource = getattr(client, f"{kind}s")
+    resource.items = [builtin]
+
+    with pytest.raises(CLIError) as error:
+        await register_plugin_version(
+            client,
+            kind=kind,
+            reference="kitaru/default-plugin",
+            source=ScriptSource(Path("plugin.py"), b"script bytes", "run"),
+            display_version=None,
+        )
+
+    assert error.value.kind == "forbidden"
+    assert error.value.exit_code == 3
+    assert "kitaru/default-plugin" in error.value.message
+    assert "read-only" in error.value.message
+    assert f"`kitaru {kind} register`" in error.value.message
+    assert client.blobs.uploads == []
+    assert resource.version_requests == []
+
+
+def test_cli_builtin_plugin_version_register_exits_forbidden_without_upload(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """CLI version registration on a built-in plugin exits 3 and skips upload."""
+    client = StubClient()
+    client.evaluators.items = [StubModel("kitaru/tool-policy")]
+    script = tmp_path / "evaluator.py"
+    script.write_text("def evaluate(sessions, **params):\n    return []\n")
+
+    @asynccontextmanager
+    async def fake_open_client():
+        yield client
+
+    monkeypatch.setattr(invocation_context, "open_asset_client", fake_open_client)
+
+    exit_code = app_module.main(
+        [
+            "evaluator",
+            "version",
+            "register",
+            "kitaru/tool-policy",
+            "--script",
+            str(script),
+            "--entrypoint",
+            "evaluate",
+            "--output",
+            "json",
+        ]
+    )
+
+    assert exit_code == 3
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["error"]["kind"] == "forbidden"
+    assert "kitaru/tool-policy" in payload["error"]["message"]
+    assert "kitaru evaluator register" in payload["error"]["message"]
+    assert client.blobs.uploads == []
+    assert client.evaluators.version_requests == []
 
 
 def test_cli_agent_register_uses_shared_runner_and_output_contract(
@@ -550,7 +620,16 @@ def test_cli_agent_delete_requires_force_before_network_access(
     assert app_module.main(["agent", "delete", str(parent.id), "--force"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["command"] == "agent.delete"
-    assert payload["item"] == {"id": str(parent.id), "deleted": True}
+    assert payload["item"] == {
+        "id": str(parent.id),
+        "name": "demo",
+        "deleted": True,
+        "soft_deleted": True,
+        "retained_sessions": 0,
+        "retained_sessions_truncated": False,
+        "retained_cohorts": 0,
+        "retained_cohorts_truncated": False,
+    }
     assert client.agents.deleted == [parent.id]
 
 
@@ -737,7 +816,7 @@ def test_agent_spec_loading_rejects_unusable_documents(
     [
         ({"sort": "name:asc"}, "--sort must be created:asc or created:desc."),
         ({"size": 0}, "--size must be between 1 and 1000."),
-        ({"filter": "not json"}, "--filter must be a valid JSON filter expression."),
+        ({"filter": "not json"}, "--filter is not valid JSON:"),
     ],
 )
 def test_list_params_name_the_offending_option(
@@ -756,7 +835,7 @@ def test_list_params_name_the_offending_option(
         list_params("agent", **options)
 
     assert raised.value.kind == "invalid_arguments"
-    assert raised.value.message == fragment
+    assert fragment in raised.value.message
 
 
 def test_version_list_params_reject_out_of_range_size() -> None:

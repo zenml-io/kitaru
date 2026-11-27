@@ -17,6 +17,37 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from kitaru.cli.presentation_formatters import (
+    format_analyzer_tasks as _format_analyzer_tasks,
+)
+from kitaru.cli.presentation_formatters import (
+    format_count as _format_count,
+)
+from kitaru.cli.presentation_formatters import (
+    format_evaluation_aggregates as _format_evaluation_aggregates,
+)
+from kitaru.cli.presentation_formatters import (
+    format_evaluator_summary as _format_evaluator_summary,
+)
+from kitaru.cli.presentation_formatters import (
+    format_evaluator_tasks as _format_evaluator_tasks,
+)
+from kitaru.cli.presentation_formatters import (
+    format_progress as _format_progress,
+)
+from kitaru.cli.presentation_formatters import (
+    format_runtime as _format_runtime,
+)
+from kitaru.cli.presentation_formatters import (
+    format_scope as _format_scope,
+)
+from kitaru.cli.presentation_formatters import (
+    format_verdict as _format_verdict,
+)
+from kitaru.cli.presentation_formatters import (
+    format_workers as _format_workers,
+)
+
 HumanFormatter = Callable[[Any], str]
 
 
@@ -48,117 +79,6 @@ class HumanView:
     sections: tuple[HumanSection, ...] = ()
     empty_message: str = "No results found."
     renderer: Literal["default", "doctor", "root", "setup"] = "default"
-
-
-def _format_count(value: Any) -> str:
-    """Format a collection as its item count."""
-    if value is None:
-        return "0"
-    try:
-        return str(len(value))
-    except TypeError:
-        return str(value)
-
-
-def _format_progress(value: Any) -> str:
-    """Format experiment-run progress as completed over total."""
-    if not isinstance(value, dict):
-        return str(value)
-    completed = value.get("completed", 0)
-    failed = value.get("failed", 0)
-    canceled = value.get("canceled", 0)
-    total = value.get("total", 0)
-    settled = completed + failed + canceled
-    return f"{settled}/{total}"
-
-
-def _format_runtime(value: Any) -> str:
-    """Format a worker runtime as a short platform summary."""
-    if not isinstance(value, dict):
-        return str(value)
-    parts = [value.get("platform"), value.get("python_version")]
-    return " / ".join(str(part) for part in parts if part) or "-"
-
-
-def _format_scope(value: Any) -> str:
-    """Format worker claims and their restrictions."""
-    if not isinstance(value, dict):
-        return str(value)
-    claims = [
-        f"{claim['kind']}={claim['agent_version_id']}"
-        if claim.get("agent_version_id")
-        else str(claim["kind"])
-        for claim in value["claims"]
-    ]
-    parts = [", ".join(claims)]
-    for selector in value.get("selectors") or []:
-        presence = "required" if selector["required"] else "if present"
-        parts.append(
-            f"{selector['key']} in [{', '.join(selector['values'])}] ({presence})"
-        )
-    if value.get("job_id"):
-        parts.append(f"job={value['job_id']}")
-    return "; ".join(parts)
-
-
-def _format_workers(value: Any) -> str:
-    """Format live worker identities and scopes."""
-    if value is None:
-        return "unavailable"
-    return (
-        "\n".join(
-            f"{worker['name']} ({worker['id']}): {_format_scope(worker['scope'])}"
-            for worker in value
-        )
-        or "none"
-    )
-
-
-def _format_verdict(value: Any) -> str:
-    """Format a nullable evaluation verdict."""
-    if value is True:
-        return "pass"
-    if value is False:
-        return "fail"
-    return "-"
-
-
-def _format_evaluation_stats(stats: dict[str, Any]) -> str:
-    """Format evaluation counts, mean scores, pass rates, and category totals."""
-    parts = [f"count={stats['count']}"]
-    if stats.get("mean") is not None:
-        parts.append(f"mean score={stats['mean']:g}")
-    if stats.get("pass_rate") is not None:
-        parts.append(f"pass rate={100 * stats['pass_rate']:g}%")
-    if counts := stats.get("value_counts"):
-        categories = ", ".join(f"{name}={count}" for name, count in counts.items())
-        parts.append(f"values: {categories}")
-    return "; ".join(parts)
-
-
-def _format_evaluation_aggregates(value: Any) -> str:
-    """Summarize aggregate groups without including per-replay values."""
-    if not value:
-        return "No evaluation aggregates found."
-    summaries = []
-    for aggregate in value:
-        evaluator = aggregate.get("evaluator_name") or "-"
-        if aggregate.get("evaluator_version") is not None:
-            evaluator += f"@{aggregate['evaluator_version']}"
-        lines = [
-            f"{aggregate['name']} ({aggregate['data_type']})",
-            f"Evaluator: {evaluator}",
-        ]
-        if aggregate.get("evaluator_version_id") is not None:
-            lines.append(f"Evaluator version ID: {aggregate['evaluator_version_id']}")
-        lines.extend(
-            (
-                f"Baseline: {_format_evaluation_stats(aggregate['baseline'])}",
-                f"Result: {_format_evaluation_stats(aggregate['result'])}",
-            )
-        )
-        summaries.append("\n".join(lines))
-    return "\n\n".join(summaries)
 
 
 _ID = HumanField("id", "ID", no_wrap=True)
@@ -250,6 +170,8 @@ _JOB_SECTIONS = (
             HumanField("terminal", "Terminal"),
             HumanField("job.status|run.status|status", "Status"),
             HumanField("job.id|run.id|id", "ID", no_wrap=True),
+            HumanField("batch_count", "Batches"),
+            HumanField("job_ids", "Job IDs"),
         ),
     ),
     HumanSection(
@@ -257,6 +179,26 @@ _JOB_SECTIONS = (
         (
             HumanField("run.progress|summary|stats", "Progress"),
             HumanField("job.error|run.error|error", "Error"),
+        ),
+    ),
+    HumanSection(
+        "Follow-up tasks",
+        (
+            HumanField(
+                "analyzer_tasks",
+                "Analyzers",
+                formatter=_format_analyzer_tasks,
+            ),
+            HumanField(
+                "evaluator_summary",
+                "Evaluators",
+                formatter=_format_evaluator_summary,
+            ),
+            HumanField(
+                "evaluator_tasks",
+                "Evaluator tasks",
+                formatter=_format_evaluator_tasks,
+            ),
         ),
     ),
     HumanSection(
@@ -268,6 +210,7 @@ _JOB_SECTIONS = (
             HumanField("importer", "Importer"),
             HumanField("session_ids", "Sessions"),
             HumanField("evaluators", "Evaluators"),
+            HumanField("analyzers", "Analyzers"),
         ),
     ),
 )
@@ -385,6 +328,28 @@ _VIEWS: dict[str, HumanView] = {
     "agent.list": _build_view("Agents", _ASSET_FIELDS, _ASSET_SECTIONS),
     "agent.get": _build_view("Agent", _ASSET_FIELDS, _ASSET_SECTIONS),
     "agent.register": _build_view("Agent", (), _REGISTRATION_SECTIONS),
+    "agent.delete": _build_view(
+        "Deleted agent",
+        (),
+        (
+            HumanSection(
+                "Summary",
+                (
+                    _NAME,
+                    _ID,
+                    HumanField("deleted", "Deleted"),
+                    HumanField("soft_deleted", "Soft deleted"),
+                ),
+            ),
+            HumanSection(
+                "Retained resources",
+                (
+                    HumanField("retained_sessions", "Sessions"),
+                    HumanField("retained_cohorts", "Cohorts"),
+                ),
+            ),
+        ),
+    ),
     "agent.version.list": _build_view(
         "Agent versions", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
@@ -392,6 +357,30 @@ _VIEWS: dict[str, HumanView] = {
         "Agent version", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
     "agent.version.register": _build_view("Agent version", (), _REGISTRATION_SECTIONS),
+    "agent.version.update": _build_view(
+        "Agent version",
+        _VERSION_FIELDS,
+        (
+            HumanSection(
+                "Summary",
+                (
+                    HumanField("version", "Version"),
+                    HumanField("display_version", "Display version"),
+                    _DESCRIPTION,
+                    _ID,
+                ),
+            ),
+            HumanSection("Timing", (_CREATED, _UPDATED)),
+            HumanSection(
+                "Run spec",
+                (
+                    HumanField("previous_run_spec", "Previous run spec"),
+                    HumanField("run_spec", "Updated run spec"),
+                ),
+            ),
+            HumanSection("Capabilities", (HumanField("capabilities", "Capabilities"),)),
+        ),
+    ),
     "importer.list": _build_view(
         "Importers",
         (
@@ -804,6 +793,18 @@ _VIEWS: dict[str, HumanView] = {
             HumanSection("Metadata", (_METADATA,)),
         ),
     ),
+    "job.list": _build_view(
+        "Jobs",
+        (
+            _STATUS,
+            HumanField("kind", "Kind"),
+            _ID,
+            HumanField("started_at", "Started", 110),
+            HumanField("ended_at", "Ended", 150),
+            HumanField("error", "Error", 190),
+            _CREATED,
+        ),
+    ),
     "job.get": _build_view(
         "Job",
         (_STATUS, _ID),
@@ -832,6 +833,19 @@ _VIEWS: dict[str, HumanView] = {
     "job.watch": _build_view("Job", (_STATUS, _ID), _JOB_SECTIONS),
     "job.cancel": _build_view("Job", (_STATUS, _ID), _JOB_SECTIONS),
     "session.import": _build_view("Import", (), _JOB_SECTIONS),
+    "session.delete": _build_view(
+        "Deleted sessions",
+        (),
+        (
+            HumanSection(
+                "Summary",
+                (
+                    HumanField("deleted_count", "Deleted"),
+                    HumanField("deleted_ids", "Session IDs"),
+                ),
+            ),
+        ),
+    ),
     "session.evaluate": _build_view("Evaluation job", (), _JOB_SECTIONS),
     "experiment.run.start": _build_view("Experiment run", (), _JOB_SECTIONS),
     "experiment.run.watch": _build_view("Experiment run", (), _JOB_SECTIONS),

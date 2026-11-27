@@ -19,7 +19,7 @@ from typing import Any
 
 from kitaru.api_models.v1.agent import AgentListParams
 from kitaru.api_models.v1.agent_version import AgentVersionListParams
-from kitaru.cli import invocation_context, registration
+from kitaru.cli import agents, invocation_context, registration
 from kitaru.cli.command_registry import (
     ASSET_READ_ERRORS,
     ASSET_WRITE_ERRORS,
@@ -44,7 +44,11 @@ _AGENT_SOURCE_PARAMETERS = (
         "combine with direct agent options.",
     ),
     ParameterSpec(
-        "--command", "string", "option", False, "Shell command stored as supplied."
+        "--command",
+        "string",
+        "option",
+        False,
+        "Shell command stored as supplied. Optional for import-only agents.",
     ),
     ParameterSpec(
         "--display-version", "string", "option", False, "Human-readable version."
@@ -53,15 +57,43 @@ _AGENT_SOURCE_PARAMETERS = (
         "--working-dir", "path", "option", False, "Worker process directory."
     ),
     ParameterSpec(
-        "--env", "KEY=VALUE[]", "option", False, "Non-secret process environment."
+        "--env",
+        "KEY=VALUE[]",
+        "option",
+        False,
+        "Non-secret process environment entry; repeat for each variable.",
     ),
-    ParameterSpec("--secret-id", "UUID[]", "option", False, "Server secret IDs."),
+    ParameterSpec(
+        "--secret-id",
+        "UUID[]",
+        "option",
+        False,
+        "Server secret UUID; repeat for each secret.",
+    ),
     ParameterSpec(
         "--timeout-seconds", "positive integer", "option", False, "Process timeout."
     ),
-    ParameterSpec("--tool", "string[]", "option", False, "Declared tools."),
-    ParameterSpec("--mcp-server", "string[]", "option", False, "Declared MCP servers."),
-    ParameterSpec("--skill", "string[]", "option", False, "Declared skills."),
+    ParameterSpec(
+        "--tool",
+        "string[]",
+        "option",
+        False,
+        "Declared tool name; repeat for each tool.",
+    ),
+    ParameterSpec(
+        "--mcp-server",
+        "string[]",
+        "option",
+        False,
+        "Declared MCP server; repeat for each server.",
+    ),
+    ParameterSpec(
+        "--skill",
+        "string[]",
+        "option",
+        False,
+        "Declared skill name; repeat for each skill.",
+    ),
 )
 
 
@@ -159,11 +191,9 @@ async def agent_register(
                     "options."
                 ),
             )
-        parent_request, version_request = registration.load_agent_register_spec(
-            name, spec
-        )
+        parent_request, version_request = agents.load_agent_register_spec(name, spec)
     else:
-        parent_request, version_request = registration.build_agent_requests(
+        parent_request, version_request = agents.build_agent_requests(
             name,
             command=command,
             entrypoint=None,
@@ -232,7 +262,9 @@ async def agent_get(agent: str, /) -> CommandResult:
     agent_app,
     build_spec(
         ("agent", "delete"),
-        "Soft delete an agent.",
+        "Soft delete an agent. Hides the agent from listings and prevents new "
+        "runs, while retaining its existing sessions, versions, cohorts, "
+        "investigations, and imports under the old agent ID.",
         parameters=(
             ParameterSpec(
                 "AGENT", "reference", "argument", True, "Agent UUID or name."
@@ -252,9 +284,7 @@ async def agent_delete(agent: str, /, *, force: bool = False) -> CommandResult:
     if not force:
         raise CLIError("invalid_arguments", "Deleting an agent requires --force.")
     async with invocation_context.open_asset_client() as client:
-        item = await registration.resolve_asset(client.agents, agent, "Agent")
-        await client.agents.delete(item.id)
-        return CommandResult(item={"id": str(item.id), "deleted": True})
+        return await agents.delete_agent(client, agent, force=force)
 
 
 @register_command(
@@ -317,9 +347,9 @@ async def agent_version_register(
                     "spec, or omit --spec and use direct options."
                 ),
             )
-        request = registration.load_agent_version_spec(spec)
+        request = agents.load_agent_version_spec(spec)
     else:
-        request = registration.build_agent_version_request(
+        request = agents.build_agent_version_request(
             command=command,
             entrypoint=None,
             description=description,
@@ -392,3 +422,64 @@ async def agent_version_get(agent_version: str, /) -> CommandResult:
     async with invocation_context.open_asset_client() as client:
         _, version = await registration.get_agent_version(client, agent_version)
         return CommandResult(item=version.model_dump(mode="json"))
+
+
+@register_command(
+    agent_version_app,
+    build_spec(
+        ("agent", "version", "update"),
+        "Update an agent version in place. Updating a version in place changes "
+        "what recorded replays and experiments run against; prefer registering "
+        "a new version for code changes.",
+        parameters=(
+            ParameterSpec(
+                "AGENT@VERSION",
+                "reference",
+                "argument",
+                True,
+                "Exact version reference.",
+            ),
+            ParameterSpec(
+                "--description", "string", "option", False, "Version description."
+            ),
+            *_AGENT_SOURCE_PARAMETERS,
+        ),
+        read_only=False,
+        side_effects=("reads_local_file", "mutates_remote_state"),
+        idempotency="idempotent replacement",
+        errors=ASSET_WRITE_ERRORS,
+    ),
+)
+async def agent_version_update(
+    agent_version: str,
+    /,
+    *,
+    spec: Path | None = None,
+    command: str | None = None,
+    description: str | None = None,
+    display_version: str | None = None,
+    working_dir: str | None = None,
+    env: list[str] | None = None,
+    secret_id: list[uuid.UUID] | None = None,
+    timeout_seconds: int | None = None,
+    tool: list[str] | None = None,
+    mcp_server: list[str] | None = None,
+    skill: list[str] | None = None,
+) -> CommandResult:
+    """Update one exact agent version in place."""
+    async with invocation_context.open_asset_client() as client:
+        return await agents.update_agent_version(
+            client,
+            agent_version,
+            spec=spec,
+            command=command,
+            description=description,
+            display_version=display_version,
+            working_dir=working_dir,
+            env=env,
+            secret_ids=secret_id,
+            timeout_seconds=timeout_seconds,
+            tools=tool,
+            mcp_servers=mcp_server,
+            skills=skill,
+        )

@@ -36,10 +36,18 @@ _CONNECTION_REFERENCE_PARAMETER = ParameterSpec(
 )
 _CONNECTION_VALUE_PARAMETERS = (
     ParameterSpec(
-        "--set", "KEY=VALUE[]", "option", False, "Non-secret environment value."
+        "--set",
+        "KEY=VALUE[]",
+        "option",
+        False,
+        "Non-secret environment value; repeat for each key.",
     ),
     ParameterSpec(
-        "--set-secret", "KEY=VALUE[]", "option", False, "Sensitive environment value."
+        "--set-secret",
+        "KEY=VALUE[]",
+        "option",
+        False,
+        "Sensitive environment value; repeat for each key.",
     ),
 )
 
@@ -49,14 +57,16 @@ _CONNECTION_UPDATE_VALUE_PARAMETERS = (
         "KEY=VALUE[]",
         "option",
         False,
-        "Non-secret environment value. Keeps the other stored values.",
+        "Non-secret environment value; repeat for each key. Keeps the other stored "
+        "values.",
     ),
     ParameterSpec(
         "--set-secret",
         "KEY=VALUE[]",
         "option",
         False,
-        "Sensitive environment value. Replaces all stored secret values.",
+        "Sensitive environment value; repeat for each key. Replaces all stored "
+        "secret values.",
     ),
 )
 

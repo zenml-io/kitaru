@@ -29,7 +29,7 @@ Each run record is read for the fields LangSmith already writes: `id`, `trace_id
 Register the agent these runs belong to, if you have not, then start a [worker](../concepts/workers.md) in another terminal (`kitaru worker start`) and import:
 
 ```bash
-kitaru agent register support-agent --command "python support.py"
+kitaru agent register support-agent
 
 kitaru session import langsmith-runs.jsonl \
   --importer kitaru/langsmith@latest \

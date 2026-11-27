@@ -66,7 +66,10 @@ class AgentVersionWithoutRunSpec(ValidationError):
         Args:
             agent_version_id: Id of the agent version.
         """
-        super().__init__(f"Agent version {agent_version_id} has no run spec")
+        super().__init__(
+            f"Agent version {agent_version_id} has no run spec; "
+            "register or update a version with --command to replay it."
+        )
 
 
 class AgentVersionAgentMismatch(ValidationError):

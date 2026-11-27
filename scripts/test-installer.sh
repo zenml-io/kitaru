@@ -16,7 +16,7 @@ export XDG_CONFIG_HOME="$TMP/config" XDG_DATA_HOME="$TMP/data"
 export XDG_CACHE_HOME="$TMP/xdg-cache"
 export UV_OFFLINE=1 UV_PYTHON_DOWNLOADS=never UV_NO_CONFIG=1
 export UV_PYTHON_INSTALL_DIR="$PYTHON_INSTALL_DIR"
-export UV_NO_INDEX=1 UV_FIND_LINKS="$TMP/wheels"
+export UV_FIND_LINKS="$TMP/wheels"
 unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT UV_PYTHON UV_PROJECT UV_WORKING_DIR UV_CONSTRAINT UV_FROZEN UV_NO_SYNC KITARU_PYTHON
 mkdir -p "$TMP/wheels"
 # This is an installer fixture, not a test of the real Kitaru package.

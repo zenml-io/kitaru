@@ -353,6 +353,66 @@ def test_annotation_json_redacts_nested_secret_fields() -> None:
     }
 
 
+def test_cli_output_preserves_provider_token_counts_and_masks_secrets() -> None:
+    """CLI output preserves numeric provider token counts and masks credentials."""
+    item = {
+        "usage": {
+            "input_tokens": 10,
+            "cache_read_tokens": 5,
+            "total_tokens": 15,
+            "request_tokens": 3,
+        },
+        "model_settings": {"max_tokens": 1024},
+        "metadata": {
+            "api_key": "KITKEY_secret",
+            "access_token": "secret-access",
+            "access_tokens": 123,
+            "github_token": 789,
+            "max_tokens": "not-a-count",
+        },
+    }
+    stdout = io.StringIO()
+    token = set_output_context(
+        OutputContext(
+            command="session.get",
+            mode="json",
+            debug=False,
+            traceback=False,
+            stdout=stdout,
+            stderr=io.StringIO(),
+            rich=False,
+        )
+    )
+    try:
+        emit_result(CommandResult(item=item))
+    finally:
+        reset_output_context(token)
+
+    assert json.loads(stdout.getvalue())["item"] == {
+        "usage": {
+            "input_tokens": 10,
+            "cache_read_tokens": 5,
+            "total_tokens": 15,
+            "request_tokens": 3,
+        },
+        "model_settings": {"max_tokens": 1024},
+        "metadata": {
+            "api_key": "***",
+            "access_token": "***",
+            "access_tokens": "***",
+            "github_token": "***",
+            "max_tokens": "***",
+        },
+    }
+
+    text_out, _ = render_text("session.get", CommandResult(item=item), rich=False)
+    assert '"cache_read_tokens": 5' in text_out
+    assert '"max_tokens": 1024' in text_out
+    assert "KITKEY_secret" not in text_out
+    assert "secret-access" not in text_out
+    assert "not-a-count" not in text_out
+
+
 @pytest.mark.parametrize(
     ("columns", "shown", "hidden"),
     [
@@ -861,6 +921,20 @@ def test_human_not_found_outside_listable_groups_has_no_hint() -> None:
     )
 
     assert "Try:" not in rendered
+
+
+def test_forbidden_error_uses_forbidden_title_and_exit_code() -> None:
+    """Forbidden errors exit 3 and do not falsely suggest `kitaru login`."""
+    assert ERROR_EXIT_CODES["forbidden"] == 3
+    rendered = _emit_error_to(
+        "evaluator.version.register",
+        CLIError("forbidden", "kitaru/default is read-only."),
+        rich=True,
+    )
+
+    assert "Error: Forbidden" in rendered
+    assert "kitaru/default is read-only." in rendered
+    assert "kitaru login" not in rendered
 
 
 def test_human_setup_renders_steps_and_the_manual_mcp_snippet() -> None:

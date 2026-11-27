@@ -249,6 +249,16 @@ class StubEvaluationClient:
         self.connections = self._Connections(self)
         self.selected_sessions = [SimpleNamespace(id=uuid.uuid4())]
         self.sessions = self._Sessions(self)
+        self.info = self._Info()
+
+    class _Info:
+        def __init__(self, evaluation_pair_limit: int | None = 100) -> None:
+            self.evaluation_pair_limit = evaluation_pair_limit
+            self.calls = 0
+
+        async def get(self) -> Any:
+            self.calls += 1
+            return SimpleNamespace(evaluation_pair_limit=self.evaluation_pair_limit)
 
     class _Connections:
         def __init__(self, owner: "StubEvaluationClient") -> None:
@@ -535,8 +545,8 @@ async def test_evaluate_sessions_builds_one_exact_cartesian_request(
     ]
 
 
-async def test_evaluate_sessions_does_not_enforce_or_batch_pair_cap() -> None:
-    """The CLI discloses a large pair count and submits exactly one request."""
+async def test_evaluate_sessions_splits_requests_above_pair_cap() -> None:
+    """Selections above the server pair cap split into sequential batch jobs."""
     client = StubEvaluationClient()
     session_ids = [str(uuid.uuid4()) for _ in range(101)]
 
@@ -552,8 +562,9 @@ async def test_evaluate_sessions_does_not_enforce_or_batch_pair_cap() -> None:
     )
 
     assert result.item["pair_count"] == 101
-    assert len(client.requests) == 1
-    assert len(client.requests[0].input_session_ids) == 101
+    assert result.item["batch_count"] == 2
+    assert len(client.requests) == 2
+    assert [len(request.input_session_ids) for request in client.requests] == [100, 1]
 
 
 async def test_evaluate_sessions_selects_all_sessions_with_tag() -> None:

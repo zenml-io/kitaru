@@ -142,6 +142,20 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     names = {parameter["name"] for parameter in agent_register["parameters"]}
     assert "--command" in names
     assert "--entrypoint" not in names
+    spec_param = next(
+        parameter
+        for parameter in agent_register["parameters"]
+        if parameter["name"] == "--spec"
+    )
+    assert "cannot combine" in spec_param["description"].lower()
+
+    [agent_version_update] = describe_schema(("agent", "version", "update"))
+    assert agent_version_update["read_only"] is False
+    assert agent_version_update["side_effects"]["mutates_remote_state"] is True
+    assert "replays" in agent_version_update["description"]
+
+    [agent_delete] = describe_schema(("agent", "delete"))
+    assert "retaining" in agent_delete["description"]
 
     [importer_scaffold] = describe_schema(("importer", "scaffold"))
     assert importer_scaffold["side_effects"]["writes_local_file"] is True
@@ -217,6 +231,7 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     session_commands = {item["command"]: item for item in describe_schema(("session",))}
     assert set(session_commands) == {
         "session.analyze",
+        "session.delete",
         "session.evaluate",
         "session.get",
         "session.import",
@@ -227,8 +242,18 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert all(
         command["read_only"]
         for name, command in session_commands.items()
-        if name not in {"session.analyze", "session.evaluate", "session.import"}
+        if name
+        not in {
+            "session.analyze",
+            "session.delete",
+            "session.evaluate",
+            "session.import",
+        }
     )
+    session_delete = session_commands["session.delete"]
+    assert session_delete["read_only"] is False
+    assert session_delete["side_effects"]["deletes_remote_state"] is True
+    assert session_delete["side_effects"]["mutates_remote_state"] is True
     session_import = session_commands["session.import"]
     assert session_import["read_only"] is False
     assert session_import["streams"] is True
@@ -252,6 +277,7 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
         "--wait",
         "--interval",
         "--timeout",
+        "--fail-on-failures",
     } <= set(import_parameters)
     import_errors = {error["kind"] for error in session_import["errors"]}
     assert {
@@ -281,7 +307,12 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
         "--timeout",
     } <= set(evaluate_parameters)
     evaluate_errors = {error["kind"] for error in session_evaluate["errors"]}
-    assert {"timeout", "remote_failed", "remote_canceled"} <= evaluate_errors
+    assert {
+        "partial_failure",
+        "timeout",
+        "remote_failed",
+        "remote_canceled",
+    } <= evaluate_errors
 
     node_parameters = {
         parameter["name"]
@@ -337,6 +368,10 @@ def test_cohort_schema_describes_exact_and_destructive_commands() -> None:
     }
     assert parameters["--baseline"]["type"] == "UUID"
     assert parameters["--baseline"]["required"] is False
+    assert parameters["--add-sessions-file"]["type"] == "path"
+    assert parameters["--remove-sessions-file"]["type"] == "path"
+    assert "repeat" in parameters["--add-session"]["description"].lower()
+    assert "repeat" in parameters["--remove-session"]["description"].lower()
     assert commands["cohort.update"]["idempotency"] == "idempotent replacement"
     assert commands["cohort.version.update"]["idempotency"] == (
         "idempotent replacement"
@@ -501,14 +536,44 @@ def test_help_exposes_only_the_schema_command_surface(capsys) -> None:
     assert "JSONL is streaming-only" in help_text
 
     assert app_module.main(["session", "list", "--help"]) == 0
-    help_text = capsys.readouterr().out
+    help_text = _normalize_help_text(capsys.readouterr().out)
     assert "Items per page" in help_text
-    assert "page.next_cursor" in help_text
-    assert "created:asc or created:desc" in help_text
+    assert "Cursor from the previous page (page.next_cursor in CLI JSON output)." in (
+        help_text
+    )
+    assert "created, started_at, or number" in help_text
+    assert ":asc or :desc" in help_text
     assert "JSON filter expression" in help_text
+
+    assert app_module.main(["agent", "list", "--help"]) == 0
+    agent_help_text = _normalize_help_text(capsys.readouterr().out)
+    assert "created:asc or created:desc" in agent_help_text
+
+    assert app_module.main(["session", "nodes", "--help"]) == 0
+    nodes_help = _normalize_help_text(capsys.readouterr().out)
+    assert "page.next_cursor in CLI JSON output" in nodes_help
+
+    assert app_module.main(["experiment", "update", "--help"]) == 0
+    exp_help = _normalize_help_text(capsys.readouterr().out)
+    assert (
+        "Fixed once the experiment has runs; create a new experiment with the new "
+        "settings."
+    ) in exp_help
+
+    assert app_module.main(["worker", "start", "--help"]) == 0
+    worker_help = _normalize_help_text(capsys.readouterr().out)
+    assert (
+        "Any --claim replaces the default claims (agent, evaluator, importer, "
+        "analyzer). agent=ID serves only that version."
+    ) in worker_help
 
     [job_get] = describe_schema(("job", "get"))
     assert job_get["side_effects"]["reads_local_file"] is True
+
+
+def _normalize_help_text(output: str) -> str:
+    """Strip Rich table borders and collapse line wraps in rendered CLI help."""
+    return " ".join(output.replace("│", " ").split())
 
 
 def test_run_aggregate_help_and_schema_skip_configuration(
