@@ -21,7 +21,16 @@ from typing import Annotated
 from cyclopts import Parameter
 
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
-from kitaru.cli import evaluations, imports, invocation_context, registration, sessions
+from kitaru.cli import (
+    evaluations,
+    imports,
+    invocation_context,
+    registration,
+    sessions,
+)
+from kitaru.cli import (
+    session_delete as session_delete_module,
+)
 from kitaru.cli.command_registry import (
     ASSET_READ_ERRORS,
     ASSET_WRITE_ERRORS,
@@ -923,7 +932,7 @@ async def session_delete(
 ) -> CommandResult:
     """Delete one or more sessions selected by ID, file, or filter."""
     if not force:
-        return await sessions.delete_sessions(
+        return await session_delete_module.delete_sessions(
             None,
             session,
             sessions_file=sessions_file,
@@ -931,7 +940,7 @@ async def session_delete(
             force=force,
         )
     async with invocation_context.open_asset_client() as client:
-        return await sessions.delete_sessions(
+        return await session_delete_module.delete_sessions(
             client,
             session,
             sessions_file=sessions_file,
