@@ -389,6 +389,7 @@ async def test_analyzer_flow_end_to_end(
     assert written[0]["name"] == "session-ids"
     assert written[0]["title"] == "Session IDs"
     assert written[0]["findings"][0]["artifacts"][0] == {
+        "title": None,
         "type": "text",
         "style": "body",
         "label": None,
