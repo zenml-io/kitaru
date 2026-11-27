@@ -1,0 +1,1 @@
+- The post-import insights model mix card now leads to comparing candidate models on the import's recorded calls for quality, cost, speed, and openness, through the `kitaru-model-swap` skill and `kitaru/model-swap` analyzer.

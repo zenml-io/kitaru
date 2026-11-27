@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Point the model mix card at choosing the right model: its description, button label ("Investigate model choice") and briefing now lead to comparing candidate models on the analyzed sessions' recorded calls with the `kitaru-model-swap` skill instead of a single replay.
+- Bump the analysis version to `2026-11-18.1` because the model mix briefing changed after 0.5.0, and the briefing text is part of each candidate's content hash.
+
 ## 0.5.0 - 2026-11-25
 
 - Accept any sessions that belong to one agent, including live-recorded sessions and sessions from several imports. When every session comes from the same import, the cards and copied investigation prompt still name that import and its provider; otherwise the prompt omits the import line.

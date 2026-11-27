@@ -113,7 +113,7 @@ def test_parses_ui_jsonl_and_reconstructs_out_of_order_graph() -> None:
                 "gen_ai.usage.input_tokens": 42,
                 "gen_ai.usage.output_tokens": 8,
                 "operation.cost": 0.00012,
-                "model_request_parameters": {"temperature": 0},
+                "gen_ai.request.parameters": {"temperature": 0},
             },
         ),
         span(

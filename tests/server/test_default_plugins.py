@@ -82,6 +82,22 @@ def test_post_import_analyzer_is_registered_from_plugin_package() -> None:
     assert definition.connection_schema is None
 
 
+def test_model_swap_analyzer_is_registered_from_plugin_package() -> None:
+    """The model-swap analyzer reads candidate keys from a provider connection."""
+    definition = next(
+        item
+        for item in DEFAULT_PLUGIN_DEFINITIONS
+        if item.kind is PluginKind.ANALYZER and item.name == "kitaru/model-swap"
+    )
+    assert definition.entrypoint == "kitaru_model_swap.analyzer:analyze_model_swap"
+    assert definition.requirement == "kitaru-model-swap==0.1.0"
+    assert definition.display_version == "0.1.0"
+    assert definition.provider == "model-swap"
+    # Candidates name their own key variables, so no fixed schema applies and
+    # no worker credential selector is required.
+    assert definition.connection_schema is None
+
+
 def test_openai_post_import_analyzer_has_separate_entrypoint_and_credentials() -> None:
     """Expose OpenAI generation as a selectable provider-backed analyzer."""
     definition = next(

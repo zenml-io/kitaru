@@ -15,13 +15,21 @@
 
 import uuid
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
+
+from cyclopts import Parameter
 
 from kitaru.api_models.v1.investigation import (
     InvestigationSessionVerdict,
     InvestigationStatus,
 )
-from kitaru.cli import annotations, insights, investigations, invocation_context
+from kitaru.cli import (
+    annotations,
+    insight_report,
+    insights,
+    investigations,
+    invocation_context,
+)
 from kitaru.cli.command_registry import (
     ASSET_READ_ERRORS,
     ASSET_WRITE_ERRORS,
@@ -265,6 +273,50 @@ async def insight_delete(
     """Delete one insight by UUID."""
     async with invocation_context.open_asset_client() as client:
         return await insights.delete_insight(client, insight, force=force)
+
+
+@register_command(
+    insight_app,
+    build_spec(
+        ("insight", "report"),
+        "Render an import's or analysis task's insights as a self-contained HTML file.",
+        parameters=(
+            ParameterSpec(
+                "--import-id",
+                "UUID",
+                "option",
+                False,
+                "Import whose insights to render.",
+            ),
+            ParameterSpec(
+                "--task-id",
+                "UUID",
+                "option",
+                False,
+                "Analysis task whose insights to render, for analyses started "
+                "with `kitaru session analyze`.",
+            ),
+            ParameterSpec(
+                "--out", "path", "option", False, "HTML file to write (report.html)."
+            ),
+        ),
+        read_only=False,
+        side_effects=("writes_local_file",),
+        idempotency="idempotent",
+        errors=UUID_READ_ERRORS,
+    ),
+)
+async def insight_report_command(
+    *,
+    import_id: Annotated[uuid.UUID | None, Parameter(name="--import-id")] = None,
+    task_id: Annotated[uuid.UUID | None, Parameter(name="--task-id")] = None,
+    out: Annotated[Path, Parameter(name="--out")] = Path("report.html"),
+) -> CommandResult:
+    """Render the insights of one import or analysis task to an HTML file."""
+    async with invocation_context.open_asset_client() as client:
+        return await insight_report.write_insight_report(
+            client, import_id=import_id, task_id=task_id, out=out
+        )
 
 
 @register_command(

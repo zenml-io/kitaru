@@ -70,7 +70,7 @@ _CTA_LABELS = {
     "model-call-distribution": "Investigate model call counts",
     "total-activity-distribution": "Investigate recorded activity",
     "recorded-duration-distribution": "Investigate session duration",
-    "model-mix": "Investigate model mix",
+    "model-mix": "Investigate model choice",
     "cost-concentration": "Investigate cost concentration",
     "component-time-share": "Investigate where time goes",
     "context-growth": "Investigate context growth",
