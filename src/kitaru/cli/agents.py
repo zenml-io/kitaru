@@ -15,8 +15,12 @@
 
 import json
 import uuid
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
+
+from httpx import TransportError
+from pydantic import ValidationError
 
 from kitaru.api_models.v1.agent import AgentCreateRequest
 from kitaru.api_models.v1.agent_version import (
@@ -37,8 +41,17 @@ from kitaru.cli.registration import (
 )
 from kitaru.cli.registration_spec import AgentParentSpec as AgentParentSpec
 from kitaru.cli.registration_spec import AgentRegistrationSpec as AgentRegistrationSpec
+from kitaru.client.exceptions import APIError, InvalidServerResponseError
 
 _RETENTION_COUNT_LIMIT = 1000
+_RETENTION_QUERY_ERRORS = (
+    APIError,
+    JSONDecodeError,
+    InvalidServerResponseError,
+    ValidationError,
+    TransportError,
+    TimeoutError,
+)
 
 
 def normalize_agent_source(
@@ -348,6 +361,33 @@ def _build_version_update_result(existing: Any, updated: Any) -> CommandResult:
     return CommandResult(item=item)
 
 
+async def _count_retained_resources(
+    resource: Any,
+    params: Any,
+    *,
+    agent_id: uuid.UUID,
+    label: str,
+) -> tuple[int | None, bool | None, str | None]:
+    """Count retained resources on a best-effort basis after soft deletion."""
+    try:
+        page = await resource.list(params)
+    except _RETENTION_QUERY_ERRORS:
+        return (
+            None,
+            None,
+            f"Agent {agent_id} was deleted, but retained {label} could not be counted.",
+        )
+    count = len(page.items)
+    truncated = page.next_cursor is not None
+    warning = (
+        f"More than {_RETENTION_COUNT_LIMIT} {label} remain under deleted agent "
+        f"{agent_id}."
+        if truncated
+        else None
+    )
+    return count, truncated, warning
+
+
 async def delete_agent(client: Any, reference: str, *, force: bool) -> CommandResult:
     """Soft delete an agent and report bounded counts of retained resources."""
     if not force:
@@ -356,38 +396,37 @@ async def delete_agent(client: Any, reference: str, *, force: bool) -> CommandRe
     await client.agents.delete(item.id)
 
     agent_filter = FilterCondition(field="agent_id", op=FilterOp.EQ, value=str(item.id))
-    sessions_page = await client.sessions.list(
-        SessionListParams(size=_RETENTION_COUNT_LIMIT, filter=agent_filter)
+    (
+        retained_sessions,
+        retained_sessions_truncated,
+        sessions_warning,
+    ) = await _count_retained_resources(
+        client.sessions,
+        SessionListParams(size=_RETENTION_COUNT_LIMIT, filter=agent_filter),
+        agent_id=item.id,
+        label="sessions",
     )
-    cohorts_page = await client.cohorts.list(
-        CohortListParams(size=_RETENTION_COUNT_LIMIT, filter=agent_filter)
+    (
+        retained_cohorts,
+        retained_cohorts_truncated,
+        cohorts_warning,
+    ) = await _count_retained_resources(
+        client.cohorts,
+        CohortListParams(size=_RETENTION_COUNT_LIMIT, filter=agent_filter),
+        agent_id=item.id,
+        label="cohorts",
     )
-    retained_sessions = len(sessions_page.items)
-    retained_sessions_truncated = sessions_page.next_cursor is not None
-    retained_cohorts = len(cohorts_page.items)
-    retained_cohorts_truncated = cohorts_page.next_cursor is not None
-
-    warnings: list[str] = []
-    if retained_sessions_truncated:
-        warnings.append(
-            f"More than {_RETENTION_COUNT_LIMIT} sessions remain under deleted agent "
-            f"{item.id}."
-        )
-    if retained_cohorts_truncated:
-        warnings.append(
-            f"More than {_RETENTION_COUNT_LIMIT} cohorts remain under deleted agent "
-            f"{item.id}."
-        )
+    warnings = [w for w in (sessions_warning, cohorts_warning) if w is not None]
 
     filter_json = json.dumps(
         {"field": "agent_id", "op": "eq", "value": str(item.id)},
         separators=(",", ":"),
     )
     next_actions: list[str] = []
-    if retained_sessions > 0:
+    if retained_sessions is None or retained_sessions > 0:
         next_actions.append(f"kitaru session list --filter '{filter_json}'")
         next_actions.append(f"kitaru session delete --filter '{filter_json}' --force")
-    if retained_cohorts > 0:
+    if retained_cohorts is None or retained_cohorts > 0:
         next_actions.append(f"kitaru cohort list --filter '{filter_json}'")
 
     return CommandResult(

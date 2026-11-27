@@ -35,6 +35,7 @@ from kitaru.api_models.v1.agent_version import (
 from kitaru.cli import app as app_module
 from kitaru.cli import invocation_context
 from kitaru.cli.output import CommandResult
+from kitaru.client.exceptions import APIError
 from kitaru.server.domain.agent_version import AgentVersionWithoutRunSpec
 
 
@@ -95,6 +96,8 @@ class StubAgentClient:
         self.cohort_next_cursor: str | None = None
         self.session_list_calls: list[Any] = []
         self.cohort_list_calls: list[Any] = []
+        self.session_list_error: Exception | None = None
+        self.cohort_list_error: Exception | None = None
 
         self.agents = self._Agents(self)
         self.agent_versions = self._AgentVersions(self)
@@ -172,6 +175,8 @@ class StubAgentClient:
 
         async def list(self, params: Any) -> Any:
             self.owner.session_list_calls.append(params)
+            if self.owner.session_list_error is not None:
+                raise self.owner.session_list_error
             return SimpleNamespace(
                 items=self.owner.session_items,
                 next_cursor=self.owner.session_next_cursor,
@@ -183,6 +188,8 @@ class StubAgentClient:
 
         async def list(self, params: Any) -> Any:
             self.owner.cohort_list_calls.append(params)
+            if self.owner.cohort_list_error is not None:
+                raise self.owner.cohort_list_error
             return SimpleNamespace(
                 items=self.owner.cohort_items,
                 next_cursor=self.owner.cohort_next_cursor,
@@ -576,6 +583,44 @@ def test_agent_delete_reports_retained_counts_warnings_and_cleanup_actions(
         "retained_cohorts_truncated": False,
     }
     assert any("More than 1000 sessions" in w for w in payload["warnings"])
+    expected_filter = f'{{"field":"agent_id","op":"eq","value":"{agent.id}"}}'
+    assert (
+        f"kitaru session delete --filter '{expected_filter}' --force"
+        in payload["next_actions"]
+    )
+    assert f"kitaru cohort list --filter '{expected_filter}'" in payload["next_actions"]
+    assert client.deleted_agents == [agent.id]
+
+
+def test_agent_delete_preserves_receipt_when_retention_queries_fail(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Retention-count query failures still return the completed deletion receipt."""
+    agent = _agent("support-agent")
+    client = StubAgentClient(agent)
+    client.session_list_error = TimeoutError("timed out")
+    client.cohort_list_error = APIError(503, "unavailable")
+    _patch_client(monkeypatch, client)
+
+    assert app_module.main(["agent", "delete", "support-agent", "--force"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "agent.delete"
+    assert payload["item"] == {
+        "id": str(agent.id),
+        "name": "support-agent",
+        "deleted": True,
+        "soft_deleted": True,
+        "retained_sessions": None,
+        "retained_sessions_truncated": None,
+        "retained_cohorts": None,
+        "retained_cohorts_truncated": None,
+    }
+    assert any(
+        "retained sessions could not be counted" in w for w in payload["warnings"]
+    )
+    assert any(
+        "retained cohorts could not be counted" in w for w in payload["warnings"]
+    )
     expected_filter = f'{{"field":"agent_id","op":"eq","value":"{agent.id}"}}'
     assert (
         f"kitaru session delete --filter '{expected_filter}' --force"
