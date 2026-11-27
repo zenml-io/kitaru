@@ -551,15 +551,17 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             session_id,
             {
                 COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
-                    session_id
+                    session_id, "a cohort version"
                 ),
                 INVESTIGATION_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
-                    session_id
+                    session_id, "an investigation"
                 ),
                 REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
-                    session_id
+                    session_id, "a replay (as baseline session)"
                 ),
-                REPLAY_RESULT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(session_id),
+                REPLAY_RESULT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
+                    session_id, "a replay (as result session)"
+                ),
             },
         )
 
