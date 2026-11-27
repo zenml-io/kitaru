@@ -151,7 +151,10 @@ async def test_background_sweep_cancels_an_unclaimed_pending_job() -> None:
         job_after = await _wait_until(
             client, f"/api/v1/jobs/{job['id']}", "status", "canceled"
         )
-        assert job_after["error"] == "Job was not claimed within 1 seconds"
+        assert job_after["error"] == (
+            "No worker picked up this job within 1 second. Check that a worker "
+            "is running with the right --claim flags."
+        )
 
         tasks_after = (await client.get(f"/api/v1/jobs/{job['id']}/tasks")).json()
         assert all(task["status"] == "canceled" for task in tasks_after["items"])

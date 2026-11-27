@@ -412,6 +412,25 @@ async def test_list_expired_pending_job_ids(services: JobAndTaskServices) -> Non
     )
 
 
+@pytest.mark.parametrize(
+    ("timeout_seconds", "waited"),
+    [
+        (1, "1 second"),
+        (45, "45 seconds"),
+        (60, "1 minute"),
+        (3600, "60 minutes"),
+    ],
+)
+def test_pending_timeout_error_uses_minutes_when_even(
+    timeout_seconds: int, waited: str
+) -> None:
+    """Unclaimed-job timeouts name minutes when the wait divides evenly."""
+    assert pending_timeout_error(timeout_seconds) == (
+        f"No worker picked up this job within {waited}. Check that a worker "
+        f"is running with the right --claim flags."
+    )
+
+
 async def test_expire_pending_job_cancels_tasks_and_settles_canceled(
     services: JobAndTaskServices,
 ) -> None:
