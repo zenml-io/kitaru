@@ -9,7 +9,7 @@ A [replay](replay.md) is one counterfactual. An **experiment** is that counterfa
 
 The split of responsibilities is deliberate:
 
-- The **experiment** holds the _change_: an override (model, prompt, params), a tool policy, and the evaluator list. It is reusable.
+- The **experiment** holds the _change_: an override (model, prompt, params), a tool policy, and the evaluator list. It is reusable. Once an experiment has runs, its replay config (override, tool policy, and evaluators) is frozen; create a new experiment to test different settings.
 - An **experiment run** supplies the _population and the code_: one cohort version and one agent version. Run the same experiment against next week's cohort version, or the same cohort against your PR's agent version.
 
 ```python

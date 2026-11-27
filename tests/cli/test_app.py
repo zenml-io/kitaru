@@ -791,6 +791,7 @@ def test_agent_spec_conflicts_with_direct_options(argv: list[str], capsys) -> No
     ("exception", "kind", "retryable"),
     [
         (APIError(401, "expired token"), "authentication_failed", False),
+        (APIError(403, "read-only plugin"), "forbidden", False),
         (APIError(409, "name already exists"), "conflict", False),
         (APIError(503, "upstream unavailable"), "network_error", True),
         (APIError(418, "teapot"), "internal_error", False),
@@ -845,3 +846,122 @@ def test_option_type_conversion_failure_is_invalid_arguments(capsys) -> None:
     error = json.loads(captured.err)["error"]
     assert error["kind"] == "invalid_arguments"
     assert "--size" in error["message"]
+
+
+@pytest.mark.parametrize(
+    ("argv", "option", "first", "second"),
+    [
+        (
+            [
+                "cohort",
+                "version",
+                "create",
+                "regression",
+                "--add-session",
+                "00000000-0000-0000-0000-000000000001",
+                "00000000-0000-0000-0000-000000000002",
+            ],
+            "--add-session",
+            "00000000-0000-0000-0000-000000000001",
+            "00000000-0000-0000-0000-000000000002",
+        ),
+        (
+            [
+                "cohort",
+                "version",
+                "create",
+                "regression",
+                "--add-session=00000000-0000-0000-0000-000000000001",
+                "00000000-0000-0000-0000-000000000002",
+            ],
+            "--add-session",
+            "00000000-0000-0000-0000-000000000001",
+            "00000000-0000-0000-0000-000000000002",
+        ),
+        (
+            [
+                "cohort",
+                "create",
+                "nightly",
+                "--agent",
+                "assistant",
+                "--session",
+                "s1",
+                "s2",
+            ],
+            "--session",
+            "s1",
+            "s2",
+        ),
+    ],
+)
+def test_unused_tokens_after_repeatable_option_suggest_repeating_flag(
+    capsys, argv: list[str], option: str, first: str, second: str
+) -> None:
+    """Passing multiple values after a repeatable option gives a concrete fix."""
+    assert app_module.main([*argv, "--output", "json"]) == 2
+
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["kind"] == "invalid_arguments"
+    assert option in error["message"]
+    assert "must be repeated" in error["message"]
+    assert f"{option} {first} {option} {second}" in error["hint"]
+
+
+def test_unused_tokens_without_repeatable_option_keep_standard_message(capsys) -> None:
+    """Extra positional arguments on non-repeatable commands keep standard output."""
+    assert (
+        app_module.main(["cohort", "get", "regression", "extra", "--output", "json"])
+        == 2
+    )
+
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["kind"] == "invalid_arguments"
+    assert "Unused Tokens" in error["message"]
+    assert "hint" not in error
+
+
+@pytest.mark.parametrize(
+    ("argv", "option", "leaked_values"),
+    [
+        (
+            [
+                "connection",
+                "create",
+                "demo",
+                "--set-secret",
+                "PASSWORD=hunter2",
+                "OTHER=supersecret",
+            ],
+            "--set-secret",
+            ("hunter2", "supersecret"),
+        ),
+        (
+            [
+                "agent",
+                "register",
+                "assistant",
+                "--command",
+                "python agent.py",
+                "--env",
+                "API_KEY=raw-secret-1",
+                "EXTRA=raw-secret-2",
+            ],
+            "--env",
+            ("raw-secret-1", "raw-secret-2"),
+        ),
+    ],
+)
+def test_unused_tokens_after_sensitive_repeatable_option_do_not_echo_values(
+    capsys, argv: list[str], option: str, leaked_values: tuple[str, ...]
+) -> None:
+    """Sensitive repeatable option hints use placeholders instead of echoing secrets."""
+    assert app_module.main([*argv, "--output", "json"]) == 2
+
+    raw_err = capsys.readouterr().err
+    for secret in leaked_values:
+        assert secret not in raw_err
+    error = json.loads(raw_err)["error"]
+    assert error["kind"] == "invalid_arguments"
+    assert option in error["message"]
+    assert f"{option} <value1> {option} <value2>" in error["hint"]

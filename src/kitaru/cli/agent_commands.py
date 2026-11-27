@@ -53,15 +53,43 @@ _AGENT_SOURCE_PARAMETERS = (
         "--working-dir", "path", "option", False, "Worker process directory."
     ),
     ParameterSpec(
-        "--env", "KEY=VALUE[]", "option", False, "Non-secret process environment."
+        "--env",
+        "KEY=VALUE[]",
+        "option",
+        False,
+        "Non-secret process environment entry; repeat for each variable.",
     ),
-    ParameterSpec("--secret-id", "UUID[]", "option", False, "Server secret IDs."),
+    ParameterSpec(
+        "--secret-id",
+        "UUID[]",
+        "option",
+        False,
+        "Server secret UUID; repeat for each secret.",
+    ),
     ParameterSpec(
         "--timeout-seconds", "positive integer", "option", False, "Process timeout."
     ),
-    ParameterSpec("--tool", "string[]", "option", False, "Declared tools."),
-    ParameterSpec("--mcp-server", "string[]", "option", False, "Declared MCP servers."),
-    ParameterSpec("--skill", "string[]", "option", False, "Declared skills."),
+    ParameterSpec(
+        "--tool",
+        "string[]",
+        "option",
+        False,
+        "Declared tool name; repeat for each tool.",
+    ),
+    ParameterSpec(
+        "--mcp-server",
+        "string[]",
+        "option",
+        False,
+        "Declared MCP server; repeat for each server.",
+    ),
+    ParameterSpec(
+        "--skill",
+        "string[]",
+        "option",
+        False,
+        "Declared skill name; repeat for each skill.",
+    ),
 )
 
 

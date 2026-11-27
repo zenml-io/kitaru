@@ -428,10 +428,7 @@ def test_invalid_list_values_are_concise_and_option_named(capsys) -> None:
     assert app_module.main(["session", "list", "--filter", "nope"]) == 2
     payload = json.loads(capsys.readouterr().err)
     assert payload["error"]["kind"] == "invalid_arguments"
-    assert (
-        payload["error"]["message"]
-        == "--filter must be a valid JSON filter expression."
-    )
+    assert payload["error"]["message"].startswith("--filter is not valid JSON:")
     assert "errors.pydantic.dev" not in payload["error"]["message"]
 
 
