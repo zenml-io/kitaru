@@ -33,6 +33,7 @@ from kitaru.server.application.models.permissions import Action, ResourceType
 from kitaru.server.application.services.analytics_events import (
     build_account_created_properties,
     build_account_traits,
+    build_survey_traits,
     build_user_enriched_properties,
 )
 from kitaru.server.application.services.permission_service import PermissionService
@@ -306,6 +307,7 @@ class AccountService:
             and not survey_finished_before
             and FINISHED_ONBOARDING_SURVEY_KEY in account.metadata
         ):
+            self._analytics.identify(account.id, build_survey_traits(account))
             self._analytics.track(
                 account.id,
                 AnalyticsEvent.USER_ENRICHED,

@@ -5172,6 +5172,11 @@ export interface components {
              */
             presentation?: ("columns" | "horizontal" | "micro") | null;
             /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
@@ -5298,6 +5303,11 @@ export interface components {
              * @description Visual layout hint.
              */
             presentation?: ("ranked_bars" | "focus_bars" | "baseline_bars" | "path_bars" | "split_bar" | "donut") | null;
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -5574,6 +5584,11 @@ export interface components {
              * @description Comparison rows.
              */
             rows: components["schemas"]["ComparisonRow"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -5948,6 +5963,11 @@ export interface components {
          */
         ErrorBody: {
             /**
+             * Code
+             * @description Machine-readable error code.
+             */
+            code?: string | null;
+            /**
              * Detail
              * @description Error message.
              */
@@ -5989,6 +6009,25 @@ export interface components {
             replays: components["schemas"]["ReplayEvaluationValues"][];
             /** @description Stats over the result sessions. */
             result: components["schemas"]["EvaluationStats"];
+        };
+        /**
+         * EvaluationBaselineContext
+         * @description Baseline identity and case metadata for evaluating a replay result.
+         */
+        EvaluationBaselineContext: {
+            /**
+             * Metadata
+             * @description Baseline session metadata.
+             */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /**
+             * Session Id
+             * Format: uuid
+             * @description Baseline session.
+             */
+            session_id: string;
         };
         /**
          * EvaluationBatchCreateRequest
@@ -6221,6 +6260,8 @@ export interface components {
          * @description Evaluation task details.
          */
         EvaluationTaskDetails: {
+            /** @description Baseline metadata when the scored session is a replay result. */
+            baseline?: components["schemas"]["EvaluationBaselineContext"] | null;
             /**
              * Evaluator Name
              * @description Name the evaluator emits results under.
@@ -6551,6 +6592,11 @@ export interface components {
              * @description Example evidence rows.
              */
             rows: components["schemas"]["EvidenceRow"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
             /**
              * Total Sessions
              * @description Total sessions behind this finding for 'Open all N'.
@@ -6898,6 +6944,11 @@ export interface components {
              */
             state_by: "tool" | "span" | "node" | "step";
             /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
              * Total Failed
              * @description Total failed sessions.
              */
@@ -6978,6 +7029,11 @@ export interface components {
              * @description 2 to 3 flow stages; past 3 use categorical path_bars.
              */
             stages: components["schemas"]["SankeyStage"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -8836,6 +8892,11 @@ export interface components {
              */
             rate: number;
             /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
              * Tone
              * @description Semantic tone.
              * @default risk
@@ -9372,6 +9433,11 @@ export interface components {
              */
             dashboard_url?: string | null;
             /**
+             * Evaluation Pair Limit
+             * @description Maximum accepted (session, evaluator) pairs per evaluation request.
+             */
+            evaluation_pair_limit?: number | null;
+            /**
              * Id
              * @description Server ID.
              */
@@ -9445,6 +9511,11 @@ export interface components {
             left: components["schemas"]["SessionSide"];
             /** @description Right session (counterexample or replay). */
             right: components["schemas"]["SessionSide"];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -9663,6 +9734,11 @@ export interface components {
             started_at?: string | null;
             status: components["schemas"]["SessionStatus"];
             /**
+             * Tags
+             * @description Linked tags.
+             */
+            tags?: components["schemas"]["TagResponse"][];
+            /**
              * Task Id
              * @description Task the session was produced by.
              */
@@ -9742,6 +9818,11 @@ export interface components {
              * @description Optional min.
              */
             scale_min?: number | null;
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -10178,6 +10259,11 @@ export interface components {
             started_at?: string | null;
             status: components["schemas"]["SessionStatus"];
             /**
+             * Tags
+             * @description Linked tags.
+             */
+            tags?: components["schemas"]["TagResponse"][];
+            /**
              * Task Id
              * @description Task the session was produced by.
              */
@@ -10273,6 +10359,11 @@ export interface components {
              * @description Ordered spans.
              */
             spans: components["schemas"]["TimelineSpan"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
             /**
              * Total Duration Ms
              * @description Total session duration in milliseconds.
@@ -10382,6 +10473,11 @@ export interface components {
              */
             items: components["schemas"]["StatItem"][];
             /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
@@ -10483,6 +10579,11 @@ export interface components {
              */
             steps: components["schemas"]["StoryStep"][];
             /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
@@ -10505,6 +10606,11 @@ export interface components {
              * @description Step strip rows.
              */
             rows: components["schemas"]["StepStripRow"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
             /**
              * Total Steps
              * @description Number of step blocks on the shared scale.
@@ -10633,6 +10739,11 @@ export interface components {
             rows: {
                 [key: string]: unknown;
             }[];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -11163,6 +11274,11 @@ export interface components {
              */
             style: "body" | "callout" | "hypothesis";
             /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
+            /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
@@ -11188,6 +11304,11 @@ export interface components {
              * @description One or more series.
              */
             series: components["schemas"]["TimeSeriesLine"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -11365,6 +11486,11 @@ export interface components {
              * @description Tools in the repeating cycle.
              */
             steps: components["schemas"]["CycleStep"][];
+            /**
+             * Title
+             * @description Optional block title.
+             */
+            title?: string | null;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}

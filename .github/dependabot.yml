@@ -323,15 +323,6 @@ updates:
       # from PyPI. Release preparation rewrites their pins by hand. `kitaru*`
       # matches `kitaru[server]` and every `kitaru-*` plugin.
       - dependency-name: "kitaru*"
-      # logfire (required by kitaru-logfire-importer) declares
-      # opentelemetry-sdk<1.45, so this workspace cannot resolve 1.45 or later
-      # and every attempt fails the whole update job. Remove both entries once
-      # a logfire release inside the importer's `logfire>=4.35,<6` range lifts
-      # that cap.
-      - dependency-name: opentelemetry-api
-        versions: [">=1.45"]
-      - dependency-name: opentelemetry-sdk
-        versions: [">=1.45"]
     cooldown:
       default-days: 7
       semver-major-days: 14

@@ -20,8 +20,10 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
+from kitaru.api_models.v1.job import JobKind, JobListParams, JobResponse, JobStatus
 from kitaru.cli.output import CLIError, CommandResult, emit_event
+from kitaru.cli.registration import list_params, page_result
 from kitaru.cli.task_diagnostics import get_task_diagnostics
 
 _TERMINAL_EXIT_CODES = {
@@ -29,6 +31,40 @@ _TERMINAL_EXIT_CODES = {
     JobStatus.FAILED: 8,
     JobStatus.CANCELED: 9,
 }
+
+
+async def list_jobs(
+    client: Any,
+    *,
+    size: int,
+    cursor: str | None,
+    sort: str,
+    filter: str | None,
+    kind: JobKind | None = None,
+    status: JobStatus | None = None,
+) -> CommandResult:
+    """List one bounded server page of jobs."""
+    params = list_params("job", size=size, cursor=cursor, sort=sort, filter=filter)
+    assert isinstance(params, JobListParams)
+    conditions = []
+    if params.filter is not None:
+        conditions.append(params.filter)
+    if kind is not None:
+        conditions.append(
+            FilterCondition(field="kind", op=FilterOp.EQ, value=kind.value)
+        )
+    if status is not None:
+        conditions.append(
+            FilterCondition(field="status", op=FilterOp.EQ, value=status.value)
+        )
+    if conditions:
+        expression = (
+            conditions[0]
+            if len(conditions) == 1
+            else AndFilter.model_validate({"and": conditions})
+        )
+        params = params.model_copy(update={"filter": expression})
+    return page_result(await client.jobs.list(params), size=size)
 
 
 async def get_job(client: Any, job_id: uuid.UUID, *, tasks: bool) -> CommandResult:

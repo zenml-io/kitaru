@@ -16,7 +16,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, TypedDict
 
 from sqlalchemy import (
     BigInteger,
@@ -47,6 +47,14 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 from kitaru.server.domain.payload import Payload, PayloadMediaType
 from kitaru.server.domain.session import Session
 
+
+class _SessionPayloads(TypedDict, total=False):
+    """Session payload fields included in a database read."""
+
+    inputs: Payload | None
+    outputs: Payload | None
+
+
 SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session", ["imported_from", "external_id", "agent_id"]
 )
@@ -62,6 +70,8 @@ SESSION_INPUTS_BLOB_ID_FOREIGN_KEY = foreign_key_name("session", ["inputs_blob_i
 SESSION_OUTPUTS_BLOB_ID_FOREIGN_KEY = foreign_key_name("session", ["outputs_blob_id"])
 SESSION_AGENT_ID_ID_INDEX = index_name("session", ["agent_id", "id"])
 SESSION_AGENT_VERSION_ID_ID_INDEX = index_name("session", ["agent_version_id", "id"])
+SESSION_STARTED_AT_ID_INDEX = index_name("session", ["started_at", "id"])
+SESSION_NUMBER_ID_INDEX = index_name("session", ["number", "id"])
 SESSION_STATUS_INDEX = index_name("session", ["status"])
 SESSION_TASK_ID_INDEX = index_name("session", ["task_id"])
 SESSION_IMPORT_ID_INDEX = index_name("session", ["import_id"])
@@ -125,6 +135,8 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index(SESSION_AGENT_ID_ID_INDEX, "agent_id", "id"),
         Index(SESSION_AGENT_VERSION_ID_ID_INDEX, "agent_version_id", "id"),
+        Index(SESSION_STARTED_AT_ID_INDEX, "started_at", "id"),
+        Index(SESSION_NUMBER_ID_INDEX, "number", "id"),
         Index(SESSION_STATUS_INDEX, "status"),
         Index(SESSION_TASK_ID_INDEX, "task_id"),
         Index(SESSION_IMPORT_ID_INDEX, "import_id"),
@@ -263,7 +275,7 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             if has_tokens
             else None
         )
-        payloads: dict[str, Payload | None] = {}
+        payloads: _SessionPayloads = {}
         if "inputs" not in exclude:
             payloads["inputs"] = payload_from_columns(
                 self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON

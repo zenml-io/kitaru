@@ -243,6 +243,8 @@ def test_model_normalization_keeps_keys_and_supported_scalars() -> None:
             "reasoning_tokens": 4,
         },
         {"input_tokens": 120.5, "cached_input_tokens": 0.0, "output_tokens": 40.2},
+        # Counts read back from settings, as at the top level.
+        {"input_tokens": "4096", "output_tokens": 12},
     ],
 )
 def test_numeric_token_usage_is_preserved(usage: Any) -> None:
@@ -271,8 +273,9 @@ def test_secret_bearing_tokens_are_masked(secret: Any) -> None:
 @given(count=st.none() | st.integers() | st.floats(allow_nan=False))
 def test_numeric_usage_fields_are_preserved(key: str, count: Any) -> None:
     assert cli_redact({key: count}) == {key: count}
-    assert cli_redact({key: "credential-value"}) == {key: "***"}
-    assert cli_redact({key: True}) == {key: "***"}
+    assert cli_redact({key: "4096"}) == {key: "4096"}
+    for other in ("credential-value", "4096 ", "12.5", "\u0664\u0660", True):
+        assert cli_redact({key: other}) == {key: "***"}
 
 
 def test_mean_token_usage_survives_beside_masked_credentials() -> None:
@@ -289,3 +292,209 @@ def test_mean_token_usage_survives_beside_masked_credentials() -> None:
 def test_credential_status_fields_are_preserved() -> None:
     value = {"credential_stored": True, "credential_status": "configured"}
     assert cli_redact(value) == value
+
+
+def test_provider_token_counts_and_model_settings_survive_beside_credentials() -> None:
+    """Provider usage counts and max_tokens stay visible while secrets stay masked."""
+    payload = {
+        "usage": {
+            "input_tokens": 10,
+            "cache_read_tokens": 5,
+            "total_tokens": 15,
+            "request_tokens": 3,
+            "completion_tokens": 7,
+            "prompt_tokens": 8,
+            "cache_creation_input_tokens": 12,
+        },
+        "model_settings": {
+            "max_tokens": 1024,
+            "max-tokens": 2048,
+            "cache-read-tokens": 4,
+            "MAX_TOKENS": 4096,
+        },
+        "api_key": "x",
+        "access_token": "y",
+    }
+    assert cli_redact(payload) == {
+        "usage": {
+            "input_tokens": 10,
+            "cache_read_tokens": 5,
+            "total_tokens": 15,
+            "request_tokens": 3,
+            "completion_tokens": 7,
+            "prompt_tokens": 8,
+            "cache_creation_input_tokens": 12,
+        },
+        "model_settings": {
+            "max_tokens": 1024,
+            "max-tokens": 2048,
+            "cache-read-tokens": 4,
+            "MAX_TOKENS": 4096,
+        },
+        "api_key": "***",
+        "access_token": "***",
+    }
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "cache_read_tokens",
+        "total_tokens",
+        "request_tokens",
+        "max_tokens",
+        "completion_tokens",
+        "prompt_tokens",
+        "cache_creation_input_tokens",
+        "cache-read-tokens",
+        "max-tokens",
+        "MAX_TOKENS",
+    ],
+)
+@given(count=st.none() | st.integers())
+def test_plural_token_count_keys_allow_only_whole_numbers_and_none(
+    key: str, count: int | None
+) -> None:
+    assert cli_redact({key: count}) == {key: count}
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["cache_read_tokens", "max_tokens", "cache-read-tokens", "max-tokens"],
+)
+def test_plural_token_count_keys_preserve_digit_strings(key: str) -> None:
+    assert cli_redact({key: "1024"}) == {key: "1024"}
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["cache_read_tokens", "max_tokens", "cache-read-tokens", "max-tokens"],
+)
+@pytest.mark.parametrize(
+    "value",
+    [
+        True,
+        False,
+        "secret",
+        "KITKEY_abc",
+        "1024 ",
+        "12.5",
+        "\u0664\u0660",
+        1.5,
+        [1024],
+        {"count": 1024},
+        object(),
+    ],
+)
+def test_plural_token_count_keys_mask_non_count_values(key: str, value: Any) -> None:
+    assert cli_redact({key: value}) == {key: "***"}
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        True,
+        False,
+        "secret",
+        "KITKEY_abc",
+        "1024",
+        1.5,
+        [1024],
+        {"count": 1024},
+        object(),
+    ],
+)
+def test_other_plural_token_keys_mask_strings_and_non_whole_values(value: Any) -> None:
+    assert cli_redact({"request_tokens": value}) == {"request_tokens": "***"}
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "access_tokens",
+        "access-tokens",
+        "accessTokens",
+        "oauth_access_tokens",
+        "refresh_tokens",
+        "refresh-tokens",
+        "refreshTokens",
+        "id_tokens",
+        "id-tokens",
+        "auth_tokens",
+        "auth-tokens",
+        "session_tokens",
+        "bearer_tokens",
+        "csrf_tokens",
+        "api_tokens",
+        "secret_tokens",
+        "oauth_tokens",
+        "security_tokens",
+        "ACCESS_TOKENS",
+        "_tokens",
+        "-tokens",
+    ],
+)
+@pytest.mark.parametrize("value", [0, 123, 456, None, True, "secret"])
+def test_explicit_credential_plural_token_keys_always_mask(
+    key: str, value: Any
+) -> None:
+    assert cli_redact({key: value}) == {key: "***"}
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "token",
+        "github_token",
+        "access_token",
+        "api_token",
+        "bearer_token",
+        "refresh_token",
+        "max_token",
+        "x-auth-token",
+    ],
+)
+@pytest.mark.parametrize("value", [0, 789, None, True, "secret"])
+def test_singular_token_keys_always_mask_even_for_integers(
+    key: str, value: Any
+) -> None:
+    assert cli_redact({key: value}) == {key: "***"}
+
+
+def test_nested_provider_payloads_preserve_counts_and_mask_credentials() -> None:
+    payload = {
+        "nodes": [
+            {
+                "usage": {
+                    "cache_read_tokens": 5,
+                    "cache_creation_input_tokens": None,
+                    "total_tokens": 25,
+                },
+                "settings": {"max-tokens": 512, "max_tokens": "secret"},
+                "auth": {
+                    "access_tokens": 123,
+                    "refresh_tokens": 456,
+                    "github_token": 789,
+                    "cache_read_tokens": "KITKEY_abc",
+                },
+            }
+        ]
+    }
+    assert cli_redact(payload) == {
+        "nodes": [
+            {
+                "usage": {
+                    "cache_read_tokens": 5,
+                    "cache_creation_input_tokens": None,
+                    "total_tokens": 25,
+                },
+                "settings": {"max-tokens": 512, "max_tokens": "***"},
+                "auth": {
+                    "access_tokens": "***",
+                    "refresh_tokens": "***",
+                    "github_token": "***",
+                    "cache_read_tokens": "***",
+                },
+            }
+        ]
+    }

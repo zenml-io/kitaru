@@ -39,7 +39,12 @@ from kitaru.cli.registration import (
 from kitaru.cli.session_selection import (
     get_cohort_version as resolve_cohort_version,
 )
-from kitaru.cli.session_selection import select_session_ids
+from kitaru.cli.session_selection import (
+    parse_session_uuid_file,
+    select_session_ids,
+)
+
+_INLINE_RETRY_SESSION_LIMIT = 10
 
 
 async def create_cohort(
@@ -107,17 +112,12 @@ async def create_cohort(
             ),
         )
     except Exception as error:
-        retry_command = [
-            "kitaru",
-            "cohort",
-            "version",
-            "create",
-            str(created_cohort.id),
-        ]
-        for session_id in selected_session_ids:
-            retry_command.extend(("--add-session", str(session_id)))
-        if display_version is not None:
-            retry_command.extend(("--display-version", display_version))
+        hint = _build_initial_version_retry_hint(
+            created_cohort.id,
+            selected_session_ids,
+            sessions_file=sessions_file if not sessions else None,
+            display_version=display_version,
+        )
         raise CLIError(
             "partial_failure",
             "Created the cohort but could not create its first version.",
@@ -136,7 +136,7 @@ async def create_cohort(
                 ],
                 "cause": str(error),
             },
-            hint=f"The cohort exists. Retry with `{shlex.join(retry_command)}`.",
+            hint=hint,
         ) from error
     return CommandResult(
         item={
@@ -219,16 +219,47 @@ async def create_cohort_version(
     remove_session_ids: list[uuid.UUID] | None,
     display_version: str | None,
     baseline_id: uuid.UUID | None = None,
+    add_sessions_file: Path | None = None,
+    remove_sessions_file: Path | None = None,
+    allow_unchanged: bool = False,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create an immutable version from an ordered membership delta."""
     additions = list(add_session_ids or [])
+    if add_sessions_file is not None:
+        additions.extend(
+            parse_session_uuid_file(add_sessions_file, option="--add-sessions-file")
+        )
     removals = list(remove_session_ids or [])
-    if len(set(additions)) != len(additions):
-        raise CLIError("invalid_arguments", "Each --add-session value must be unique.")
-    if len(set(removals)) != len(removals):
+    if remove_sessions_file is not None:
+        removals.extend(
+            parse_session_uuid_file(
+                remove_sessions_file, option="--remove-sessions-file"
+            )
+        )
+    if not additions and not removals and not allow_unchanged:
         raise CLIError(
-            "invalid_arguments", "Each --remove-session value must be unique."
+            "invalid_arguments",
+            "Select at least one --add-session or --remove-session, or use "
+            "--allow-unchanged to copy existing membership.",
+        )
+    if len(set(additions)) != len(additions):
+        option_label = (
+            "--add-sessions-file"
+            if add_sessions_file is not None and not add_session_ids
+            else "--add-session"
+        )
+        raise CLIError(
+            "invalid_arguments", f"Each {option_label} value must be unique."
+        )
+    if len(set(removals)) != len(removals):
+        option_label = (
+            "--remove-sessions-file"
+            if remove_sessions_file is not None and not remove_session_ids
+            else "--remove-session"
+        )
+        raise CLIError(
+            "invalid_arguments", f"Each {option_label} value must be unique."
         )
     if set(additions) & set(removals):
         raise CLIError(
@@ -326,3 +357,38 @@ async def delete_cohort_version(
     _, version = await get_cohort_version(client, reference)
     await client.cohort_versions.delete(version.id)
     return CommandResult(item={"id": str(version.id), "deleted": True})
+
+
+def _build_initial_version_retry_hint(
+    cohort_id: uuid.UUID,
+    selected_session_ids: list[uuid.UUID],
+    *,
+    sessions_file: Path | None,
+    display_version: str | None,
+) -> str:
+    """Build a bounded retry command for a failed initial cohort version."""
+    retry_command = [
+        "kitaru",
+        "cohort",
+        "version",
+        "create",
+        str(cohort_id),
+    ]
+    if sessions_file is not None:
+        retry_command.extend(("--add-sessions-file", str(sessions_file)))
+        if display_version is not None:
+            retry_command.extend(("--display-version", display_version))
+        return f"The cohort exists. Retry with `{shlex.join(retry_command)}`."
+    if len(selected_session_ids) <= _INLINE_RETRY_SESSION_LIMIT:
+        for session_id in selected_session_ids:
+            retry_command.extend(("--add-session", str(session_id)))
+        if display_version is not None:
+            retry_command.extend(("--display-version", display_version))
+        return f"The cohort exists. Retry with `{shlex.join(retry_command)}`."
+    retry_command.extend(("--add-sessions-file", "<sessions-file>"))
+    if display_version is not None:
+        retry_command.extend(("--display-version", display_version))
+    return (
+        "The cohort exists. Save details.selected_session_ids (one UUID per line) "
+        f"and retry with `{shlex.join(retry_command)}`."
+    )

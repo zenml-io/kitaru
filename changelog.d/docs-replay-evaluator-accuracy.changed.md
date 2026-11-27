@@ -1,0 +1,2 @@
+- Updated `kitaru evaluator scaffold` to inspect `session.nodes` and report the observed `tool_call` count in `explanation`.
+- Added a `--agent NAME@VERSION` hint when `kitaru replay create` fails because the baseline session has no recorded `agent_version_id`.

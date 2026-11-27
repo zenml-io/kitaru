@@ -1,0 +1,1 @@
+- Fixed `kitaru session import --wait` so imports where every record failed exit non-zero (`remote_failed`) with bounded stats and failure details, added `--fail-on-failures` to also fail on partial record failures, and surfaced follow-up analyzer and evaluator task statuses, counts, skip reasons, and warnings in the import receipt.

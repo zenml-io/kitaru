@@ -34,7 +34,11 @@ from kitaru.mcp.models.failure_matrix import (
     GroupSummary,
     MatrixCell,
 )
+from kitaru.mcp.redaction import MASKED
+from kitaru.mcp.settings import MCPSettings
+from kitaru.mcp.tools.paging import read_up_to
 from kitaru.mcp.tools.transitions import (
+    SHORTENED,
     SessionOutcome,
     analyze_group,
     build_cells,
@@ -62,9 +66,11 @@ async def handle_failure_matrix(
     """Build the transition failure matrix for one or two session groups."""
     # Read fresh: a reviewer who just marked a first failure expects to see it.
     records = await _fetch_groups(state, request)
-    snapshot_id = uuid.uuid4().hex
-    state.matrix_snapshots.put(snapshot_id, records)
-    groups = _analyze(request, records)
+    snapshot_id = None
+    if not state.settings.stateless:
+        snapshot_id = uuid.uuid4().hex
+        state.matrix_snapshots.put(snapshot_id, records)
+    groups = _analyze(request, records, _get_label_keys(state.settings)[0])
     base, compare = groups[0], groups[1] if len(groups) > 1 else None
     rows, cols, cells = build_cells(
         base.outcomes, compare.outcomes if compare else None, request.sources
@@ -99,7 +105,7 @@ async def handle_failure_cell(
     state: MCPServerState, request: FailureCellRequest
 ) -> FailureCellData:
     """List the sessions and repeated notes behind one matrix cell."""
-    if request.snapshot_id is None:
+    if request.snapshot_id is None or state.settings.stateless:
         records = await _fetch_groups(state, request)
     else:
         # Drill into exactly the records the visible matrix was built from;
@@ -113,19 +119,36 @@ async def handle_failure_cell(
                 "the cell.",
             )
         records = cached
-    groups = _analyze(request, records)
     index = 1 if request.side == "compare" else 0
-    if index >= len(groups):
+    if index >= len(records):
         raise MCPToolError(
             "invalid_arguments",
             "side='compare' needs compare_filter.",
             recovery="Pass the same compare_filter the matrix was built with.",
         )
-    return cell_details(
-        groups[index].outcomes,
-        (request.from_state, request.to_state),
-        request.sources,
-        request.limit,
+    # A matrix built before a key rotation tagged its redacted labels with an
+    # earlier key, so a cell no session matched is looked up again with each of
+    # those; a cell matches when it has sessions or counts attempts. Only a
+    # redacted label carries a key's tag; redaction leaves MASKED in it, and a
+    # label cut short for length keeps its mark even where MASKED was cut off.
+    keys = _get_label_keys(state.settings)
+    states = (request.from_state, request.to_state)
+    if not any(MASKED in label or SHORTENED in label for label in states):
+        keys = keys[:1]
+    cells = (
+        cell_details(
+            _analyze(request, records, label_key)[index].outcomes,
+            (request.from_state, request.to_state),
+            request.sources,
+            request.limit,
+        )
+        for label_key in keys
+    )
+    current = next(cells)
+    if current.total or current.attempts is not None:
+        return current
+    return next(
+        (cell for cell in cells if cell.total or cell.attempts is not None), current
     )
 
 
@@ -157,12 +180,26 @@ async def _fetch_groups(
     )
 
 
+def _get_label_keys(settings: MCPSettings) -> list[bytes | None]:
+    """Return the key that tags new labels, then the keys of earlier labels.
+
+    `None` stands for this process's own key, used when no key is set.
+    """
+    current = settings.label_key
+    return [
+        current.get_secret_value().encode() if current else None,
+        *(key.get_secret_value().encode() for key in settings.previous_label_keys),
+    ]
+
+
 def _analyze(
-    request: FailureMatrixRequest, records: Sequence[GroupRecords]
+    request: FailureMatrixRequest,
+    records: Sequence[GroupRecords],
+    label_key: bytes | None,
 ) -> list[_AnalyzedGroup]:
-    labeler = build_labeler(request.state_by, request.state_map)
+    labeler = build_labeler(request.state_by, request.state_map, label_key)
     folded = fold_rare_states(
-        [analyze_group(group, labeler, request.state_map) for group in records],
+        [analyze_group(group, labeler) for group in records],
         request.sources,
     )
     return [
@@ -203,7 +240,7 @@ async def fetch_group(
             iterator = client.sessions.iter_nodes(
                 session_id, SessionNodeListParams(size=PAGE_SIZE)
             )
-            nodes, capped = await _read_up_to(iterator, node_limit)
+            nodes, capped = await read_up_to(iterator, node_limit)
             return [_slim(node) for node in nodes], capped
 
     (
@@ -256,17 +293,6 @@ def _slim(node: SessionNodeResponse) -> SessionNodeResponse:
     )
 
 
-async def _read_up_to(
-    iterator: AsyncIterator[ItemT], limit: int
-) -> tuple[list[ItemT], bool]:
-    items: list[ItemT] = []
-    async for item in iterator:
-        if len(items) == limit:
-            return items, True
-        items.append(item)
-    return items, False
-
-
 async def _collect_by_session(
     iterate: Callable[[ParamsT], AsyncIterator[ItemT]],
     params_type: type[ParamsT],
@@ -278,7 +304,7 @@ async def _collect_by_session(
             filter=FilterCondition(field="session_id", op=FilterOp.IN, value=chunk),
             size=PAGE_SIZE,
         )
-        return await _read_up_to(iterate(params), MAX_RECORDS_PER_BATCH)
+        return await read_up_to(iterate(params), MAX_RECORDS_PER_BATCH)
 
     chunks = await asyncio.gather(
         *(chunk_items(start) for start in range(0, len(session_ids), IDS_PER_FILTER))

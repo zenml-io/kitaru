@@ -1,0 +1,1 @@
+- An MCP tool result whose data is sent unmasked, such as a custom viewer's HTML from `kitaru_viewer_read`, now still masks credentials in its warnings and links.

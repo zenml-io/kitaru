@@ -514,6 +514,7 @@ class TestExtractedPublicApi:
         task = public_api["modules"]["task"]
         evaluator = task["modules"]["evaluator"]
         assert "EvaluationResult" in evaluator["classes"]
+        assert "EvaluationBaselineContext" in evaluator["classes"]
         assert "SessionView" in evaluator["classes"]
 
         importer = task["modules"]["importer"]

@@ -101,7 +101,7 @@ kitaru session import sessions.jsonl \
 The analyzer runs once the import finishes, as one task over every session the import created, in parallel with any evaluator tasks the same import names. From the client, list `analyzers` on the import request the same way you list `evaluators`:
 
 ```python
-from kitaru.api_models.v1.imports import ImportCreateRequest
+from kitaru.api_models.v1.imports import BlobImportSource, ImportCreateRequest
 from kitaru.api_models.v1.plugin import AnalyzerConfig
 
 created_import = await client.imports.create(
@@ -110,7 +110,7 @@ created_import = await client.imports.create(
         version=1,
         agent_id=agent_id,
         agent_version_id=agent_version_id,
-        payload_blob_id=blob_id,
+        source=BlobImportSource(blob_id=blob_id),
         analyzers=[AnalyzerConfig(analyzer="session-outcomes")],
     )
 )

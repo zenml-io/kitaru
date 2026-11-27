@@ -48,6 +48,7 @@ __all__ = [
     "ApiImportSourceSpec",
     "BlobImportSourceSpec",
     "DuplicateEvaluationTask",
+    "EvaluationBaselineContext",
     "EvaluationTask",
     "EvaluationTaskDetails",
     "ImportSourceSpec",
@@ -674,6 +675,14 @@ class ImportTask(Task):
             raise InvalidTaskResult(f"Task {self.id} requires a result")
 
 
+class _AnalysisSkippedDiagnostic(FrozenModel):
+    """Diagnostic recorded when an analysis task is skipped before execution."""
+
+    reason: Literal["insufficient_sessions"] = "insufficient_sessions"
+    eligible_sessions: int = Field(ge=0)
+    min_sessions: int = Field(ge=1)
+
+
 class AnalysisTask(Task):
     """Analysis task.
 
@@ -710,6 +719,10 @@ class AnalysisTask(Task):
             return
         self._require_status({TaskStatus.PENDING}, TaskStatus.SKIPPED)
         self.status = TaskStatus.SKIPPED
+        self.result = _AnalysisSkippedDiagnostic(
+            eligible_sessions=eligible_sessions,
+            min_sessions=min_sessions,
+        ).model_dump(mode="json")
         self.ended_at = now
 
     @property
@@ -809,6 +822,13 @@ class AgentTaskDetails(FrozenModel):
     replay_id: uuid.UUID | None = None
 
 
+class EvaluationBaselineContext(FrozenModel):
+    """Baseline identity and case metadata for evaluating a replay result."""
+
+    session_id: uuid.UUID
+    metadata: dict[str, Any]
+
+
 class EvaluationTaskDetails(FrozenModel):
     """Evaluation task details."""
 
@@ -817,6 +837,7 @@ class EvaluationTaskDetails(FrozenModel):
     params: dict[str, Any] = Field(default_factory=dict)
     plugin: PluginSpec
     input_session_id: uuid.UUID
+    baseline: EvaluationBaselineContext | None = None
 
 
 class ImportTaskDetails(FrozenModel):

@@ -3099,6 +3099,56 @@
     "name": "kitaru_activity_read",
     "outputSchema": {
       "$defs": {
+        "ActivityPageData": {
+          "additionalProperties": false,
+          "description": "Bounded page of activity records.",
+          "properties": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/SessionDetailResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/SessionResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/ReplayResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/ImportResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/EvaluationResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/ExperimentRunResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/SessionNodeResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/TaskResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/_MCPJob"
+                  }
+                ]
+              },
+              "title": "Items",
+              "type": "array"
+            },
+            "page": {
+              "$ref": "#/$defs/PageMetadata"
+            }
+          },
+          "required": [
+            "items",
+            "page"
+          ],
+          "title": "ActivityPageData",
+          "type": "object"
+        },
         "AnalyzerConfig": {
           "additionalProperties": false,
           "description": "Analyzer config.",
@@ -4138,55 +4188,6 @@
           "title": "NodeType",
           "type": "string"
         },
-        "PageData_Union_SessionDetailResponse__SessionResponse__ReplayResponse__ImportResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__": {
-          "additionalProperties": false,
-          "properties": {
-            "items": {
-              "items": {
-                "anyOf": [
-                  {
-                    "$ref": "#/$defs/SessionDetailResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/SessionResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/ReplayResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/ImportResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/EvaluationResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/ExperimentRunResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/SessionNodeResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/TaskResponse"
-                  },
-                  {
-                    "$ref": "#/$defs/_MCPJob"
-                  }
-                ]
-              },
-              "title": "Items",
-              "type": "array"
-            },
-            "page": {
-              "$ref": "#/$defs/PageMetadata"
-            }
-          },
-          "required": [
-            "items",
-            "page"
-          ],
-          "title": "PageData[Union[SessionDetailResponse, SessionResponse, ReplayResponse, ImportResponse, EvaluationResponse, ExperimentRunResponse, SessionNodeResponse, TaskResponse, _MCPJob]]",
-          "type": "object"
-        },
         "PageMetadata": {
           "additionalProperties": false,
           "description": "Opaque one-page cursor metadata.",
@@ -4679,6 +4680,14 @@
             },
             "status": {
               "$ref": "#/$defs/SessionStatus"
+            },
+            "tags": {
+              "description": "Linked tags.",
+              "items": {
+                "$ref": "#/$defs/TagResponse"
+              },
+              "title": "Tags",
+              "type": "array"
             },
             "task_id": {
               "anyOf": [
@@ -5256,6 +5265,14 @@
             "status": {
               "$ref": "#/$defs/SessionStatus"
             },
+            "tags": {
+              "description": "Linked tags.",
+              "items": {
+                "$ref": "#/$defs/TagResponse"
+              },
+              "title": "Tags",
+              "type": "array"
+            },
             "task_id": {
               "anyOf": [
                 {
@@ -5389,6 +5406,49 @@
           ],
           "title": "StaticMatchMode",
           "type": "string"
+        },
+        "TagResponse": {
+          "description": "Tag response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "id": {
+              "description": "Tag id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "name": {
+              "description": "Tag name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "name"
+          ],
+          "title": "TagResponse",
+          "type": "object"
         },
         "TaskKind": {
           "description": "Kind of work a task runs.",
@@ -6005,7 +6065,7 @@
               "$ref": "#/$defs/_MCPJob"
             },
             {
-              "$ref": "#/$defs/PageData_Union_SessionDetailResponse__SessionResponse__ReplayResponse__ImportResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__"
+              "$ref": "#/$defs/ActivityPageData"
             },
             {
               "type": "null"
@@ -11469,7 +11529,7 @@
       "openWorldHint": true,
       "readOnlyHint": true
     },
-    "description": "Show where sessions first go wrong as an interactive transition matrix.\n\nRows are the last step that went right and columns the first step that went\nwrong, counted over the sessions `filter` selects (for example an agent_id or\ncohort_version_id). Pass `compare_filter`, such as a replay's\nexperiment_run_id, to compare two groups. A reviewer places a failure that\nraised no error by annotating the failing node with the value\n`{\"first_failure\": true, \"note\": \"...\"}`.",
+    "description": "Show where sessions first go wrong as an interactive transition matrix.\n\nRows are the last step that went right and columns the first step that went\nwrong, counted over the sessions `filter` selects (for example an agent_id or\ncohort_version_id). Pass `compare_filter`, such as a replay's\nexperiment_run_id, to compare two groups. A reviewer places a failure that\nraised no error by annotating the failing node with the value\n`{\"first_failure\": true, \"note\": \"...\"}`.\n\nThe result's snapshot_id lets a cell drill into exactly these sessions; it\nis null on a server that keeps no matrix in memory.",
     "inputSchema": {
       "$defs": {
         "AndFilter": {
@@ -11821,9 +11881,16 @@
               "type": "array"
             },
             "snapshot_id": {
-              "description": "Identifies the records behind this matrix.",
-              "title": "Snapshot Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Identifies the records behind this matrix. Null on a server that keeps no matrix in memory; a cell then reads the sessions again.",
+              "title": "Snapshot Id"
             },
             "state_by": {
               "enum": [
@@ -12096,7 +12163,7 @@
       "openWorldHint": true,
       "readOnlyHint": true
     },
-    "description": "List the sessions and repeated notes behind one transition matrix cell.",
+    "description": "List the sessions and repeated notes behind one transition matrix cell.\n\nOn a server that keeps no matrix in memory, the matrix has no snapshot_id\nand the cell reads the sessions again.",
     "inputSchema": {
       "$defs": {
         "AndFilter": {
@@ -12250,7 +12317,7 @@
                 }
               ],
               "default": null,
-              "description": "snapshot_id of the matrix being drilled into; without it the sessions are read again.",
+              "description": "snapshot_id of the matrix being drilled into. Without it, or on a server that keeps no matrix in memory, the sessions are read again and the counts can differ from the matrix if sessions changed since.",
               "title": "Snapshot Id"
             },
             "sources": {
@@ -12429,7 +12496,7 @@
       "required": [
         "request"
       ],
-      "title": "failure_cell_toolArguments",
+      "title": "failure_matrix_cell_toolArguments",
       "type": "object"
     },
     "name": "kitaru_failure_matrix_cell",
@@ -12669,6 +12736,838 @@
         "ok"
       ],
       "title": "FailureCellResult",
+      "type": "object"
+    }
+  },
+  {
+    "_meta": {
+      "ui": {
+        "resourceUri": "ui://kitaru/session-viewer.html"
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Open one session in an interactive trace viewer where a reviewer annotates it.\n\nPass `session_id`, or `investigation_id` with `position` to review an\ninvestigation's sessions with its questions and verdicts. `viewer` picks the\npage: `default`, or a named custom viewer if this server enables custom\nviewers. The result names the session; the viewer page reads its payloads\nitself. Notes, answers, and verdicts the reviewer saves in the viewer go to\nKitaru; read them back with `kitaru_review_read`.",
+    "inputSchema": {
+      "$defs": {
+        "SessionViewRequest": {
+          "additionalProperties": false,
+          "description": "Open one session, or one session of an investigation, in a trace viewer.",
+          "properties": {
+            "investigation_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Investigation to review; the viewer shows its questions and saves answers to it.",
+              "title": "Investigation Id"
+            },
+            "position": {
+              "default": 0,
+              "description": "Zero-based position of the investigation session to open.",
+              "minimum": 0,
+              "title": "Position",
+              "type": "integer"
+            },
+            "session_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Session to open.",
+              "title": "Session Id"
+            },
+            "viewer": {
+              "default": "default",
+              "description": "Viewer to open: `default`, or the name of a custom viewer if this server enables custom viewers.",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+              "title": "Viewer",
+              "type": "string"
+            }
+          },
+          "title": "SessionViewRequest",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/SessionViewRequest"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "session_view_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_session_view",
+    "outputSchema": {
+      "$defs": {
+        "SessionViewOpened": {
+          "additionalProperties": false,
+          "description": "The session a viewer opened, without its payloads.",
+          "properties": {
+            "can_write": {
+              "title": "Can Write",
+              "type": "boolean"
+            },
+            "investigation_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Investigation Id"
+            },
+            "investigation_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Investigation Name"
+            },
+            "llm_call_count": {
+              "title": "Llm Call Count",
+              "type": "integer"
+            },
+            "position": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Position"
+            },
+            "questions": {
+              "items": {
+                "$ref": "#/$defs/ViewerQuestion"
+              },
+              "title": "Questions",
+              "type": "array"
+            },
+            "session_count": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sessions in the investigation, when one is open.",
+              "title": "Session Count"
+            },
+            "session_id": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "session_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Name"
+            },
+            "tool_call_count": {
+              "title": "Tool Call Count",
+              "type": "integer"
+            },
+            "viewer": {
+              "title": "Viewer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "viewer",
+            "session_id",
+            "session_name",
+            "llm_call_count",
+            "tool_call_count",
+            "investigation_id",
+            "investigation_name",
+            "position",
+            "session_count",
+            "questions",
+            "can_write"
+          ],
+          "title": "SessionViewOpened",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        },
+        "ViewerQuestion": {
+          "additionalProperties": false,
+          "description": "One question the reviewer answers about the open session.",
+          "properties": {
+            "key": {
+              "title": "Key",
+              "type": "string"
+            },
+            "question": {
+              "title": "Question",
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "question"
+          ],
+          "title": "ViewerQuestion",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Session view result.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionViewOpened"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "SessionViewResult",
+      "type": "object"
+    }
+  },
+  {
+    "_meta": {
+      "ui": {
+        "resourceUri": "ui://kitaru/session-viewer.html",
+        "visibility": [
+          "app"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Read a session for a viewer page, a viewer's HTML, or more of its nodes.",
+    "inputSchema": {
+      "$defs": {
+        "ViewerNodesRead": {
+          "additionalProperties": false,
+          "description": "Read the next page of a session's nodes with their payloads.",
+          "properties": {
+            "cursor": {
+              "minLength": 1,
+              "title": "Cursor",
+              "type": "string"
+            },
+            "operation": {
+              "const": "nodes",
+              "title": "Operation",
+              "type": "string"
+            },
+            "session_id": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "size": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "operation",
+            "session_id",
+            "cursor"
+          ],
+          "title": "ViewerNodesRead",
+          "type": "object"
+        },
+        "ViewerSourceRead": {
+          "additionalProperties": false,
+          "description": "Read the HTML of one viewer.",
+          "properties": {
+            "operation": {
+              "const": "viewer_source",
+              "title": "Operation",
+              "type": "string"
+            },
+            "viewer": {
+              "description": "Viewer to open: `default`, or the name of a custom viewer if this server enables custom viewers.",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+              "title": "Viewer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "viewer"
+          ],
+          "title": "ViewerSourceRead",
+          "type": "object"
+        },
+        "ViewerViewRead": {
+          "additionalProperties": false,
+          "description": "Read one session with its nodes, notes, and investigation for a viewer.",
+          "properties": {
+            "investigation_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Investigation to review; the viewer shows its questions and saves answers to it.",
+              "title": "Investigation Id"
+            },
+            "operation": {
+              "const": "view",
+              "title": "Operation",
+              "type": "string"
+            },
+            "position": {
+              "default": 0,
+              "description": "Zero-based position of the investigation session to open.",
+              "minimum": 0,
+              "title": "Position",
+              "type": "integer"
+            },
+            "session_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Session to open.",
+              "title": "Session Id"
+            },
+            "viewer": {
+              "default": "default",
+              "description": "Viewer to open: `default`, or the name of a custom viewer if this server enables custom viewers.",
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+              "title": "Viewer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation"
+          ],
+          "title": "ViewerViewRead",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "discriminator": {
+            "mapping": {
+              "nodes": "#/$defs/ViewerNodesRead",
+              "view": "#/$defs/ViewerViewRead",
+              "viewer_source": "#/$defs/ViewerSourceRead"
+            },
+            "propertyName": "operation"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ViewerViewRead"
+            },
+            {
+              "$ref": "#/$defs/ViewerSourceRead"
+            },
+            {
+              "$ref": "#/$defs/ViewerNodesRead"
+            }
+          ],
+          "title": "Request"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "viewer_read_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_viewer_read",
+    "outputSchema": {
+      "$defs": {
+        "InvestigationPosition": {
+          "additionalProperties": false,
+          "description": "One session's place in an investigation, for navigation.",
+          "properties": {
+            "position": {
+              "title": "Position",
+              "type": "integer"
+            },
+            "session_id": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "verdict": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InvestigationSessionVerdict"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "position",
+            "session_id",
+            "verdict"
+          ],
+          "title": "InvestigationPosition",
+          "type": "object"
+        },
+        "InvestigationSessionVerdict": {
+          "description": "Investigation session verdict.",
+          "enum": [
+            "acceptable",
+            "problematic",
+            "uncertain"
+          ],
+          "title": "InvestigationSessionVerdict",
+          "type": "string"
+        },
+        "SessionViewData": {
+          "additionalProperties": false,
+          "description": "One session with its nodes and annotations, ready for a viewer page.",
+          "properties": {
+            "annotations": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "title": "Annotations",
+              "type": "array"
+            },
+            "annotations_truncated": {
+              "title": "Annotations Truncated",
+              "type": "boolean"
+            },
+            "capabilities": {
+              "$ref": "#/$defs/ViewerCapabilities"
+            },
+            "investigation": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ViewerInvestigation"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "links": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "title": "Links",
+              "type": "object"
+            },
+            "nodes": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "title": "Nodes",
+              "type": "array"
+            },
+            "nodes_cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Nodes Cursor"
+            },
+            "session": {
+              "additionalProperties": true,
+              "title": "Session",
+              "type": "object"
+            },
+            "viewer": {
+              "title": "Viewer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "viewer",
+            "session",
+            "nodes",
+            "nodes_cursor",
+            "annotations",
+            "annotations_truncated",
+            "investigation",
+            "capabilities",
+            "links"
+          ],
+          "title": "SessionViewData",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        },
+        "ViewerCapabilities": {
+          "additionalProperties": false,
+          "description": "What the viewer may do under the server's capability mode.",
+          "properties": {
+            "can_write": {
+              "title": "Can Write",
+              "type": "boolean"
+            },
+            "mode": {
+              "title": "Mode",
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode",
+            "can_write"
+          ],
+          "title": "ViewerCapabilities",
+          "type": "object"
+        },
+        "ViewerInvestigation": {
+          "additionalProperties": false,
+          "description": "The investigation being reviewed and the session open in it.",
+          "properties": {
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Description"
+            },
+            "id": {
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "investigation_session": {
+              "additionalProperties": true,
+              "title": "Investigation Session",
+              "type": "object"
+            },
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "position": {
+              "title": "Position",
+              "type": "integer"
+            },
+            "sessions": {
+              "items": {
+                "$ref": "#/$defs/InvestigationPosition"
+              },
+              "title": "Sessions",
+              "type": "array"
+            },
+            "status": {
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "description",
+            "status",
+            "position",
+            "investigation_session",
+            "sessions"
+          ],
+          "title": "ViewerInvestigation",
+          "type": "object"
+        },
+        "ViewerNodesPage": {
+          "additionalProperties": false,
+          "description": "One page of a session's nodes with their payloads.",
+          "properties": {
+            "nodes": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "title": "Nodes",
+              "type": "array"
+            },
+            "nodes_cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Nodes Cursor"
+            }
+          },
+          "required": [
+            "nodes",
+            "nodes_cursor"
+          ],
+          "title": "ViewerNodesPage",
+          "type": "object"
+        },
+        "ViewerSource": {
+          "additionalProperties": false,
+          "description": "The HTML of one viewer.",
+          "properties": {
+            "html": {
+              "title": "Html",
+              "type": "string"
+            },
+            "viewer": {
+              "title": "Viewer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "viewer",
+            "html"
+          ],
+          "title": "ViewerSource",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Viewer read result.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionViewData"
+            },
+            {
+              "$ref": "#/$defs/ViewerSource"
+            },
+            {
+              "$ref": "#/$defs/ViewerNodesPage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "ViewerReadResult",
       "type": "object"
     }
   }

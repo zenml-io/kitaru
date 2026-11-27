@@ -8,6 +8,10 @@ import pytest
 REPO_ROOT = Path(__file__).parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "typescript-packages.mjs"
 CI_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+TYPESCRIPT_CI_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "ci-typescript.yml"
+TYPESCRIPT_BRIDGE_WORKFLOW_PATH = (
+    REPO_ROOT / ".github" / "workflows" / "ci-typescript-bridge.yml"
+)
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "release-typescript.yml"
 
 PACKAGE_PATHS = (
@@ -195,6 +199,7 @@ def test_typescript_release_workflow_contract() -> None:
     assert "needs: [build, publish]" in verify_source
     assert "node scripts/typescript-packages.mjs --tag" in workflow_source
     assert "run: pnpm run generate:check" in build_source
+    assert "KITARU_MASTRA_COMPAT_FULL: '1'" in build_source
     assert "run: pnpm run pack:release:built" in build_source
     assert "uv sync --frozen --extra server --extra cli --extra worker" in build_source
     assert "run: uv run pytest -q tests/typescript" in build_source
@@ -231,36 +236,95 @@ def test_typescript_release_workflow_contract() -> None:
 
 
 def test_typescript_ci_owns_cross_language_tests() -> None:
-    workflow_source = CI_WORKFLOW_PATH.read_text()
-    typescript_job = workflow_source.split("\n  typescript:\n", maxsplit=1)[1].split(
+    ci_source = CI_WORKFLOW_PATH.read_text()
+    ts_workflow_source = TYPESCRIPT_CI_WORKFLOW_PATH.read_text()
+    bridge_source = TYPESCRIPT_BRIDGE_WORKFLOW_PATH.read_text()
+    typescript_job = ts_workflow_source.split("\n  typescript:\n", maxsplit=1)[1].split(
         "\n  typescript-node-24:\n", maxsplit=1
     )[0]
-    base_matrix = workflow_source.split("\n          - name: py311-base\n", maxsplit=1)[
+    bridge_job = bridge_source.split("\n  typescript-cross-language:\n", maxsplit=1)[1]
+    base_matrix = ci_source.split("\n          - name: py311-base\n", maxsplit=1)[
         1
     ].split("\n          - name: py311-cli\n", maxsplit=1)[0]
 
     base_commands = base_matrix.split("pytest-command:")[1:]
     assert base_commands
     assert all("--ignore=tests/typescript" in command for command in base_commands)
-    assert "run: uv run pytest -q tests/typescript" in typescript_job
+    assert "\n  typescript:\n" not in ci_source
+    assert "\n  typescript-node-24:\n" not in ci_source
+    assert "\n  typescript-node-26:\n" not in ci_source
     assert "run: pnpm run pack:check:built" in typescript_job
-    assert (
-        "uv sync --frozen --extra server --extra cli --extra worker" in typescript_job
-    )
-    assert "\n  typescript-ticket-resolver:\n" not in workflow_source
     assert typescript_job.count("pnpm install --frozen-lockfile") == 1
+    assert "setup-uv" not in typescript_job
+    assert "uv sync" not in typescript_job
+    assert "pytest" not in typescript_job
+    assert "\n  typescript-ticket-resolver:\n" not in ts_workflow_source
+    assert "run: pnpm run build:packages" in bridge_job
+    assert "run: uv run pytest -q tests/typescript" in bridge_job
+    assert "uv sync --frozen --extra server --extra cli --extra worker" in bridge_job
+    assert bridge_job.count("pnpm install --frozen-lockfile") == 1
 
 
-def test_typescript_ci_validates_the_ticket_resolver() -> None:
-    workflow_source = CI_WORKFLOW_PATH.read_text()
-    job = workflow_source.split("\n  typescript:\n", maxsplit=1)[1].split(
+def test_typescript_ci_filters_pull_requests_and_trims_pr_mastra_compat() -> None:
+    workflow_source = TYPESCRIPT_CI_WORKFLOW_PATH.read_text()
+    push_block, pr_block = workflow_source.split("\n  pull_request:\n", maxsplit=1)
+    pr_header = pr_block.split("\nconcurrency:\n", maxsplit=1)[0]
+    typescript_job = workflow_source.split("\n  typescript:\n", maxsplit=1)[1].split(
         "\n  typescript-node-24:\n", maxsplit=1
     )[0]
 
+    assert "branches: [develop]" in push_block
+    assert "paths:" not in push_block
+    assert (
+        "cancel-in-progress: ${{ github.event_name == 'pull_request' }}"
+        in workflow_source
+    )
+    assert "- .github/workflows/ci.yml" not in pr_header
+    for expected_path in (
+        "- .github/workflows/ci-typescript.yml",
+        "- packages/**",
+        "- examples/typescript/**",
+        "- openapi/**",
+        "- docs/book/adapters/mastra.md",
+        "- package.json",
+        "- pnpm-lock.yaml",
+    ):
+        assert expected_path in pr_header
+    assert '--mastra-compat="$MASTRA_COMPAT_SCOPE"' in typescript_job
+    assert "github.event_name == 'pull_request' && 'boundary'" in typescript_job
+
+
+def test_typescript_bridge_ci_covers_python_and_ticket_resolver() -> None:
+    workflow_source = TYPESCRIPT_BRIDGE_WORKFLOW_PATH.read_text()
+    push_block, pr_block = workflow_source.split("\n  pull_request:\n", maxsplit=1)
+    pr_header = pr_block.split("\nconcurrency:\n", maxsplit=1)[0]
+    job = workflow_source.split("\n  typescript-cross-language:\n", maxsplit=1)[1]
+
+    assert "branches: [develop]" in push_block
+    assert "paths:" not in push_block
+    assert (
+        "cancel-in-progress: ${{ github.event_name == 'pull_request' }}"
+        in workflow_source
+    )
+    for expected_path in (
+        "- .github/workflows/ci-typescript-bridge.yml",
+        "- src/kitaru/api_models/**",
+        "- src/kitaru/client/**",
+        "- src/kitaru/server/**",
+        "- src/kitaru/task/**",
+        "- src/kitaru/worker/**",
+        "- pyproject.toml",
+        "- uv.lock",
+        "- tests/conftest.py",
+        "- tests/typescript/**",
+        "- packages/**",
+        "- examples/typescript/**",
+        "- openapi/**",
+    ):
+        assert expected_path in pr_header
     assert "image: postgres:16-alpine" in job
     assert "run: pnpm install --frozen-lockfile" in job
-    assert "pnpm --filter @zenml-io/kitaru build" in job
-    assert "pnpm --filter @zenml-io/kitaru-vercel-ai build" in job
+    assert "run: pnpm run build:packages" in job
     for command in (
         "pnpm build",
         "pnpm test",
@@ -272,29 +336,30 @@ def test_typescript_ci_validates_the_ticket_resolver() -> None:
         assert command in job
 
 
-def test_typescript_ci_validates_node_26_floor_and_current_without_services() -> None:
-    workflow_source = CI_WORKFLOW_PATH.read_text()
-    job = workflow_source.split("\n  typescript-node-26:\n", maxsplit=1)[1].split(
-        "\n  typos:\n", maxsplit=1
-    )[0]
+def test_typescript_ci_validates_node_26_without_services_or_mastra_compat() -> None:
+    workflow_source = TYPESCRIPT_CI_WORKFLOW_PATH.read_text()
+    job = workflow_source.split("\n  typescript-node-26:\n", maxsplit=1)[1]
 
     assert (
         "if: ${{ github.event_name != 'pull_request' || "
         "github.event.pull_request.draft == false }}" in job
     )
-    assert "node-version: [26.0.0, 26.x]" in job
+    assert "fromJSON('[\"26.x\"]')" in job
+    assert 'fromJSON(\'["26.0.0", "26.x"]\')' in job
     assert "node-version: ${{ matrix.node-version }}" in job
     assert "name: TypeScript (Node ${{ matrix.node-version }})" not in job
     assert "run: pnpm install --frozen-lockfile" in job
     for command in (
-        "pnpm run generate:check",
-        "pnpm run lint",
-        "pnpm run typecheck",
-        "pnpm run test:built",
+        "pnpm run build:packages",
+        "pnpm run test:core:built",
         "pnpm run pack:check:built",
     ):
         assert command in job
     for excluded in (
+        "pnpm run generate:check",
+        "pnpm run lint",
+        "pnpm run typecheck",
+        "pnpm run test:built",
         "services:",
         "postgres",
         "setup-uv",
@@ -305,8 +370,8 @@ def test_typescript_ci_validates_node_26_floor_and_current_without_services() ->
         assert excluded not in job
 
 
-def test_typescript_ci_validates_node_24_floor_and_current_without_services() -> None:
-    workflow_source = CI_WORKFLOW_PATH.read_text()
+def test_typescript_ci_validates_node_24_without_services_or_mastra_compat() -> None:
+    workflow_source = TYPESCRIPT_CI_WORKFLOW_PATH.read_text()
     job = workflow_source.split("\n  typescript-node-24:\n", maxsplit=1)[1].split(
         "\n  typescript-node-26:\n", maxsplit=1
     )[0]
@@ -315,18 +380,21 @@ def test_typescript_ci_validates_node_24_floor_and_current_without_services() ->
         "if: ${{ github.event_name != 'pull_request' || "
         "github.event.pull_request.draft == false }}" in job
     )
-    assert "node-version: [24.0.0, 24.x]" in job
+    assert "fromJSON('[\"24.x\"]')" in job
+    assert 'fromJSON(\'["24.0.0", "24.x"]\')' in job
     assert "node-version: ${{ matrix.node-version }}" in job
     assert "run: pnpm install --frozen-lockfile" in job
     for command in (
-        "pnpm run generate:check",
-        "pnpm run lint",
-        "pnpm run typecheck",
-        "pnpm run test:built",
+        "pnpm run build:packages",
+        "pnpm run test:core:built",
         "pnpm run pack:check:built",
     ):
         assert command in job
     for excluded in (
+        "pnpm run generate:check",
+        "pnpm run lint",
+        "pnpm run typecheck",
+        "pnpm run test:built",
         "services:",
         "postgres",
         "setup-uv",

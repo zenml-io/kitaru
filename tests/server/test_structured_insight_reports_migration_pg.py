@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""PostgreSQL backfill and downgrade tests for migration 028."""
+"""PostgreSQL backfill and downgrade tests for migration 029."""
 
 import json
 import uuid
@@ -40,8 +40,8 @@ from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 
-STRUCTURED_REPORTS_REVISION = "028_structured_insight_reports"
-PREVIOUS_REVISION = "027_session_group"
+STRUCTURED_REPORTS_REVISION = "029_structured_insight_reports"
+PREVIOUS_REVISION = "028_session_sort_indexes"
 
 
 async def test_upgrade_groups_invocation_siblings_and_downgrade_restores_rows() -> None:

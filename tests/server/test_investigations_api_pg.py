@@ -124,6 +124,13 @@ async def test_investigation_persists_across_requests(
     assert body["next_cursor"] is None
     assert [item["id"] for item in body["items"]] == [created["id"]]
 
+    name_filter = {"field": "name", "op": "eq", "value": "payment-failures"}
+    response = await client.get(
+        "/api/v1/investigations", params={"filter": json.dumps(name_filter)}
+    )
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["items"]] == [created["id"]]
+
 
 async def test_update_persists_across_requests(
     client: httpx.AsyncClient, agent_id: str

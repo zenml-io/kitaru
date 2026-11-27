@@ -20,7 +20,7 @@ from kitaru.mcp.connection import MCPConnection
 from kitaru.mcp.connection import resolve_connection as resolve_fixed_connection
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.redaction import redact
-from kitaru.mcp.registry import register_tools
+from kitaru.mcp.registry import build_tools
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
 
 ClientFactory = Callable[[], KitaruAPIClient]
@@ -54,16 +54,15 @@ def create_server(
         finally:
             await state.close()
 
-    server = MCPServer[MCPServerState](
+    return MCPServer[MCPServerState](
         "kitaru",
         description="Bounded typed access to Kitaru v2.",
         debug=settings.debug,
         log_level="DEBUG" if settings.debug else "WARNING",
         lifespan=lifespan,
         extensions=[build_apps_extension()],
+        tools=build_tools(settings.mode),
     )
-    register_tools(server, settings.mode)
-    return server
 
 
 async def run_stdio(settings: MCPSettings) -> None:
@@ -124,6 +123,7 @@ def _parse_arguments(argv: Sequence[str] | None) -> dict[str, object]:
     parser.add_argument("--handler-timeout", type=float, dest="handler_timeout")
     parser.add_argument("--pool-size", type=int, dest="pool_size")
     parser.add_argument("--max-concurrency", type=int, dest="max_concurrency")
+    parser.add_argument("--viewers-dir", dest="viewers_dir")
     parser.add_argument("--debug", action="store_true", default=None)
     namespace = parser.parse_args(list(argv or ()))
     return {key: value for key, value in vars(namespace).items() if value is not None}

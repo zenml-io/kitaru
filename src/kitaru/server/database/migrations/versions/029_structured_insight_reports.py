@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Rework insight rows into structured insight reports.
 
-Revision ID: 028_structured_insight_reports
-Revises: 027_session_group
+Revision ID: 029_structured_insight_reports
+Revises: 028_session_sort_indexes
 Create Date: 2026-11-25
 
 """
@@ -28,8 +28,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = "028_structured_insight_reports"
-down_revision = "027_session_group"
+revision = "029_structured_insight_reports"
+down_revision = "028_session_sort_indexes"
 branch_labels = None
 depends_on = None
 

@@ -96,14 +96,36 @@ def build_session_filter(
     return AndFilter.model_validate({"and": operands})
 
 
-def read_session_file(path: Path) -> list[tuple[int, str]]:
+def read_session_file(
+    path: Path, *, option: str = "--sessions-file"
+) -> list[tuple[int, str]]:
     """Read UTF-8 session UUID lines without accepting stdin or comments."""
-    content = read_utf8_file(path, "--sessions-file")
+    content = read_utf8_file(path, option)
     return [
         (line_number, line.strip())
         for line_number, line in enumerate(content.splitlines(), start=1)
         if line.strip()
     ]
+
+
+def parse_session_uuid_file(path: Path, *, option: str) -> list[uuid.UUID]:
+    """Parse one UTF-8 file containing one session UUID per nonblank line."""
+    lines = read_session_file(path, option=option)
+    if not lines:
+        raise CLIError(
+            "invalid_arguments",
+            f"{option} must contain at least one session UUID.",
+        )
+    session_ids: list[uuid.UUID] = []
+    for line_number, value in lines:
+        try:
+            session_ids.append(uuid.UUID(value))
+        except ValueError as error:
+            raise CLIError(
+                "invalid_arguments",
+                f"{option} line {line_number} must contain an exact UUID.",
+            ) from error
+    return session_ids
 
 
 def parse_session_ids(values: list[str], sessions_file: Path | None) -> list[uuid.UUID]:
@@ -157,16 +179,19 @@ async def get_cohort_version(
 
     parent_reference, requested = parse_version_reference(normalized, "Cohort")
     cohort = await resolve_asset(client.cohorts, parent_reference, "Cohort")
-    version_number = cohort.latest_version if requested == "latest" else requested
-    matches = [
-        item
-        async for item in client.cohorts.iter_versions(cohort.id)
-        if item.version == version_number
-    ]
+    versions = [item async for item in client.cohorts.iter_versions(cohort.id)]
+    version_number = (
+        max((item.version for item in versions), default=None)
+        if requested == "latest"
+        else requested
+    )
+    matches = [item for item in versions if item.version == version_number]
     if not matches:
         raise CLIError(
             "not_found",
-            f"Cohort {cohort.name!r} has no version {version_number}.",
+            f"Cohort {cohort.name!r} has no versions."
+            if version_number is None
+            else f"Cohort {cohort.name!r} has no version {version_number}.",
         )
     if len(matches) > 1:
         raise CLIError(

@@ -1,20 +1,22 @@
 {
   "budgets": {
-    "maximum_destructive_discovery_bytes": 368640,
-    "maximum_tool_schema_bytes": 106496,
-    "maximum_tools": 19
+    "maximum_destructive_model_discovery_bytes": 368640,
+    "maximum_model_tools": 19,
+    "maximum_tool_schema_bytes": 106496
   },
   "modes": {
     "destructive": {
-      "discovery_response_bytes": 362393,
-      "tool_count": 19,
+      "discovery_response_bytes": 383019,
+      "model_discovery_response_bytes": 361636,
+      "model_tool_count": 19,
+      "tool_count": 22,
       "tools": {
         "kitaru_activity_read": {
-          "$defs_count": 53,
-          "combined_bytes": 45448,
+          "$defs_count": 54,
+          "combined_bytes": 45846,
           "input_bytes": 5416,
           "maximum_nesting_depth": 8,
-          "output_bytes": 40032
+          "output_bytes": 40430
         },
         "kitaru_analyzers_manage": {
           "$defs_count": 11,
@@ -39,8 +41,8 @@
         },
         "kitaru_connections_manage": {
           "$defs_count": 5,
-          "combined_bytes": 4917,
-          "input_bytes": 2549,
+          "combined_bytes": 6533,
+          "input_bytes": 4165,
           "maximum_nesting_depth": 8,
           "output_bytes": 2368
         },
@@ -74,15 +76,15 @@
         },
         "kitaru_failure_matrix": {
           "$defs_count": 11,
-          "combined_bytes": 8462,
+          "combined_bytes": 8577,
           "input_bytes": 4192,
           "maximum_nesting_depth": 8,
-          "output_bytes": 4270
+          "output_bytes": 4385
         },
         "kitaru_failure_matrix_cell": {
           "$defs_count": 10,
-          "combined_bytes": 7111,
-          "input_bytes": 4413,
+          "combined_bytes": 7234,
+          "input_bytes": 4536,
           "maximum_nesting_depth": 8,
           "output_bytes": 2698
         },
@@ -128,6 +130,27 @@
           "maximum_nesting_depth": 7,
           "output_bytes": 4721
         },
+        "kitaru_session_view": {
+          "$defs_count": 4,
+          "combined_bytes": 3688,
+          "input_bytes": 1078,
+          "maximum_nesting_depth": 7,
+          "output_bytes": 2610
+        },
+        "kitaru_viewer_read": {
+          "$defs_count": 11,
+          "combined_bytes": 6870,
+          "input_bytes": 2381,
+          "maximum_nesting_depth": 7,
+          "output_bytes": 4489
+        },
+        "kitaru_viewer_write": {
+          "$defs_count": 8,
+          "combined_bytes": 6136,
+          "input_bytes": 4996,
+          "maximum_nesting_depth": 7,
+          "output_bytes": 1140
+        },
         "kitaru_workflow_cancel": {
           "$defs_count": 11,
           "combined_bytes": 7261,
@@ -145,15 +168,17 @@
       }
     },
     "read-only": {
-      "discovery_response_bytes": 172171,
-      "tool_count": 9,
+      "discovery_response_bytes": 184704,
+      "model_discovery_response_bytes": 169798,
+      "model_tool_count": 9,
+      "tool_count": 11,
       "tools": {
         "kitaru_activity_read": {
-          "$defs_count": 53,
-          "combined_bytes": 45448,
+          "$defs_count": 54,
+          "combined_bytes": 45846,
           "input_bytes": 5416,
           "maximum_nesting_depth": 8,
-          "output_bytes": 40032
+          "output_bytes": 40430
         },
         "kitaru_connection_read": {
           "$defs_count": 6,
@@ -171,15 +196,15 @@
         },
         "kitaru_failure_matrix": {
           "$defs_count": 11,
-          "combined_bytes": 8462,
+          "combined_bytes": 8577,
           "input_bytes": 4192,
           "maximum_nesting_depth": 8,
-          "output_bytes": 4270
+          "output_bytes": 4385
         },
         "kitaru_failure_matrix_cell": {
           "$defs_count": 10,
-          "combined_bytes": 7111,
-          "input_bytes": 4413,
+          "combined_bytes": 7234,
+          "input_bytes": 4536,
           "maximum_nesting_depth": 8,
           "output_bytes": 2698
         },
@@ -210,19 +235,35 @@
           "input_bytes": 1019,
           "maximum_nesting_depth": 7,
           "output_bytes": 4721
+        },
+        "kitaru_session_view": {
+          "$defs_count": 4,
+          "combined_bytes": 3688,
+          "input_bytes": 1078,
+          "maximum_nesting_depth": 7,
+          "output_bytes": 2610
+        },
+        "kitaru_viewer_read": {
+          "$defs_count": 11,
+          "combined_bytes": 6870,
+          "input_bytes": 2381,
+          "maximum_nesting_depth": 7,
+          "output_bytes": 4489
         }
       }
     },
     "standard": {
-      "discovery_response_bytes": 350560,
-      "tool_count": 17,
+      "discovery_response_bytes": 371186,
+      "model_discovery_response_bytes": 349803,
+      "model_tool_count": 17,
+      "tool_count": 20,
       "tools": {
         "kitaru_activity_read": {
-          "$defs_count": 53,
-          "combined_bytes": 45448,
+          "$defs_count": 54,
+          "combined_bytes": 45846,
           "input_bytes": 5416,
           "maximum_nesting_depth": 8,
-          "output_bytes": 40032
+          "output_bytes": 40430
         },
         "kitaru_analyzers_manage": {
           "$defs_count": 11,
@@ -247,8 +288,8 @@
         },
         "kitaru_connections_manage": {
           "$defs_count": 5,
-          "combined_bytes": 4917,
-          "input_bytes": 2549,
+          "combined_bytes": 6533,
+          "input_bytes": 4165,
           "maximum_nesting_depth": 8,
           "output_bytes": 2368
         },
@@ -275,15 +316,15 @@
         },
         "kitaru_failure_matrix": {
           "$defs_count": 11,
-          "combined_bytes": 8462,
+          "combined_bytes": 8577,
           "input_bytes": 4192,
           "maximum_nesting_depth": 8,
-          "output_bytes": 4270
+          "output_bytes": 4385
         },
         "kitaru_failure_matrix_cell": {
           "$defs_count": 10,
-          "combined_bytes": 7111,
-          "input_bytes": 4413,
+          "combined_bytes": 7234,
+          "input_bytes": 4536,
           "maximum_nesting_depth": 8,
           "output_bytes": 2698
         },
@@ -328,6 +369,27 @@
           "input_bytes": 1019,
           "maximum_nesting_depth": 7,
           "output_bytes": 4721
+        },
+        "kitaru_session_view": {
+          "$defs_count": 4,
+          "combined_bytes": 3688,
+          "input_bytes": 1078,
+          "maximum_nesting_depth": 7,
+          "output_bytes": 2610
+        },
+        "kitaru_viewer_read": {
+          "$defs_count": 11,
+          "combined_bytes": 6870,
+          "input_bytes": 2381,
+          "maximum_nesting_depth": 7,
+          "output_bytes": 4489
+        },
+        "kitaru_viewer_write": {
+          "$defs_count": 8,
+          "combined_bytes": 6136,
+          "input_bytes": 4996,
+          "maximum_nesting_depth": 7,
+          "output_bytes": 1140
         },
         "kitaru_workflow_start": {
           "$defs_count": 24,

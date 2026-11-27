@@ -1,20 +1,48 @@
 #  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
 """Capability inventories, SDK schemas, and protocol result contracts."""
 
+import asyncio
 import json
+import logging
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, cast
 
+import pytest
+from jsonschema import Draft202012Validator
+from mcp.server import MCPServer
 from mcp.types import TextContent
+from pydantic import Field, TypeAdapter, ValidationError
+from scripts.report_mcp_schema import (
+    MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES,
+    MAX_MODEL_TOOLS,
+    MAX_TOOL_SCHEMA_BYTES,
+)
 
 from kitaru.api_models.v1.agent import AgentResponse
+from kitaru.api_models.v1.session import SessionDetailResponse, SessionResponse
+from kitaru.api_models.v1.tag import TagResponse
+from kitaru.mcp import registry
+from kitaru.mcp.apps import is_model_visible
 from kitaru.mcp.errors import (
     MCPToolError,
     error_result,
     protocol_result,
     success_result,
 )
-from kitaru.mcp.models.common import RegistryReadResult, ToolResult
+from kitaru.mcp.lifecycle import MCPServerState
+from kitaru.mcp.models.common import (
+    ActivityItem,
+    ActivityReadResult,
+    PageData,
+    PageMetadata,
+    RegistryReadResult,
+    ToolResult,
+    ToolSuccessPayload,
+)
+from kitaru.mcp.registry import TOOL_SPECS, ToolSpec, get_tool_specs, invoke_tool
 from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
 
@@ -29,6 +57,8 @@ EXPECTED = {
         "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
+        "kitaru_session_view",
+        "kitaru_viewer_read",
     ],
     CapabilityMode.STANDARD: [
         "kitaru_registry_read",
@@ -40,6 +70,8 @@ EXPECTED = {
         "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
+        "kitaru_session_view",
+        "kitaru_viewer_read",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
@@ -48,6 +80,7 @@ EXPECTED = {
         "kitaru_evaluators_manage",
         "kitaru_analyzers_manage",
         "kitaru_connections_manage",
+        "kitaru_viewer_write",
     ],
     CapabilityMode.DESTRUCTIVE: [
         "kitaru_registry_read",
@@ -59,6 +92,8 @@ EXPECTED = {
         "kitaru_feedback_draft",
         "kitaru_failure_matrix",
         "kitaru_failure_matrix_cell",
+        "kitaru_session_view",
+        "kitaru_viewer_read",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
@@ -67,6 +102,7 @@ EXPECTED = {
         "kitaru_evaluators_manage",
         "kitaru_analyzers_manage",
         "kitaru_connections_manage",
+        "kitaru_viewer_write",
         "kitaru_workflow_cancel",
         "kitaru_delete",
     ],
@@ -96,8 +132,173 @@ async def test_exact_capability_filtered_inventories_and_annotations() -> None:
                     "kitaru_feedback_draft",
                     "kitaru_failure_matrix",
                     "kitaru_failure_matrix_cell",
+                    "kitaru_session_view",
+                    "kitaru_viewer_read",
                 }
             )
+
+
+class _HostError(Exception):
+    """A failure a host handles itself."""
+
+
+def _get_spec(name: str) -> ToolSpec:
+    return next(spec for spec in TOOL_SPECS if spec.name == name)
+
+
+def _get_request(spec: ToolSpec, payload: object) -> object:
+    return TypeAdapter(spec.request_type).validate_python(payload)
+
+
+async def test_invoke_tool_masks_credentials_in_tool_data() -> None:
+    async def leak(_state: MCPServerState, _request: object) -> object:
+        return {"OPENAI_API_KEY": "sk-leak-value", "note": "Bearer leak-bearer"}
+
+    spec = replace(_get_spec("kitaru_registry_read"), run=leak, result_type=ToolResult)
+    request = _get_request(spec, {"operation": "list", "kind": "agent"})
+
+    result = await invoke_tool(spec, MCPServerState(MCPSettings()), request)
+
+    serialized = json.dumps(result.structured_content)
+    assert result.is_error is False
+    assert "sk-leak-value" not in serialized
+    assert "leak-bearer" not in serialized
+
+
+async def test_invoke_tool_returns_viewer_source_unchanged(tmp_path: Path) -> None:
+    source = "<script>const label = `Bearer ${token}`;</script>"
+    (tmp_path / "auth.html").write_text(source)
+    spec = _get_spec("kitaru_viewer_read")
+    request = _get_request(spec, {"operation": "viewer_source", "viewer": "auth"})
+
+    result = await invoke_tool(
+        spec, MCPServerState(MCPSettings(viewers_dir=tmp_path)), request
+    )
+
+    assert cast(dict[str, Any], result.structured_content)["data"]["html"] == source
+    assert source in cast(TextContent, result.content[0]).text
+
+
+class _LinkedResult(ToolResult):
+    links: dict[str, str] = Field(default_factory=dict)
+
+
+@pytest.mark.parametrize("text", [None, "Summary with Bearer leak-text"])
+async def test_unredacted_data_keeps_warnings_links_and_text_masked(
+    text: str | None,
+) -> None:
+    source = "<script>const label = `Bearer ${token}`;</script>"
+
+    async def viewer_file(_state: MCPServerState, _request: object) -> object:
+        return ToolSuccessPayload(
+            data={"html": source},
+            warnings=["retry with Bearer leak-warning"],
+            links={"open": "https://example.test/?key=KITKEY_leaklink"},
+            text=text,
+            redact=False,
+        )
+
+    spec = replace(
+        _get_spec("kitaru_docs_search"), run=viewer_file, result_type=_LinkedResult
+    )
+    request = _get_request(spec, {"query": "viewer"})
+
+    result = await invoke_tool(spec, MCPServerState(MCPSettings()), request)
+
+    structured = cast(dict[str, Any], result.structured_content)
+    shown = json.dumps(structured) + cast(TextContent, result.content[0]).text
+    assert structured["data"]["html"] == source
+    assert structured["warnings"] == ["retry with Bearer ***"]
+    assert structured["links"] == {"open": "https://example.test/?key=KITKEY_***"}
+    assert not any(leak in shown for leak in ("leak-warning", "leaklink", "leak-text"))
+
+
+def test_validate_request_types_a_request_and_never_shows_its_input() -> None:
+    spec = _get_spec("kitaru_connections_manage")
+    secrets = {"OPENAI_API_KEY": 98761}
+
+    with pytest.raises(ValidationError) as refused:
+        spec.validate_request(
+            {"operation": "create", "name": "n", "provider": "p", "secrets": secrets}
+        )
+    valid = spec.validate_request(
+        {"operation": "create", "name": "n", "provider": "p", "env": {"REGION": "eu"}}
+    )
+
+    assert "98761" not in str(refused.value)
+    assert "request.create.secrets.OPENAI_API_KEY" in str(refused.value)
+    assert valid.env == {"REGION": "eu"}
+
+
+def test_register_tools_still_registers_the_tools_but_is_deprecated() -> None:
+    server = MCPServer("kitaru")
+
+    with pytest.warns(DeprecationWarning, match="build_tools"):
+        registry.register_tools(server, CapabilityMode.READ_ONLY)
+
+    assert len(asyncio.run(server.list_tools())) == len(
+        get_tool_specs(CapabilityMode.READ_ONLY)
+    )
+
+
+async def test_invoke_tool_bounds_the_handler_with_the_state_settings() -> None:
+    async def never_finish(_state: MCPServerState, _request: object) -> object:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    spec = replace(_get_spec("kitaru_docs_search"), run=never_finish)
+    request = _get_request(spec, {"query": "matrix"})
+    state = MCPServerState(MCPSettings(handler_timeout=0.01))
+
+    result = await invoke_tool(spec, state, request)
+
+    assert cast(dict[str, Any], result.structured_content)["error"]["code"] == (
+        "timeout"
+    )
+
+
+async def test_invoke_tool_raises_host_errors_and_logs_others_by_type_only(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    raised: list[Exception] = []
+
+    async def fail(_state: MCPServerState, _request: object) -> object:
+        raise raised[-1]
+
+    spec = replace(_get_spec("kitaru_docs_search"), run=fail)
+    request = _get_request(spec, {"query": "matrix"})
+    state = MCPServerState(MCPSettings())
+    caplog.set_level(logging.DEBUG, logger="kitaru.mcp.registry")
+
+    raised.append(_HostError("handled by the host"))
+    with pytest.raises(_HostError):
+        await invoke_tool(spec, state, request, passthrough=(_HostError,))
+    raised.append(RuntimeError("backend echoed sk-unmasked-secret"))
+    result = await invoke_tool(spec, state, request, passthrough=(_HostError,))
+
+    assert result.is_error is True
+    assert "RuntimeError" in caplog.text
+    assert "sk-unmasked-secret" not in caplog.text
+
+
+SERVERLESS_REQUESTS = {
+    "kitaru_docs_search": {"query": "failure matrix"},
+    "kitaru_feedback_draft": {
+        "title": "Docs search misses",
+        "problem": "kitaru_docs_search returned nothing for a known guide.",
+    },
+}
+
+
+async def test_tools_marked_as_needing_no_server_run_without_a_client() -> None:
+    serverless = [spec for spec in TOOL_SPECS if not spec.needs_server]
+    # Built without a client: a tool that reads one raises.
+    state = MCPServerState(MCPSettings())
+
+    assert {spec.name for spec in serverless} == set(SERVERLESS_REQUESTS)
+    for spec in serverless:
+        request = _get_request(spec, SERVERLESS_REQUESTS[spec.name])
+        assert await spec.run(state, request) is not None
 
 
 async def test_actual_sdk_discovery_schemas_fit_budgets() -> None:
@@ -112,9 +313,65 @@ async def test_actual_sdk_discovery_schemas_fit_budgets() -> None:
         combined = _compact_size(tool["inputSchema"]) + _compact_size(
             tool["outputSchema"]
         )
-        assert combined < 104 * 1024
-    assert _compact_size({"tools": dumped}) < 360 * 1024
-    assert len(tools) <= 19
+        assert combined < MAX_TOOL_SCHEMA_BYTES
+    # Hosts keep app-only tools out of the model's context, so the context
+    # budget counts the tools the model sees.
+    model_visible = [tool for tool in dumped if is_model_visible(tool.get("_meta"))]
+    assert (
+        _compact_size({"tools": model_visible}) < MAX_DESTRUCTIVE_MODEL_DISCOVERY_BYTES
+    )
+    assert len(model_visible) <= MAX_MODEL_TOOLS
+
+
+@pytest.mark.parametrize("session_type", [SessionResponse, SessionDetailResponse])
+@pytest.mark.parametrize("serialized", [False, True])
+def test_activity_result_preserves_generic_pages_and_complete_session_tags(
+    session_type: type[SessionResponse], serialized: bool
+) -> None:
+    now = datetime.now(UTC)
+    tag = TagResponse(
+        id=uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        name="reviewed",
+        created=now,
+        updated=now,
+    )
+    session = session_type.model_validate(
+        {
+            "id": uuid.uuid4(),
+            "owner_id": tag.owner_id,
+            "agent_id": uuid.uuid4(),
+            "number": 1,
+            "origin": "imported",
+            "status": "completed",
+            "metadata": {},
+            "llm_call_count": 0,
+            "tool_call_count": 0,
+            "tags": [tag],
+            "created": now,
+            "updated": now,
+            "inputs": {"question": "Why?"},
+            "outputs": {"answer": "Because."},
+        }
+    )
+    page = PageData[ActivityItem](
+        items=[session],
+        page=PageMetadata(size=1, next_cursor="next-page", has_more=True),
+    )
+
+    result = ActivityReadResult.model_validate(
+        {"ok": True, "data": page.model_dump(mode="json") if serialized else page}
+    )
+    result_data = result.model_dump(mode="json")["data"]
+
+    assert result_data == {
+        "items": [session.model_dump(mode="json")],
+        "page": {"size": 1, "next_cursor": "next-page", "has_more": True},
+    }
+    assert result_data["items"][0]["tags"] == [tag.model_dump(mode="json")]
+    Draft202012Validator(ActivityReadResult.model_json_schema()).validate(
+        result.model_dump(mode="json")
+    )
 
 
 async def test_activity_child_schema_exposes_only_kind_specific_fields() -> None:
@@ -239,6 +496,58 @@ def test_nested_secret_containers_are_redacted_in_structured_and_text_results() 
         assert leaked not in serialized
         assert leaked not in text.text
     assert json.loads(text.text) == result.structured_content
+
+
+def test_mcp_result_preserves_provider_token_counts_and_masks_credentials() -> None:
+    payload = {
+        "usage": {
+            "input_tokens": 10,
+            "cache_read_tokens": 5,
+            "total_tokens": 15,
+            "request_tokens": 3,
+            "completion_tokens": 7,
+            "prompt_tokens": 8,
+            "cache_creation_input_tokens": 12,
+        },
+        "model_settings": {"max_tokens": 1024, "max-tokens": 2048},
+        "provider_metadata": {
+            "api_key": "leak-api-key",
+            "access_token": "leak-access-token",
+            "access_tokens": 123,
+            "refresh_tokens": 456,
+            "github_token": 789,
+            "max_tokens": True,
+            "cache_read_tokens": "KITKEY_leak",
+        },
+    }
+    result = protocol_result(success_result(ToolResult, payload))
+    assert result.structured_content is not None
+    assert result.structured_content["data"] == {
+        "usage": {
+            "input_tokens": 10,
+            "cache_read_tokens": 5,
+            "total_tokens": 15,
+            "request_tokens": 3,
+            "completion_tokens": 7,
+            "prompt_tokens": 8,
+            "cache_creation_input_tokens": 12,
+        },
+        "model_settings": {"max_tokens": 1024, "max-tokens": 2048},
+        "provider_metadata": {
+            "api_key": "***",
+            "access_token": "***",
+            "access_tokens": "***",
+            "refresh_tokens": "***",
+            "github_token": "***",
+            "max_tokens": "***",
+            "cache_read_tokens": "***",
+        },
+    }
+    text = result.content[0]
+    assert isinstance(text, TextContent)
+    assert json.loads(text.text) == result.structured_content
+    for leaked in ("leak-api-key", "leak-access-token", "KITKEY_leak"):
+        assert leaked not in text.text
 
 
 def _compact_size(value: object) -> int:

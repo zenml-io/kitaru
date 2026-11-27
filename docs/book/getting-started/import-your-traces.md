@@ -19,10 +19,10 @@ Importers for **Langfuse, LangSmith, Braintrust, Logfire, Arize Phoenix, MLflow,
 **Traces in OpenTelemetry format?** There is no OTel ingestion endpoint yet. Export the spans and convert them to [Kitaru JSONL](../guides/importing-sessions.md), or wrap that conversion in a [custom importer](../guides/custom-importer.md) so your exports import directly; the `kitaru-importer-builder` skill drafts one from a sample export.
 {% endhint %}
 
-Register the agent these traces belong to, if you haven't:
+Register the agent these traces belong to, if you haven't (omit `--command` if this agent only receives imported traces; add it later with `kitaru agent version update` or a new version when you want to replay):
 
 ```bash
-kitaru agent register support-agent --command "python support.py"
+kitaru agent register support-agent
 ```
 
 ## 2. Import the export
@@ -47,7 +47,7 @@ The final receipt reports what happened: sessions `created`, `skipped`, and `fai
 kitaru session list --agent support-agent --origin imported
 ```
 
-The same import is two calls on the [Python client](../deploy/configuration.md) when you'd rather script it: upload the export with `client.blobs.upload(...)`, then create the import with `client.imports.create(ImportCreateRequest( importer="langfuse", agent_id=..., payload_blob_id=...))`.
+The same import is two calls on the [Python client](../deploy/configuration.md) when you'd rather script it: upload the export with `client.blobs.upload(...)`, then create the import with `client.imports.create(ImportCreateRequest(importer="kitaru/langfuse", agent_id=..., source=BlobImportSource(blob_id=...)))` (or `source={"type": "blob", "blob_id": ...}`).
 
 ## Or skip the export
 

@@ -19,7 +19,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, ClassVar
 
-from pydantic import AwareDatetime, Field
+from pydantic import AwareDatetime, Field, field_validator
 
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
@@ -32,13 +32,22 @@ from kitaru.server.filtering import (
     ORDERED_OPS,
     SCOPE_OPS,
     STRING_OPS,
+    AndExpression,
+    FilterCondition,
+    FilterExpression,
     FilterField,
+    NotExpression,
+    OrExpression,
+    validate_filter_expression,
 )
 
 
 class SessionFilter(ListFilter):
     """Session list filter."""
 
+    sortable_fields: ClassVar[frozenset[str]] = frozenset(
+        {"created", "started_at", "number"}
+    )
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
         "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "agent_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
@@ -69,6 +78,51 @@ class SessionFilter(ListFilter):
         "tool_call_count": FilterField(value_type=int, ops=ORDERED_OPS),
         "created": FilterField(value_type=AwareDatetime, ops=ORDERED_OPS),
     }
+
+    @field_validator("expression")
+    @classmethod
+    def _validate_expression(
+        cls, value: FilterExpression | None
+    ) -> FilterExpression | None:
+        """Validate session conditions and canonicalize the tags alias.
+
+        Args:
+            value: Session filter expression.
+
+        Returns:
+            Validated expression using canonical field names.
+        """
+        if value is None:
+            return None
+        validated = validate_filter_expression(
+            value, {**cls.filterable_fields, "tags": cls.filterable_fields["tag"]}
+        )
+        return cls._normalize_tag_alias(validated)
+
+    @classmethod
+    def _normalize_tag_alias(cls, expression: FilterExpression) -> FilterExpression:
+        """Replace tags with tag in a bounded, validated expression.
+
+        Args:
+            expression: Validated session filter expression.
+
+        Returns:
+            Expression using canonical field names.
+        """
+        if isinstance(expression, FilterCondition):
+            return (
+                expression.model_copy(update={"field": "tag"})
+                if expression.field == "tags"
+                else expression
+            )
+        if isinstance(expression, NotExpression):
+            return NotExpression(operand=cls._normalize_tag_alias(expression.operand))
+        operands = tuple(
+            cls._normalize_tag_alias(operand) for operand in expression.operands
+        )
+        if isinstance(expression, AndExpression):
+            return AndExpression(operands=operands)
+        return OrExpression(operands=operands)
 
 
 class SessionCreate(FrozenModel):

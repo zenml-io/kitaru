@@ -20,6 +20,7 @@ from kitaru.api_models.v1.task import (
     AnalysisTaskDetails,
     ApiImportSourceSpec,
     BlobImportSourceSpec,
+    EvaluationBaselineContext,
     EvaluationTaskDetails,
     ImportSourceSpec,
     ImportTaskDetails,
@@ -101,7 +102,9 @@ def task_to_response(task: Task) -> TaskResponse:
             task.agent_version_id if isinstance(task, AgentTask) else None
         ),
         plugin_version_id=(
-            task.plugin_version_id if isinstance(task, EvaluationTask) else None
+            task.plugin_version_id
+            if isinstance(task, (EvaluationTask, AnalysisTask))
+            else None
         ),
         input_session_id=(
             task.input_session_id if isinstance(task, EvaluationTask) else None
@@ -192,6 +195,12 @@ def _details_to_response(spec: TaskSpec) -> TaskDetails:
             params=details.params,
             plugin=_plugin_spec_to_response(details.plugin),
             input_session_id=details.input_session_id,
+            baseline=EvaluationBaselineContext(
+                session_id=details.baseline.session_id,
+                metadata=details.baseline.metadata,
+            )
+            if details.baseline is not None
+            else None,
         )
     if isinstance(details, DomainImportTaskDetails):
         return ImportTaskDetails(

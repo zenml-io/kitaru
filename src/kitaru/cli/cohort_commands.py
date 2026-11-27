@@ -56,7 +56,11 @@ from kitaru.cli.schema import ParameterSpec
                 "--metadata", "JSON object", "option", False, "Cohort metadata."
             ),
             ParameterSpec(
-                "--session", "UUID[]", "option", False, "Explicit session IDs."
+                "--session",
+                "UUID[]",
+                "option",
+                False,
+                "Session UUID to include; repeat for each session.",
             ),
             ParameterSpec(
                 "--sessions-file",
@@ -269,14 +273,28 @@ async def cohort_delete(cohort: str, /, *, force: bool = False) -> CommandResult
                 "UUID[]",
                 "option",
                 False,
-                "Ordered session IDs to add.",
+                "Session UUID to add; repeat for each session.",
+            ),
+            ParameterSpec(
+                "--add-sessions-file",
+                "path",
+                "option",
+                False,
+                "UTF-8 file with one session UUID per nonblank line to add.",
             ),
             ParameterSpec(
                 "--remove-session",
                 "UUID[]",
                 "option",
                 False,
-                "Ordered session IDs to remove.",
+                "Session UUID to remove; repeat for each session.",
+            ),
+            ParameterSpec(
+                "--remove-sessions-file",
+                "path",
+                "option",
+                False,
+                "UTF-8 file with one session UUID per nonblank line to remove.",
             ),
             ParameterSpec(
                 "--baseline",
@@ -292,6 +310,13 @@ async def cohort_delete(cohort: str, /, *, force: bool = False) -> CommandResult
                 False,
                 "Human-readable version.",
             ),
+            ParameterSpec(
+                "--allow-unchanged",
+                "boolean",
+                "option",
+                False,
+                "Allow an empty delta to copy the latest or baseline membership.",
+            ),
             IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
@@ -305,9 +330,17 @@ async def cohort_version_create(
     /,
     *,
     add_session: list[uuid.UUID] | None = None,
+    add_sessions_file: Path | None = None,
     remove_session: list[uuid.UUID] | None = None,
+    remove_sessions_file: Path | None = None,
     baseline: uuid.UUID | None = None,
     display_version: str | None = None,
+    allow_unchanged: Annotated[
+        bool,
+        Parameter(
+            help="Allow an empty delta to copy the latest or baseline membership."
+        ),
+    ] = False,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create an immutable version from an ordered membership delta."""
@@ -316,9 +349,12 @@ async def cohort_version_create(
             client,
             cohort,
             add_session_ids=add_session,
+            add_sessions_file=add_sessions_file,
             remove_session_ids=remove_session,
+            remove_sessions_file=remove_sessions_file,
             baseline_id=baseline,
             display_version=display_version,
+            allow_unchanged=allow_unchanged,
             idempotency_key=idempotency_key,
         )
 

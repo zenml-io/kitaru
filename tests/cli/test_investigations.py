@@ -62,6 +62,7 @@ class StubInvestigationClient:
 
     def __init__(self) -> None:
         self.agent = StubModel(uuid.uuid4(), {"name": "assistant"})
+        self.agents_by_id: dict[uuid.UUID, StubModel] = {self.agent.id: self.agent}
         self.session_ids = [uuid.uuid4(), uuid.uuid4()]
         self.investigation = StubModel(
             uuid.uuid4(),
@@ -72,8 +73,12 @@ class StubInvestigationClient:
                 "status": "pending",
                 "total_sessions": 2,
                 "completed_sessions": 0,
+                "created": "2026-04-01T12:00:00Z",
             },
         )
+        self.listed_investigations: list[StubModel] | None = None
+        self.list_next_cursor: str | None = "next-investigation"
+        self.list_error: Exception | None = None
         self.investigation_session = StubModel(
             uuid.uuid4(),
             {
@@ -129,17 +134,19 @@ class StubInvestigationClient:
 
         async def iter(self):
             self.owner.agent_lookups += 1
-            yield self.owner.agent
+            for agent in self.owner.agents_by_id.values():
+                yield agent
 
         async def list(self, params: Any) -> Any:
             assert params.size == 2
             self.owner.agent_lookups += 1
-            return SimpleNamespace(items=[self.owner.agent], next_cursor=None)
+            return SimpleNamespace(
+                items=list(self.owner.agents_by_id.values()), next_cursor=None
+            )
 
         async def get(self, agent_id: uuid.UUID) -> StubModel:
             self.owner.agent_lookups += 1
-            assert agent_id == self.owner.agent.id
-            return self.owner.agent
+            return self.owner.agents_by_id[agent_id]
 
     class _Investigations:
         def __init__(self, owner: "StubInvestigationClient") -> None:
@@ -156,9 +163,14 @@ class StubInvestigationClient:
 
         async def list(self, params: InvestigationListParams) -> Any:
             self.owner.list_calls.append(params)
-            return SimpleNamespace(
-                items=[self.owner.investigation], next_cursor="next-investigation"
+            if self.owner.list_error is not None:
+                raise self.owner.list_error
+            items = (
+                [self.owner.investigation]
+                if self.owner.listed_investigations is None
+                else list(self.owner.listed_investigations)
             )
+            return SimpleNamespace(items=items, next_cursor=self.owner.list_next_cursor)
 
         async def get(self, investigation_id: uuid.UUID) -> StubModel:
             self.owner.get_calls.append(investigation_id)
@@ -412,6 +424,21 @@ async def test_create_warns_when_server_info_is_unavailable(
             [f"{uuid.UUID(int=5)}:retry=[]"],
             "has no matching --session-question",
         ),
+        (
+            [uuid.UUID(int=6)],
+            [],
+            [],
+            f"--session {uuid.UUID(int=6)} has no --session-question\\..*"
+            f'--session-question {uuid.UUID(int=6)}:verdict="\\.\\.\\."',
+        ),
+        (
+            [uuid.UUID(int=6), uuid.UUID(int=7), uuid.UUID(int=8)],
+            [f"{uuid.UUID(int=7)}:root-cause=why?"],
+            [],
+            f"Sessions missing --session-question: {uuid.UUID(int=6)}, "
+            f"{uuid.UUID(int=8)}\\..*"
+            f'--session-question {uuid.UUID(int=6)}:verdict="\\.\\.\\."',
+        ),
     ],
 )
 async def test_create_validation_precedes_agent_lookup(
@@ -436,6 +463,185 @@ async def test_create_validation_precedes_agent_lookup(
 
     assert client.agent_lookups == 0
     assert client.create_calls == []
+
+
+async def test_create_warns_when_duplicate_name_exists_for_agent() -> None:
+    """Create succeeds with a warning when the agent already has that name."""
+    client = StubInvestigationClient()
+    existing = StubModel(
+        uuid.uuid4(),
+        {
+            "agent_id": str(client.agent.id),
+            "name": "triage",
+            "created": "2026-04-01T10:00:00Z",
+        },
+    )
+    client.listed_investigations = [existing]
+
+    result = await _create_minimal(client)
+
+    assert result.item["id"] == str(client.investigation.id)
+    assert len(client.create_calls) == 1
+    assert len(client.list_calls) == 1
+    assert client.list_calls[0].size == 1
+    assert client.list_calls[0].filter is not None
+    assert client.list_calls[0].filter.model_dump(mode="json", by_alias=True) == {
+        "and": [
+            {"field": "agent_id", "op": "eq", "value": str(client.agent.id)},
+            {"field": "name", "op": "eq", "value": "triage"},
+        ]
+    }
+    assert len(result.warnings) == 1
+    assert "triage" in result.warnings[0]
+    assert str(existing.id) in result.warnings[0]
+    assert "--idempotency-key" in result.warnings[0]
+
+
+async def test_create_skips_duplicate_warning_on_idempotent_retry_or_list_error() -> (
+    None
+):
+    """Idempotent retries and failed pre-checks emit no duplicate warning."""
+    client = StubInvestigationClient()
+    client.investigation.values["name"] = "triage"
+    client.listed_investigations = [client.investigation]
+
+    retried = await investigations.create_investigation(
+        client,
+        "triage",
+        agent="assistant",
+        description=None,
+        session_ids=[],
+        session_questions=[],
+        session_highlights=[],
+        idempotency_key="retry-triage",
+    )
+    assert retried.warnings == []
+
+    client.list_error = APIError(422, "Field 'name' is not filterable")
+    fallback = await _create_minimal(client)
+    assert fallback.item["id"] == str(client.investigation.id)
+    assert fallback.warnings == []
+
+
+async def test_lookup_by_name_resolves_unambiguously_and_reports_conflicts() -> None:
+    """Name lookup succeeds on one exact match, errors on none or multiple."""
+    client = StubInvestigationClient()
+    client.listed_investigations = [client.investigation]
+    client.list_next_cursor = None
+
+    fetched = await investigations.get_investigation(client, "failure-review")
+    assert fetched.item["id"] == str(client.investigation.id)
+    assert client.get_calls == []
+    assert client.list_calls[-1].filter is not None
+    assert client.list_calls[-1].filter.model_dump(mode="json") == {
+        "field": "name",
+        "op": "eq",
+        "value": "failure-review",
+    }
+
+    with pytest.raises(CLIError, match="cannot be blank") as blank_error:
+        await investigations.get_investigation(client, "   ")
+    assert blank_error.value.kind == "invalid_arguments"
+
+    with pytest.raises(CLIError, match="was not found") as missing_error:
+        await investigations.get_investigation(client, "FAILURE-REVIEW")
+    assert missing_error.value.kind == "not_found"
+
+    other_agent = StubModel(uuid.uuid4(), {"name": "billing"})
+    client.agents_by_id[other_agent.id] = other_agent
+    duplicate = StubModel(
+        uuid.uuid4(),
+        {
+            "agent_id": str(other_agent.id),
+            "name": "failure-review",
+            "created": "2026-04-02T15:30:00Z",
+        },
+    )
+    client.listed_investigations = [client.investigation, duplicate]
+
+    with pytest.raises(CLIError) as conflict_error:
+        await investigations.get_investigation(client, "failure-review")
+    assert conflict_error.value.kind == "conflict"
+    assert str(client.investigation.id) in conflict_error.value.message
+    assert str(duplicate.id) in conflict_error.value.message
+    assert str(other_agent.id) in conflict_error.value.message
+    assert "2026-04-02T15:30:00Z" in conflict_error.value.message
+    assert conflict_error.value.details["ids"] == [
+        str(client.investigation.id),
+        str(duplicate.id),
+    ]
+    assert conflict_error.value.hint is not None
+    assert "--agent" in conflict_error.value.hint
+
+    scoped = await investigations.get_investigation(
+        client, "failure-review", agent="billing"
+    )
+    assert scoped.item["id"] == str(duplicate.id)
+    assert client.list_calls[-1].filter is not None
+    assert client.list_calls[-1].filter.model_dump(mode="json", by_alias=True) == {
+        "and": [
+            {"field": "name", "op": "eq", "value": "failure-review"},
+            {"field": "agent_id", "op": "eq", "value": str(other_agent.id)},
+        ]
+    }
+
+    with pytest.raises(CLIError, match="was not found for agent") as wrong_agent:
+        await investigations.get_investigation(
+            client, str(client.investigation.id), agent="billing"
+        )
+    assert wrong_agent.value.kind == "not_found"
+
+    same_agent_dup = StubModel(
+        uuid.uuid4(),
+        {
+            "agent_id": str(client.agent.id),
+            "name": "failure-review",
+            "created": "2026-04-03T09:00:00Z",
+        },
+    )
+    client.listed_investigations = [client.investigation, same_agent_dup]
+    with pytest.raises(CLIError) as scoped_conflict:
+        await investigations.get_investigation(
+            client, "failure-review", agent="assistant"
+        )
+    assert scoped_conflict.value.kind == "conflict"
+    assert scoped_conflict.value.hint == "Pass the exact investigation UUID."
+
+
+async def test_investigation_subcommands_resolve_by_name() -> None:
+    """Update, delete, session list, and verdict commands accept exact names."""
+    client = StubInvestigationClient()
+    client.listed_investigations = [client.investigation]
+    client.list_next_cursor = None
+
+    await investigations.update_investigation(
+        client,
+        "failure-review",
+        name="renamed",
+        description=None,
+        clear_description=False,
+        status=None,
+    )
+    assert client.update_calls[-1][0] == client.investigation.id
+
+    await investigations.list_investigation_sessions(
+        client, "failure-review", size=5, cursor=None
+    )
+    assert client.session_list_calls[-1][0] == client.investigation.id
+
+    await investigations.update_investigation_session_verdict(
+        client,
+        "failure-review",
+        client.session_ids[0],
+        verdict=InvestigationSessionVerdict.ACCEPTABLE,
+    )
+    assert client.session_update_calls[-1][0] == client.investigation.id
+
+    deleted = await investigations.delete_investigation(
+        client, "failure-review", force=True
+    )
+    assert deleted.item == {"id": str(client.investigation.id), "deleted": True}
+    assert client.deleted[-1] == client.investigation.id
 
 
 async def test_crud_and_session_status_commands_map_to_sdk() -> None:
@@ -568,12 +774,14 @@ def test_public_argv_and_schema_cover_investigation_lifecycle(
         (["investigation", "create", "triage", "--agent", "assistant"], "create"),
         (["investigation", "list"], "list"),
         (["investigation", "get", investigation_id], "get"),
+        (["investigation", "get", "failure-review"], "get"),
+        (["investigation", "get", "failure-review", "--agent", "assistant"], "get"),
         (
-            ["investigation", "update", investigation_id, "--name", "renamed"],
+            ["investigation", "update", "failure-review", "--name", "renamed"],
             "update",
         ),
         (
-            ["investigation", "session", "list", investigation_id],
+            ["investigation", "session", "list", "failure-review"],
             "session.list",
         ),
         (
@@ -581,7 +789,7 @@ def test_public_argv_and_schema_cover_investigation_lifecycle(
                 "investigation",
                 "session",
                 "verdict",
-                investigation_id,
+                "failure-review",
                 session_id,
                 "acceptable",
             ],
@@ -604,5 +812,14 @@ def test_public_argv_and_schema_cover_investigation_lifecycle(
         "investigation.session.verdict",
         "investigation.update",
     }
+    create_params = {
+        param["name"]: param for param in specs["investigation.create"]["parameters"]
+    }
+    assert (
+        "requires at least one --session-question"
+        in (create_params["--session-question"]["description"])
+    )
+    get_errors = {error["kind"] for error in specs["investigation.get"]["errors"]}
+    assert "conflict" in get_errors
     assert specs["investigation.delete"]["side_effects"]["deletes_remote_state"]
     assert specs["investigation.session.verdict"]["mutating"] is True

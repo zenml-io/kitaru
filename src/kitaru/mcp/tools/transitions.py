@@ -9,7 +9,7 @@ import hmac
 import secrets
 import uuid
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from fnmatch import fnmatchcase
@@ -39,10 +39,11 @@ MAX_PATH = 8
 MAX_NOTE = 300
 MAX_LABEL = 80
 MAX_UNLOCATED_EVALUATIONS = 10
+# Marks where a label too long for the matrix was cut.
+SHORTENED = "…"
 
-_LABEL_KEY = secrets.token_bytes(32)
+_PROCESS_LABEL_KEY = secrets.token_bytes(32)
 
-Labeler = Callable[[SessionNodeResponse], str | None]
 Transition = tuple[str, str]
 
 
@@ -75,29 +76,62 @@ class SessionOutcome:
         return (self.path[-2] if len(self.path) > 1 else START, self.path[-1])
 
 
-def build_labeler(state_by: StateBy, state_map: Mapping[str, str] | None) -> Labeler:
-    """Return a function mapping a node to its state name, or `None` if not a state."""
-    patterns = tuple((state_map or {}).items())
+@dataclass(frozen=True, slots=True)
+class Labeler:
+    """Name the state a node stands for, as the matrix shows it.
 
-    def label(node: SessionNodeResponse) -> str | None:
-        raw = _raw_state(node, state_by)
-        return None if raw is None else _display_state(raw, patterns)
+    Attributes:
+        state_by: Which nodes are states.
+        patterns: Glob patterns, in order, that group raw state names.
+        key: Key for the digest that tells apart labels redaction made equal.
+    """
 
-    return label
+    state_by: StateBy
+    patterns: tuple[tuple[str, str], ...]
+    key: bytes
+
+    def __call__(self, node: SessionNodeResponse) -> str | None:
+        """Return the node's state label, or `None` if it is not a state."""
+        raw = _raw_state(node, self.state_by)
+        return None if raw is None else self.display(raw)
+
+    def display(self, name: str) -> str:
+        """Return the label shown for a raw state name."""
+        # Redact and bound here rather than on output: the view sends labels back
+        # to the drill-down tool, which must compare them with the string it shows.
+        label = _escape_reserved(map_state(name, self.patterns))
+        shown = redact(label)
+        if shown != label:
+            # Redaction can map distinct labels to one string, and labels are
+            # grouping keys, so tag each with a keyed digest that cannot be used
+            # to test guesses. The space keeps output redaction from swallowing
+            # the tag again.
+            digest = hmac.new(self.key, label.encode(), hashlib.sha256).hexdigest()
+            shown = f"{shown} [{digest[:12]}]"
+        return _bounded(shown)
 
 
-def _display_state(name: str, patterns: Sequence[tuple[str, str]]) -> str:
-    # Redact and bound here rather than on output: the view sends labels back to
-    # the drill-down tool, which must compare them with the same string it shows.
-    label = _escape_reserved(map_state(name, patterns))
-    shown = redact(label)
-    if shown != label:
-        # Redaction can map distinct labels to one string, and labels are grouping
-        # keys, so tag each with a keyed digest that cannot be used to test guesses.
-        # The space keeps output redaction from swallowing the tag again.
-        digest = hmac.new(_LABEL_KEY, label.encode(), hashlib.sha256).hexdigest()
-        shown = f"{shown} [{digest[:12]}]"
-    return _bounded(shown)
+def build_labeler(
+    state_by: StateBy,
+    state_map: Mapping[str, str] | None,
+    label_key: bytes | None = None,
+) -> Labeler:
+    """Return the labeler for one matrix request.
+
+    Args:
+        state_by: Which nodes are states.
+        state_map: Glob patterns that group raw state names.
+        label_key: Key for the digest that tells apart labels redaction made
+            equal; this process's own key when `None`.
+
+    Returns:
+        The labeler.
+    """
+    return Labeler(
+        state_by,
+        tuple((state_map or {}).items()),
+        _PROCESS_LABEL_KEY if label_key is None else label_key,
+    )
 
 
 def _bounded(label: str) -> str:
@@ -106,7 +140,7 @@ def _bounded(label: str) -> str:
     # The shortened label is also the grouping key, so the digest must be long
     # enough that two long names sharing a prefix never collide.
     digest = hashlib.sha256(label.encode()).hexdigest()[:24]
-    return f"{label[: MAX_LABEL - 26]}…{digest}"
+    return f"{label[: MAX_LABEL - 26]}{SHORTENED}{digest}"
 
 
 def map_state(name: str, patterns: Sequence[tuple[str, str]]) -> str:
@@ -227,7 +261,6 @@ def analyze_session(
     marks: Mapping[uuid.UUID, str | None],
     failed_evaluations: Sequence[str],
     labeler: Labeler,
-    state_map: Sequence[tuple[str, str]],
     nodes_complete: bool = True,
 ) -> SessionOutcome:
     """Reduce one session to its state path and failure transition."""
@@ -264,7 +297,7 @@ def analyze_session(
     )
     own_state = labeler(point.node)
     fallback = _raw_state(point.node, "node") or _node_name(point.node)
-    path = (*before, own_state or _display_state(fallback, state_map))
+    path = (*before, own_state or labeler.display(fallback))
     # A failing step that is not itself a state never counts as a tried transition,
     # so its cell reports failures without a failure rate.
     transitions = _pairs(path) if own_state is not None else _pairs(before)
@@ -317,13 +350,10 @@ def _ancestors(
     return ancestors
 
 
-def analyze_group(
-    records: GroupRecords, labeler: Labeler, state_map: Mapping[str, str] | None
-) -> list[SessionOutcome]:
+def analyze_group(records: GroupRecords, labeler: Labeler) -> list[SessionOutcome]:
     """Analyze every session of a group."""
     marks = first_failure_marks(records.annotations)
     failed_evaluations = _failed_evaluations(records.evaluations)
-    patterns = tuple((state_map or {}).items())
     return [
         analyze_session(
             session,
@@ -331,7 +361,6 @@ def analyze_group(
             marks,
             failed_evaluations.get(session.id, ()),
             labeler,
-            patterns,
             nodes_complete=session.id not in records.partial_sessions,
         )
         for session in records.sessions

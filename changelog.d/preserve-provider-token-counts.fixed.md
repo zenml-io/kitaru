@@ -1,0 +1,1 @@
+- Fixed CLI and MCP redaction masking whole-number token counts and `None` under non-credential plural `*_tokens` and `*-tokens` keys such as `cache_read_tokens`, `total_tokens`, `request_tokens`, and `max_tokens`, while keeping explicit credential keys, singular `*_token` keys, booleans, and non-numeric values masked.

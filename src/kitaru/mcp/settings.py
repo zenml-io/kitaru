@@ -3,12 +3,22 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Validated settings for the local Kitaru MCP runtime."""
 
+import json
 import math
 import os
 from collections.abc import Mapping
 from enum import StrEnum
+from pathlib import Path
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 
 class CapabilityMode(StrEnum):
@@ -27,7 +37,8 @@ class CapabilityMode(StrEnum):
 class MCPSettings(BaseModel):
     """Immutable MCP process settings."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    # `label_key` is a secret, so a refused value never shows in the error.
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
     mode: CapabilityMode = CapabilityMode.READ_ONLY
     server_url: str | None = None
@@ -35,13 +46,55 @@ class MCPSettings(BaseModel):
     handler_timeout: float = Field(default=120.0, gt=0)
     pool_size: int = Field(default=20, ge=1, le=1000)
     max_concurrency: int = Field(default=10, ge=1, le=1000)
+    viewers_dir: Path | None = None
+    # Off, only the viewers bundled with Kitaru exist: nothing is read from the
+    # viewers folder, and no answer names it.
+    custom_viewers: bool = True
     debug: bool = False
+    # Turn on for a server that runs as several copies behind one address: a
+    # follow-up call can reach another copy, so no state is kept in memory
+    # between calls. The failure matrix then returns no snapshot_id and each
+    # cell reads its sessions again. Custom viewers are still read from each
+    # copy's own viewers folder unless `custom_viewers` is off.
+    stateless: bool = False
+    # Keys the digest that tells apart state labels redaction made equal. Copies
+    # that serve one matrix and its cells must share it; when unset, each
+    # process draws its own.
+    label_key: SecretStr | None = Field(default=None, min_length=32)
+    # Keys that tagged labels before `label_key` replaced them, so on a
+    # `stateless` server a cell of a matrix built before the rotation still
+    # finds its sessions. A server that keeps matrices answers cells from its
+    # copy, which the restart that rotates the key has already dropped.
+    previous_label_keys: tuple[Annotated[SecretStr, Field(min_length=32)], ...] = ()
 
     @field_validator("server_url")
     @classmethod
     def _reject_blank_target(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
             raise ValueError("explicit server target must not be blank")
+        return value
+
+    @field_validator("previous_label_keys", mode="before")
+    @classmethod
+    def _parse_previous_label_keys(cls, value: object) -> object:
+        # The environment holds the keys as a JSON array of strings, so each
+        # keeps its exact bytes, as `KITARU_MCP_LABEL_KEY` held them.
+        if not isinstance(value, str):
+            return value
+        try:
+            keys = json.loads(value)
+        except ValueError:
+            keys = None
+        if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+            raise ValueError("must be a JSON array of strings")
+        return tuple(keys)
+
+    @field_validator("viewers_dir", mode="before")
+    @classmethod
+    def _ignore_blank_viewers_dir(cls, value: object) -> object:
+        # An empty variable would otherwise become `Path(".")`, the host's cwd.
+        if isinstance(value, str) and not value.strip():
+            return None
         return value
 
     @model_validator(mode="after")
@@ -64,7 +117,12 @@ class MCPSettings(BaseModel):
             "handler_timeout": "KITARU_MCP_HANDLER_TIMEOUT",
             "pool_size": "KITARU_MCP_POOL_SIZE",
             "max_concurrency": "KITARU_MCP_MAX_CONCURRENCY",
+            "viewers_dir": "KITARU_MCP_VIEWERS_DIR",
+            "custom_viewers": "KITARU_MCP_CUSTOM_VIEWERS",
             "debug": "KITARU_MCP_DEBUG",
+            "stateless": "KITARU_MCP_STATELESS",
+            "label_key": "KITARU_MCP_LABEL_KEY",
+            "previous_label_keys": "KITARU_MCP_PREVIOUS_LABEL_KEYS",
         }
         for field, variable in mapping.items():
             value = env.get(variable)

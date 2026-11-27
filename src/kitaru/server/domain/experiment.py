@@ -58,7 +58,7 @@ class ExperimentFrozen(ConflictError):
         """
         super().__init__(
             f"Experiment {experiment_id} has runs and its replay config "
-            "cannot be changed"
+            "cannot be changed; create a new experiment with the new settings."
         )
 
 

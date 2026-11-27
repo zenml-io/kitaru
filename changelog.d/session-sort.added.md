@@ -1,0 +1,1 @@
+- Added `started_at` and `number` sorting (`:asc` and `:desc`) to `GET /api/v1/sessions` and `kitaru session list --sort`.

@@ -55,9 +55,9 @@ The adapter looks for a recorded call with the same tool name and arguments. If 
 
 | Scope | Answers come from |
 | --- | --- |
-| `baseline` | Only the session being replayed. This is the narrowest scope. |
-| `cohort_version` | Any session in the experiment's cohort. This scope is valid only inside experiments. |
-| `agent` | Any session belonging to the agent. |
+| `baseline` | Only the session being replayed. This is the safe default whenever tool answers depend on the conversation. |
+| `cohort_version` | Any session in the experiment's cohort. Valid only inside experiments; safe only when identical arguments should return the same answer across every conversation. |
+| `agent` | Any session belonging to the agent. Same cross-conversation caveat as `cohort_version`. |
 
 `on_miss` controls what happens when no recorded call matches:
 
@@ -65,7 +65,11 @@ The adapter looks for a recorded call with the same tool name and arguments. If 
 - `error_result`: return a tool error to the agent and continue the replay.
 - `passthrough`: execute the live tool. Use this only when repeating the call is safe.
 
-A model or prompt change may cause the agent to call a tool that does not appear in the baseline. With `fail`, that call stops the replay. With `error_result`, the agent receives an error and the evaluator can assess its response.
+A model or prompt change may cause the agent to call a tool that does not appear in the baseline, or to call an existing tool with different arguments. With `fail`, that call stops the replay. With `error_result`, the agent receives a mocked error and continues.
+
+{% hint style="warning" %}
+A code or prompt fix that changes a tool's arguments changes its cache key, so that call always misses `history`. With `on_miss="error_result"`, the adapter returns a mocked tool error to the agent, records the `tool_call` node as `failed` with `attributes.mocked: true`, and still lets the replay **complete**. If your evaluator only reads the final reply, a broken fix can look like a completed replay. Check replayed sessions for failed or mocked tool nodes (`status == "failed"` or `attributes.mocked == true`), and configure a `static` policy for side-effecting tools whose arguments you expect a fix to change.
+{% endhint %}
 
 ### `static`: return a configured result
 
@@ -101,4 +105,6 @@ If a tool call's arguments cannot be serialized to canonical JSON, the call has 
 | Fork that may explore new paths | `history` default with `on_miss="error_result"`; `fail` on side-effecting tools |
 | Injecting a counterfactual | `static` on the tool in question, `history` for the rest |
 | Read-only tools that are cheap and safe | `passthrough`, scoped per tool |
-| Regression suite over a cohort | `history(cohort_version, on_miss="fail")` |
+| Regression suite over a cohort | `history(baseline, on_miss="fail")` by default; `cohort_version` only per tool when identical arguments always have one shared answer |
+
+**Choosing `baseline` vs `cohort_version`:** Start with `baseline`. Whenever a tool's arguments do not uniquely identify the conversation, such as `get_current_order()` or `get_user_profile()`, `cohort_version` returns the newest matching recording from *any* session in the cohort and silently feeds another conversation's data into the replay. Use `cohort_version` only when calls with the same arguments should return the same answer across conversations and you want cross-session fallback (for example, shared read-only lookups keyed by an explicit resource ID).

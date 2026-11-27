@@ -81,8 +81,10 @@ class FailureCellRequest(FailureMatrixRequest):
     snapshot_id: str | None = Field(
         default=None,
         max_length=64,
-        description="snapshot_id of the matrix being drilled into; without it "
-        "the sessions are read again.",
+        description="snapshot_id of the matrix being drilled into. Without it, "
+        "or on a server that keeps no matrix in memory, the sessions are read "
+        "again and the counts can differ from the matrix if sessions changed "
+        "since.",
     )
     from_state: str = Field(min_length=1, description="Last step that went right.")
     to_state: str = Field(min_length=1, description="First step that went wrong.")
@@ -137,7 +139,10 @@ class GroupSummary(MCPModel):
 class FailureMatrixData(MCPModel):
     """Transition failure matrix over one group, optionally compared to a second."""
 
-    snapshot_id: str = Field(description="Identifies the records behind this matrix.")
+    snapshot_id: str | None = Field(
+        description="Identifies the records behind this matrix. Null on a server "
+        "that keeps no matrix in memory; a cell then reads the sessions again.",
+    )
     state_by: StateBy
     rows: list[str]
     cols: list[str]

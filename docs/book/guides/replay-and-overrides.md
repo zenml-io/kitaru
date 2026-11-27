@@ -81,13 +81,23 @@ asyncio.run(main())
 Field by field:
 
 - `baseline_session_id`: the recording to re-run.
-- `agent_version_id`: which code runs. Omitted, it is the version the baseline was recorded with, which is the faithful choice. Point it at a newly registered version to replay old traffic **against your working tree**.
+- `agent_version_id`: which registered run spec executes. Omitted, it uses the version recorded on the baseline session. Point it at another registered version to replay old traffic against a candidate build. Because an agent version stores a `RunSpec` pointer (`command`, `working_dir`, environment, secrets) rather than a code snapshot or commit hash, keep each version in a separate directory, git worktree, or container image so editing code in place does not change what older versions run.
 - `override`: the fork. Omit it for a pure reproduction.
 - `tool_policy`: what tool calls hit. If omitted, the server applies its default, which currently passes calls through to live tools. For a replay that touches nothing real, set a `history` policy as above. Details in [Tool policies](tool-policies.md).
 - `evaluators`: at least one, always. A replay is evaluated on arrival.
 - `baseline_evaluation_mode`: `IF_MISSING` (the default) reuses the latest baseline evaluation with the same evaluator version and parameters, or schedules one if none matches. `FORCE` always reruns baseline evaluations; `NONE` skips them. Result sessions receive fresh evaluations.
 
 Watch it with `kitaru job watch <job-id>`; when the replay reads `completed`, `client.replays.get(replay.id)` carries the `result_session_id`.
+
+## Expected answers during replay
+
+Keep gold labels in the baseline session's metadata, separate from agent inputs. Evaluators of the result session receive `SessionView.baseline`, an optional `EvaluationBaselineContext` containing the baseline's `session_id` and `metadata`. This context also accompanies a later direct evaluation of the result session. It does not include the baseline's full trace or outputs. The result session's own metadata remains separate in `session.session.metadata`.
+
+An evaluator can read gold labels from `session.baseline.metadata` for a replay result and fall back to `session.session.metadata` for an ordinary session. A baseline evaluation has no baseline context unless that session was itself the result of an earlier replay. See [Write an evaluator](write-an-evaluator.md) for an example. The replayed agent receives the baseline inputs and replay ID, without baseline metadata or permission to read the baseline session.
+
+Context refers to the immediate baseline, without following earlier replays. Prefer the original labeled session as your baseline; replaying a previous result does not recover labels from its ancestors.
+
+Metadata is read when the evaluation task specification is fetched, not preserved as a permanent snapshot. Keep labels unchanged while comparing a pair. After editing gold labels, use `--baseline-evaluation-mode force` or `BaselineEvaluationMode.FORCE` for the next replay so the baseline is evaluated again; `if_missing` can reuse evaluations made before the edit.
 
 ## Overrides
 
@@ -100,7 +110,7 @@ One `ReplayOverride`, four knobs; change one at a time:
 | `prompt` | Replace the user prompt to ask a different question of the same recorded world. |
 | `model_params` | Adjust sampling parameters (temperature, etc.) at the adapter level. |
 
-Code changes need no override at all: register the new code as an agent version and pass its `agent_version_id`. Replays run **from the top**: the whole agent re-executes against the recorded world, so the entire decision path downstream of your change is real.
+Code changes need no override at all: put the candidate code in its own working directory, git worktree, or container image, register it as a new agent version with `--display-version`, and pass its `agent_version_id` (or `--agent NAME@VERSION`). Do not mutate the directory used by an earlier agent version in place, because an agent version stores only a `RunSpec` pointer (`command`, `working_dir`, environment, secrets), not a code snapshot or commit hash. Replays run **from the top**: the whole agent re-executes against the recorded world, so the entire decision path downstream of your change is real.
 
 {% hint style="warning" %} With the default `passthrough` policy, a replayed `refund_payment` call **refunds the card again**. Set a `history` policy for anything with side effects, or use `static` to inject a canned result. If your agent must behave differently under replay, check for the `KITARU_REPLAY_ID` environment variable; it is set only in replayed runs. {% endhint %}
 
@@ -141,7 +151,7 @@ A replay settles `failed` when its pipeline cannot produce the comparison: the a
 
 - **No run spec:** the agent version must carry a run command; registering with `--command` is what makes a session replayable.
 - **Worker environment:** the subprocess needs your agent's dependencies and provider keys; it inherits them from the worker's environment.
-- **Unrecorded tool call:** the fork took a path the baseline never took. That is information: widen the history scope, add a `static` case for it, or accept `error_result` and let the agent handle it.
+- **Unrecorded tool call:** the fork took a path or passed tool arguments the baseline never recorded. That is information: add a `static` case for side-effecting tools whose arguments changed, widen the history scope only if the tool's answer is independent of the conversation, or accept `error_result` and inspect the replayed session for failed or mocked tool nodes (`attributes.mocked: true`). See [Tool policies](tool-policies.md).
 
 ## From one replay to many
 

@@ -39,8 +39,22 @@ from kitaru.cli.output import CommandResult
 from kitaru.cli.schema import ParameterSpec
 
 _CURSOR_PARAMETERS = LIST_PARAMETERS[:2]
+_INVESTIGATION_REFERENCE_PARAMETER = ParameterSpec(
+    "INVESTIGATION",
+    "reference",
+    "argument",
+    True,
+    "Investigation UUID or case-sensitive name.",
+)
+_INVESTIGATION_AGENT_SCOPE_PARAMETER = ParameterSpec(
+    "--agent",
+    "reference",
+    "option",
+    False,
+    "Scope investigation lookup to this exact agent UUID or name.",
+)
 _INVESTIGATION_SESSION_VERDICT_PARAMETERS = (
-    ParameterSpec("INVESTIGATION", "UUID", "argument", True, "Investigation ID."),
+    _INVESTIGATION_REFERENCE_PARAMETER,
     ParameterSpec(
         "SESSION",
         "UUID",
@@ -55,6 +69,7 @@ _INVESTIGATION_SESSION_VERDICT_PARAMETERS = (
         True,
         "Verdict for the investigation session.",
     ),
+    _INVESTIGATION_AGENT_SCOPE_PARAMETER,
 )
 
 
@@ -298,21 +313,25 @@ async def insight_delete(
                 "UUID[]",
                 "option",
                 False,
-                "Ordered session UUID; repeat for each linked session.",
+                "Ordered session UUID; repeat for each linked session. Every "
+                "--session requires at least one --session-question.",
             ),
             ParameterSpec(
                 "--session-question",
                 "SESSION:KEY=QUESTION[]",
                 "option",
                 False,
-                "Keyed question for a session selected with --session.",
+                "Keyed question for a session selected with --session; repeat for "
+                "each question. Every --session requires at least one "
+                "--session-question.",
             ),
             ParameterSpec(
                 "--session-highlights",
                 "SESSION:KEY=JSON_ARRAY[]",
                 "option",
                 False,
-                "Curated highlights for a question added with --session-question.",
+                "Curated highlights for a question added with --session-question; "
+                "repeat for each entry.",
             ),
             IDEMPOTENCY_KEY_PARAMETER,
         ),
@@ -374,19 +393,22 @@ async def investigation_list(
     investigation_app,
     build_spec(
         ("investigation", "get"),
-        "Get an investigation by exact UUID.",
+        "Get an investigation by exact UUID or case-sensitive name.",
         parameters=(
-            ParameterSpec(
-                "INVESTIGATION", "UUID", "argument", True, "Investigation ID."
-            ),
+            _INVESTIGATION_REFERENCE_PARAMETER,
+            _INVESTIGATION_AGENT_SCOPE_PARAMETER,
         ),
-        errors=UUID_READ_ERRORS,
+        errors=ASSET_READ_ERRORS,
     ),
 )
-async def investigation_get(investigation: uuid.UUID, /) -> CommandResult:
-    """Get one investigation by UUID."""
+async def investigation_get(
+    investigation: str, /, *, agent: str | None = None
+) -> CommandResult:
+    """Get one investigation by exact UUID or unambiguous case-sensitive name."""
     async with invocation_context.open_asset_client() as client:
-        return await investigations.get_investigation(client, investigation)
+        return await investigations.get_investigation(
+            client, investigation, agent=agent
+        )
 
 
 @register_command(
@@ -395,9 +417,8 @@ async def investigation_get(investigation: uuid.UUID, /) -> CommandResult:
         ("investigation", "update"),
         "Update selected investigation fields.",
         parameters=(
-            ParameterSpec(
-                "INVESTIGATION", "UUID", "argument", True, "Investigation ID."
-            ),
+            _INVESTIGATION_REFERENCE_PARAMETER,
+            _INVESTIGATION_AGENT_SCOPE_PARAMETER,
             ParameterSpec(
                 "--name",
                 "string",
@@ -432,9 +453,10 @@ async def investigation_get(investigation: uuid.UUID, /) -> CommandResult:
     ),
 )
 async def investigation_update(
-    investigation: uuid.UUID,
+    investigation: str,
     /,
     *,
+    agent: str | None = None,
     name: str | None = None,
     description: str | None = None,
     clear_description: bool = False,
@@ -445,6 +467,7 @@ async def investigation_update(
         return await investigations.update_investigation(
             client,
             investigation,
+            agent=agent,
             name=name,
             description=description,
             clear_description=clear_description,
@@ -458,9 +481,8 @@ async def investigation_update(
         ("investigation", "delete"),
         "Delete an investigation, its linked sessions, and its answers.",
         parameters=(
-            ParameterSpec(
-                "INVESTIGATION", "UUID", "argument", True, "Investigation ID."
-            ),
+            _INVESTIGATION_REFERENCE_PARAMETER,
+            _INVESTIGATION_AGENT_SCOPE_PARAMETER,
             ParameterSpec(
                 "--force",
                 "boolean",
@@ -476,12 +498,12 @@ async def investigation_update(
     ),
 )
 async def investigation_delete(
-    investigation: uuid.UUID, /, *, force: bool = False
+    investigation: str, /, *, agent: str | None = None, force: bool = False
 ) -> CommandResult:
     """Delete one investigation and its linked review state."""
     async with invocation_context.open_asset_client() as client:
         return await investigations.delete_investigation(
-            client, investigation, force=force
+            client, investigation, agent=agent, force=force
         )
 
 
@@ -491,25 +513,25 @@ async def investigation_delete(
         ("investigation", "session", "list"),
         "List sessions linked to an investigation in presentation order.",
         parameters=(
-            ParameterSpec(
-                "INVESTIGATION", "UUID", "argument", True, "Investigation ID."
-            ),
+            _INVESTIGATION_REFERENCE_PARAMETER,
+            _INVESTIGATION_AGENT_SCOPE_PARAMETER,
             *_CURSOR_PARAMETERS,
         ),
-        errors=UUID_READ_ERRORS,
+        errors=ASSET_READ_ERRORS,
     ),
 )
 async def investigation_session_list(
-    investigation: uuid.UUID,
+    investigation: str,
     /,
     *,
+    agent: str | None = None,
     size: int = 20,
     cursor: str | None = None,
 ) -> CommandResult:
     """List one ordered page of an investigation's linked sessions."""
     async with invocation_context.open_asset_client() as client:
         return await investigations.list_investigation_sessions(
-            client, investigation, size=size, cursor=cursor
+            client, investigation, agent=agent, size=size, cursor=cursor
         )
 
 
@@ -526,10 +548,12 @@ async def investigation_session_list(
     ),
 )
 async def investigation_session_verdict(
-    investigation: uuid.UUID,
+    investigation: str,
     session: uuid.UUID,
     verdict: InvestigationSessionVerdict,
     /,
+    *,
+    agent: str | None = None,
 ) -> CommandResult:
     """Set one investigation session's verdict."""
     async with invocation_context.open_asset_client() as client:
@@ -538,6 +562,7 @@ async def investigation_session_verdict(
             investigation,
             session,
             verdict=verdict,
+            agent=agent,
         )
 
 

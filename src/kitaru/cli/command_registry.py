@@ -51,7 +51,7 @@ agent_app = App(
 )
 agent_version_app = App(
     name="version",
-    help="Register and inspect agent versions.",
+    help="Register, inspect, and update agent versions.",
     default_parameter=Parameter(negative=False),
 )
 cohort_app = App(
@@ -286,18 +286,25 @@ def _add_parameter_help(function: F, spec: CommandSpec) -> None:
             parameter_spec = next(positional_specs, None)
         if parameter_spec is None:
             continue
+        option_names = tuple(parameter_spec.name.split("/"))
+        if (
+            parameter_spec.kind == "option"
+            and parameter_spec.type != "boolean"
+            and len(option_names) > 1
+        ):
+            cyclopts_parameter = Parameter(
+                name=option_names, help=parameter_spec.description
+            )
+        else:
+            cyclopts_parameter = Parameter(help=parameter_spec.description)
         annotation = parameter.annotation
         if annotation is inspect.Parameter.empty:
             annotation = str
         if get_origin(annotation) is Annotated:
             base, *metadata = get_args(annotation)
-            annotation = Annotated[
-                base, *metadata, Parameter(help=parameter_spec.description)
-            ]
+            annotation = Annotated[base, *metadata, cyclopts_parameter]
         else:
-            annotation = Annotated[
-                annotation, Parameter(help=parameter_spec.description)
-            ]
+            annotation = Annotated[annotation, cyclopts_parameter]
         function.__annotations__[name] = annotation
 
 
@@ -305,6 +312,7 @@ COLLECTION_READ_ERRORS = (
     "invalid_arguments",
     "invalid_configuration",
     "authentication_failed",
+    "forbidden",
     "network_error",
     "internal_error",
 )
@@ -313,20 +321,47 @@ ASSET_READ_ERRORS = (*UUID_READ_ERRORS, "conflict")
 ASSET_WRITE_ERRORS = (*ASSET_READ_ERRORS, "partial_failure")
 JOB_WAIT_ERRORS = ("timeout", "remote_failed", "remote_canceled")
 LIST_PARAMETERS = (
-    ParameterSpec("--size", "integer", "option", False, "Items per page (1-1000)."),
     ParameterSpec(
-        "--cursor", "string", "option", False, "Cursor from the previous page."
+        "--size/--limit",
+        "integer",
+        "option",
+        False,
+        "Items per page (1-1000; default 20). --limit aliases --size; supply only "
+        "one. This does not fetch all pages.",
+    ),
+    ParameterSpec(
+        "--cursor",
+        "string",
+        "option",
+        False,
+        "Cursor from the previous page (page.next_cursor in CLI JSON output).",
     ),
     ParameterSpec(
         "--sort",
         "field:direction",
         "option",
         False,
-        "Sort by created:asc or created:desc.",
+        "Sort by created:asc or created:desc (default), preserving cursor pagination.",
     ),
     ParameterSpec(
-        "--filter", "JSON", "option", False, "Advanced JSON filter expression."
+        "--filter",
+        "JSON",
+        "option",
+        False,
+        "JSON filter expression, e.g. "
+        '\'{"field":"status","op":"eq","value":"failed"}\'.',
     ),
+)
+SESSION_LIST_PARAMETERS = (
+    *LIST_PARAMETERS[:2],
+    ParameterSpec(
+        "--sort",
+        "field:direction",
+        "option",
+        False,
+        "Sort by created, started_at, or number, each with :asc or :desc.",
+    ),
+    LIST_PARAMETERS[3],
 )
 VERSION_LIST_PARAMETERS = LIST_PARAMETERS[:-1]
 WAIT_PARAMETERS = (

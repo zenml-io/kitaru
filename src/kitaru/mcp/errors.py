@@ -79,18 +79,31 @@ def error_result(result_type: type[ToolResult], error: BaseException) -> ToolRes
     )
 
 
-def protocol_result(envelope: ToolResult, text: str | None = None) -> CallToolResult:
+def protocol_result(
+    envelope: ToolResult, text: str | None = None, *, mask_credentials: bool = True
+) -> CallToolResult:
     """Render redacted canonical JSON as structured content and as text.
 
     Args:
         envelope: The result envelope.
         text: Summary to send as the text content of a successful result in
             place of the JSON, for tools whose view renders the structured data.
+        mask_credentials: Mask credential-shaped strings in the result's
+            data; off only for a successful result whose data comes from the
+            user's own files. Everything else in the envelope, error results,
+            and the text summary are always masked.
 
     Returns:
         The protocol result.
     """
-    structured = redact_data(envelope)
+    if mask_credentials or not envelope.ok:
+        structured = redact_data(envelope)
+    else:
+        # Only the data comes from the user's own files; the rest of the
+        # envelope comes from Kitaru and is masked as always.
+        structured = redact_data(envelope.model_copy(update={"data": None}))
+        if isinstance(structured, dict):
+            structured["data"] = envelope.model_dump(mode="json")["data"]
     if not isinstance(structured, dict):
         # Whole-model normalization can fail before yielding any safe fields.
         structured = {

@@ -4,6 +4,7 @@
 """Transition failure matrix analysis, handlers, and MCP Apps wiring."""
 
 import dataclasses
+import secrets
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime, timedelta
@@ -13,7 +14,7 @@ import pytest
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.types import CallToolResult, TextContent
 from mcp_fakes import build_server_context
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from kitaru.api_models.v1.annotation import AnnotationResponse, AnnotationSelector
 from kitaru.api_models.v1.base import JsonValue, Page
@@ -30,7 +31,7 @@ from kitaru.mcp.models.failure_matrix import (
 )
 from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import MCPSettings
-from kitaru.mcp.tools import failure_matrix
+from kitaru.mcp.tools import failure_matrix, transitions
 from kitaru.mcp.tools.failure_matrix import describe_matrix
 from kitaru.mcp.tools.transitions import (
     START,
@@ -137,7 +138,7 @@ def test_error_is_placed_at_deepest_failed_node_not_inherited_span() -> None:
 
     point = locate_failure(nodes, {})
     [outcome] = analyze_group(
-        _records({session.id: nodes}, [session]), build_labeler("tool", None), None
+        _records({session.id: nodes}, [session]), build_labeler("tool", None)
     )
 
     assert point is not None and point.node.name == "issue_refund"
@@ -184,7 +185,6 @@ def test_folding_keeps_rows_for_the_requested_sources_only() -> None:
             [_annotation(marked_nodes[0], {"first_failure": True})],
         ),
         build_labeler("tool", None),
-        None,
     )
 
     [folded] = fold_rare_states([outcomes], ["annotation"], limit=2)
@@ -199,7 +199,6 @@ def test_unlocated_evaluation_summary_is_bounded() -> None:
     outcomes = analyze_group(
         _records({session.id: []}, [session], evaluations=evaluations),
         build_labeler("tool", None),
-        None,
     )
     summary = summarize_group(
         "group", outcomes, ["error"], truncated=False, records_capped=False
@@ -219,7 +218,7 @@ def test_completed_children_count_before_their_failed_parent_span() -> None:
     ]
 
     [outcome] = analyze_group(
-        _records({session.id: nodes}, [session]), build_labeler("node", None), None
+        _records({session.id: nodes}, [session]), build_labeler("node", None)
     )
 
     assert outcome.failure_transition == ("search", "postprocess")
@@ -241,7 +240,7 @@ def test_cut_off_session_is_not_placed_at_an_enclosing_span() -> None:
         partial_sessions=frozenset({session.id}),
     )
 
-    [outcome] = analyze_group(records, build_labeler("node", None), None)
+    [outcome] = analyze_group(records, build_labeler("node", None))
 
     assert outcome.failed and outcome.point is None
 
@@ -254,7 +253,7 @@ def test_a_step_still_running_at_the_failure_is_not_the_last_good_one() -> None:
     ]
 
     [outcome] = analyze_group(
-        _records({session.id: nodes}, [session]), build_labeler("tool", None), None
+        _records({session.id: nodes}, [session]), build_labeler("tool", None)
     )
 
     assert outcome.failure_transition == (START, "charge")
@@ -265,7 +264,7 @@ def test_span_states_skip_ancestors_of_the_failing_node() -> None:
     nodes = _langgraph_failure(session)
 
     [outcome] = analyze_group(
-        _records({session.id: nodes}, [session]), build_labeler("span", None), None
+        _records({session.id: nodes}, [session]), build_labeler("span", None)
     )
 
     # `agent` is the failing tool's parent and `invoke` is the root, so no
@@ -281,7 +280,6 @@ def test_reviewer_mark_wins_over_recorded_error_and_carries_note() -> None:
     [outcome] = analyze_group(
         _records({session.id: nodes}, [session], [mark]),
         build_labeler("tool", None),
-        None,
     )
 
     assert outcome.point is not None
@@ -306,7 +304,6 @@ def test_negative_first_failure_answers_are_not_marks(answer: JsonValue) -> None
     [outcome] = analyze_group(
         _records({session.id: nodes}, [session], [mark]),
         build_labeler("tool", None),
-        None,
     )
 
     assert not outcome.failed and outcome.point is None
@@ -320,9 +317,7 @@ def test_redacted_labels_stay_distinct_without_revealing_secrets() -> None:
         for s, name in zip(sessions, secrets_, strict=True)
     }
 
-    outcomes = analyze_group(
-        _records(nodes, sessions), build_labeler("tool", None), None
-    )
+    outcomes = analyze_group(_records(nodes, sessions), build_labeler("tool", None))
     labels = [outcome.path[-1] for outcome in outcomes]
 
     assert labels[0] != labels[1]
@@ -364,7 +359,6 @@ def test_evaluation_failure_without_location_is_unlocated_not_guessed() -> None:
             evaluations=[_evaluation(session, "grounded")],
         ),
         build_labeler("tool", None),
-        None,
     )
     _rows, _cols, cells = build_cells(outcomes, None, ["error", "annotation"])
 
@@ -383,7 +377,7 @@ def test_failing_llm_call_has_failures_but_no_rate() -> None:
     }
 
     outcomes = analyze_group(
-        _records(nodes, [passing, failing]), build_labeler("tool", None), None
+        _records(nodes, [passing, failing]), build_labeler("tool", None)
     )
     _rows, _cols, cells = build_cells(outcomes, None, ["error"])
     by_pair = {(c.from_state, c.to_state): c for c in cells}
@@ -409,7 +403,7 @@ def test_non_state_failure_does_not_borrow_a_real_states_rate() -> None:
     }
 
     outcomes = analyze_group(
-        _records(nodes, [labeled, failing]), build_labeler("tool", None), None
+        _records(nodes, [labeled, failing]), build_labeler("tool", None)
     )
     _rows, _cols, cells = build_cells(outcomes, None, ["error"])
     cell = next(c for c in cells if (c.from_state, c.to_state) == ("search", "llm"))
@@ -439,7 +433,6 @@ def test_excluded_non_state_failure_does_not_hide_a_selected_rate() -> None:
     outcomes = analyze_group(
         _records(nodes, [marked, crashed, passing], [mark]),
         build_labeler("tool", None),
-        None,
     )
     _rows, _cols, cells = build_cells(outcomes, None, ["annotation"])
     cell = next(c for c in cells if (c.from_state, c.to_state) == ("search", "llm"))
@@ -460,7 +453,6 @@ def test_state_map_groups_named_like_matrix_rows_are_escaped() -> None:
     [outcome] = analyze_group(
         _records({session.id: nodes}, [session]),
         build_labeler("tool", {"*": START}),
-        None,
     )
 
     assert outcome.failure_transition == (START, f"{START} (recorded)")
@@ -524,8 +516,8 @@ def test_state_map_merges_states_and_compare_counts_both_groups() -> None:
     }
     labeler = build_labeler("tool", {"sql_*": "SQL"})
 
-    base = analyze_group(_records(nodes, [before]), labeler, None)
-    compare = analyze_group(_records(nodes, [after]), labeler, None)
+    base = analyze_group(_records(nodes, [before]), labeler)
+    compare = analyze_group(_records(nodes, [after]), labeler)
     rows, cols, cells = build_cells(base, compare, ["error"])
     cell = next(c for c in cells if (c.from_state, c.to_state) == ("SQL", "SQL"))
 
@@ -618,7 +610,7 @@ def test_blank_node_names_get_a_drillable_label() -> None:
     node = _node(session, "a", "tool_call", "  ", status="failed")
 
     [outcome] = analyze_group(
-        _records({session.id: [node]}, [session]), build_labeler("tool", None), None
+        _records({session.id: [node]}, [session]), build_labeler("tool", None)
     )
 
     assert outcome.failure_transition == (START, "unnamed tool_call")
@@ -629,7 +621,7 @@ def test_recorded_names_never_merge_with_the_start_row() -> None:
     node = _node(session, "a", "tool_call", START, status="failed")
 
     [outcome] = analyze_group(
-        _records({session.id: [node]}, [session]), build_labeler("tool", None), None
+        _records({session.id: [node]}, [session]), build_labeler("tool", None)
     )
 
     assert outcome.failure_transition == (START, f"{START} (recorded)")
@@ -685,7 +677,7 @@ def test_cell_sessions_clip_long_session_names() -> None:
     )
     nodes = [_node(session, "a", "tool_call", "search", status="failed")]
     outcomes = analyze_group(
-        _records({session.id: nodes}, [session]), build_labeler("tool", None), None
+        _records({session.id: nodes}, [session]), build_labeler("tool", None)
     )
 
     data = cell_details(outcomes, (START, "search"), ["error"], limit=5)
@@ -769,6 +761,152 @@ async def test_unknown_snapshot_asks_for_a_rebuild_instead_of_refetching() -> No
     assert client.sessions.list_calls == 0
 
 
+async def test_stateless_server_keeps_no_matrix_and_cells_read_again() -> None:
+    client = _FakeClient(_failing_group())
+    server, context = build_server_context(client, settings=MCPSettings(stateless=True))
+
+    matrix = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+    # Another copy of the server built this snapshot, so this one cannot know it.
+    request = {"snapshot_id": "elsewhere", "from_state": "lookup_order"}
+    cell = await server.call_tool(
+        "kitaru_failure_matrix_cell",
+        {"request": {**request, "to_state": "issue_refund"}},
+        context,
+    )
+
+    assert _structured(matrix)["data"]["snapshot_id"] is None
+    assert _structured(cell)["data"]["total"] == 3
+    assert client.sessions.list_calls == 2
+
+
+async def test_redacted_labels_drill_down_on_another_server_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool, span = _session("failed"), _session("failed")
+    nodes = {
+        tool.id: [_node(tool, "a", "tool_call", "KITKEY_alpha", status="failed")],
+        # With tool states, a failing span is labeled by its own name.
+        span.id: [
+            _node(span, "root", "span", "run", status="failed"),
+            _node(span, "b", "span", "KITKEY_beta", parent="root", status="failed"),
+        ],
+    }
+    records = _records(nodes, [tool, span])
+    settings = MCPSettings(stateless=True, label_key=SecretStr("k" * 32))
+    server, context = build_server_context(_FakeClient(records), settings=settings)
+    matrix = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+    columns = _structured(matrix)["data"]["cols"]
+
+    # Another copy runs in its own process, which draws its own key.
+    monkeypatch.setattr(transitions, "_PROCESS_LABEL_KEY", secrets.token_bytes(32))
+    other, other_context = build_server_context(_FakeClient(records), settings=settings)
+    totals = []
+    for shown in columns:
+        cell = await other.call_tool(
+            "kitaru_failure_matrix_cell",
+            {"request": {"from_state": START, "to_state": shown}},
+            other_context,
+        )
+        totals.append(_structured(cell)["data"]["total"])
+
+    assert len(columns) == 2
+    assert not any("alpha" in shown or "beta" in shown for shown in columns)
+    assert totals == [1, 1]
+
+
+@pytest.mark.parametrize(("previous", "total"), [((), 0), (("a" * 32,), 1)])
+async def test_cells_of_a_matrix_built_before_a_key_rotation(
+    previous: tuple[str, ...], total: int
+) -> None:
+    session = _session("failed")
+    nodes = [_node(session, "a", "tool_call", "KITKEY_alpha", status="failed")]
+    records = _records({session.id: nodes}, [session])
+    before = MCPSettings(stateless=True, label_key=SecretStr("a" * 32))
+    server, context = build_server_context(_FakeClient(records), settings=before)
+    matrix = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+    [shown] = _structured(matrix)["data"]["cols"]
+
+    after = MCPSettings(
+        stateless=True,
+        label_key=SecretStr("b" * 32),
+        previous_label_keys=[SecretStr(key) for key in previous],
+    )
+    rotated, rotated_context = build_server_context(
+        _FakeClient(records), settings=after
+    )
+    cell = await rotated.call_tool(
+        "kitaru_failure_matrix_cell",
+        {"request": {"from_state": START, "to_state": shown}},
+        rotated_context,
+    )
+
+    assert _structured(cell)["data"]["total"] == total
+
+
+@pytest.mark.parametrize(
+    ("producer", "previous"),
+    [("b", ()), ("b", ("a",)), ("a", ("a", "c"))],
+    ids=["current-only", "current-with-previous", "earlier-previous"],
+)
+async def test_a_redacted_cell_without_failures_keeps_its_attempts(
+    producer: str, previous: tuple[str, ...]
+) -> None:
+    session = _session()
+    nodes = [_node(session, "a", "tool_call", "KITKEY_fixture")]
+    records = _records({session.id: nodes}, [session])
+    built = MCPSettings(stateless=True, label_key=SecretStr(producer * 32))
+    server, context = build_server_context(_FakeClient(records), settings=built)
+    matrix = await server.call_tool("kitaru_failure_matrix", {"request": {}}, context)
+    [shown] = _structured(matrix)["data"]["cells"]
+
+    reading = MCPSettings(
+        stateless=True,
+        label_key=SecretStr("b" * 32),
+        previous_label_keys=[SecretStr(key * 32) for key in previous],
+    )
+    reader, reader_context = build_server_context(
+        _FakeClient(records), settings=reading
+    )
+    cell = await reader.call_tool(
+        "kitaru_failure_matrix_cell",
+        {"request": {"from_state": shown["from_state"], "to_state": shown["to_state"]}},
+        reader_context,
+    )
+
+    assert shown["attempts"] == 1
+    assert _structured(cell)["data"]["total"] == 0
+    assert _structured(cell)["data"]["attempts"] == 1
+
+
+async def test_an_empty_plain_cell_is_not_looked_up_again_with_previous_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = _failing_group()
+    analyses: list[object] = []
+    analyze = failure_matrix._analyze
+
+    def counted(*args: Any) -> Any:
+        analyses.append(args)
+        return analyze(*args)
+
+    monkeypatch.setattr(failure_matrix, "_analyze", counted)
+    settings = MCPSettings(
+        stateless=True,
+        label_key=SecretStr("b" * 32),
+        previous_label_keys=[SecretStr("a" * 32), SecretStr("c" * 32)],
+    )
+    server, context = build_server_context(_FakeClient(records), settings=settings)
+
+    cell = await server.call_tool(
+        "kitaru_failure_matrix_cell",
+        {"request": {"from_state": "lookup_order", "to_state": "never_called"}},
+        context,
+    )
+
+    assert _structured(cell)["data"]["total"] == 0
+    assert len(analyses) == 1
+
+
 def test_long_names_get_bounded_distinct_labels() -> None:
     sessions = [_session("failed"), _session("failed")]
     long_names = ["x" * 200 + "_alpha", "x" * 200 + "_beta"]
@@ -777,9 +915,7 @@ def test_long_names_get_bounded_distinct_labels() -> None:
         for s, name in zip(sessions, long_names, strict=True)
     }
 
-    outcomes = analyze_group(
-        _records(nodes, sessions), build_labeler("tool", None), None
-    )
+    outcomes = analyze_group(_records(nodes, sessions), build_labeler("tool", None))
     labels = [outcome.path[-1] for outcome in outcomes]
 
     assert all(len(label) <= 80 for label in labels)

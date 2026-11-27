@@ -22,9 +22,10 @@ Everything is deterministic. The same seed and flags produce the same sessions, 
 | `check_mastra_memory_replay.py` | Prove SDK, CLI, and MCP Mastra memory replay on a disposable stack |
 | `check_mastra_processor_decisions.py` | Prove Mastra decision recording and replay on a local worker |
 | `check_typescript_evaluators.py` | Check the TypeScript evaluator bridge through a disposable worker stack |
+| `check_importer_sdks.py` | Smoke-test trace importer SDKs against local MLflow/Phoenix servers and live or stub cloud APIs |
 | `publish.sh` | Build and push dev images and chart, create a ZenML Pro workspace |
 
-Requires `uv sync --extra server` and Docker for Postgres. Add `--extra cli` when you shell out to `kitaru`.
+Requires `uv sync --extra server` and Docker for Postgres. Add `--extra cli` when you shell out to `kitaru`. `check_importer_sdks.py` runs from the plugins workspace instead (`uv run --project plugins --no-sync python devtools/check_importer_sdks.py`), uses Docker for Arize Phoenix and `uvx` for MLflow, and uses live read-only cloud probes when `LANGFUSE_*`, `LOGFIRE_READ_TOKEN`, or `BRAINTRUST_API_KEY` + `BRAINTRUST_PROJECT_ID` are set (pass `--require-live` to forbid local stub fallbacks).
 
 The `.mjs` agent scripts are type-checked against the built packages by `devtools/tsconfig.json`, which `pnpm run typecheck` runs after it builds them. To check them alone, run `pnpm run build:packages`, then `pnpm exec tsc -p devtools/tsconfig.json`.
 

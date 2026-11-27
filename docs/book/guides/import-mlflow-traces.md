@@ -37,7 +37,7 @@ Traces must include their spans. A trace exported with `--no-include-spans` fail
 Register the agent the traces belong to, if you have not, and start a worker:
 
 ```bash
-kitaru agent register support-agent --command "python support.py"
+kitaru agent register support-agent
 kitaru worker start
 ```
 

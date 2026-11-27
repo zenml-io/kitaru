@@ -2,11 +2,11 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-25
+
+- Normalize OpenInference messages and tool calls, preserve message text, and populate prompt, reply, system prompt, and visible reasoning selectors for readable imported model calls.
 - Import prompt-cache writes from `gen_ai.usage.details.cache_write_tokens` or `llm.token_count.prompt_details.cache_write` as `cache_write_input_tokens`.
-
-### Release context
-
-- Requires the unreleased `TokenUsage.cache_write_input_tokens` field in core. Replace `kitaru==0.27.6+dev` with the selected compatible published core version before releasing.
+- Require Kitaru 0.27.7 or later for `TokenUsage.cache_write_input_tokens`.
 
 ## 0.4.0 - 2026-09-21
 

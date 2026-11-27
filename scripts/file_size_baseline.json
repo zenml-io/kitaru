@@ -28,10 +28,9 @@
   "plugins/tests/importers/fuzz_strategies.py": 1008,
   "plugins/tests/importers/test_langfuse.py": 1473,
   "src/kitaru/cli/local_runtime.py": 1057,
-  "src/kitaru/cli/registration.py": 1010,
   "tests/cli/test_auth.py": 1189,
   "tests/cli/test_local_runtime.py": 1187,
-  "tests/cli/test_sessions.py": 1920,
+  "tests/cli/test_sessions.py": 1917,
   "tests/mcp/test_handlers_protocol.py": 1113,
   "tests/mcp/test_review_workflows.py": 2193,
   "tests/server/test_evaluation_repository.py": 1159,
@@ -43,5 +42,5 @@
   "tests/server/test_session_service.py": 1773,
   "tests/server/test_sessions_api.py": 1386,
   "tests/server/test_task_service.py": 1244,
-  "tests/task/test_importer.py": 1430
+  "tests/task/test_importer.py": 1380
 }

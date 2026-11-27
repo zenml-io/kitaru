@@ -38,9 +38,9 @@ The worker retains the API key for registration and worker-token renewal. Each t
 
 ## Fleet patterns
 
-**One general worker per agent environment.** The simplest useful fleet: each environment that can run an agent gets a worker with no scope, and utility work (imports, evaluations) rides along.
+**One general worker per agent environment.** The simplest useful fleet: each environment that can run an agent gets a worker with no scope, and utility work (imports, evaluations, analyses) rides along.
 
-**Split agent execution from plugin execution.** Agent replays need your application environment; evaluations and imports don't. A scoped pair keeps them independent:
+**Split agent execution from plugin execution.** Agent replays need your application environment; evaluations, imports, and analyses don't. A scoped pair keeps them independent:
 
 ```bash
 # in the agent's environment
@@ -67,4 +67,34 @@ This is the pattern for [CI regression gates](../guides/regression-suite.md): th
 - **Draining**: SIGINT/SIGTERM stops claiming and finishes in-flight tasks; a second signal exits immediately. Per-task timeouts (set server-side and on agent versions) bound the wait.
 - **Crash safety**: a worker that dies stops heartbeating; the server requeues its tasks to the next worker (up to the retry limit). No replay is lost to a pod eviction.
 - **Liveness**: `kitaru worker list` shows the live fleet and when each worker was last seen. Add `--include-stale` to see workers past the liveness window.
-- **Subprocess environments**: evaluator and importer plugins run via `uv` in isolated per-plugin environments, cached by content hash; agent tasks run the agent version's command in the worker's own environment plus the version's [secrets](secrets.md). The default plugins (the five `kitaru/` importers and the built-in evaluator suite) run under the same isolation as plugins you write yourself.
+- **Subprocess environments**: evaluator, importer, and analyzer plugins run via `uv` in isolated per-plugin environments, cached by content hash; agent tasks run the agent version's command in the worker's own environment plus the version's [secrets](secrets.md). The default plugins (the built-in `kitaru/` importers, evaluators, and analyzers) run under the same isolation as plugins you write yourself.
+
+## Workers without internet access
+
+When a worker claims a package-backed evaluator, importer, or analyzer task, it launches the plugin with `uv run --no-project --python <worker-python> --prerelease=allow --with <requirement> python -m kitaru.task ...` (adding `[api]` for API imports and `--exclude-newer-package` overrides for pinned first-party packages when supported by `uv`). Script plugins with inline PEP 723 dependencies use the same `uv run --with` path; script plugins with no dependencies run directly with the worker's Python interpreter.
+
+By default, `uv` resolves each pinned plugin and its transitive dependencies from PyPI on first run. If the worker container cannot reach PyPI, tasks fail during dependency resolution. Setting `UV_NO_INDEX=1` does not disable PyPI lookups because `uv` does not read a `UV_NO_INDEX` environment variable; instead, configure `no-index = true` and `find-links` in a `uv.toml` file.
+
+To run `zenmldocker/kitaru-worker` without PyPI access, pre-download the pinned plugin wheels and their transitive dependencies at image build time and write a system-wide `/etc/uv/uv.toml`:
+
+```dockerfile
+FROM zenmldocker/kitaru-worker:0.27.7
+
+USER root
+
+# Pre-download the pinned plugin wheels and their transitive dependencies
+# for the worker's Python interpreter during image build.
+RUN mkdir -p /opt/kitaru-wheels /etc/uv && \
+    uv run --no-project --python /app/.venv/bin/python --with pip \
+      python -m pip download --only-binary=:all: -d /opt/kitaru-wheels \
+      kitaru-evaluator==0.3.0 \
+      kitaru-langfuse-importer==0.5.0 \
+      kitaru-post-import-insights==0.4.0
+
+# Point every uv invocation in the container at the local wheel directory.
+RUN printf 'no-index = true\nfind-links = ["/opt/kitaru-wheels"]\n' > /etc/uv/uv.toml
+
+USER kitaru
+```
+
+Include every plugin distribution (and any extras your tasks need, such as `kitaru-langfuse-importer[api]==0.5.0` or `kitaru-post-import-insights[openai]==0.4.0`) matching the pinned versions registered on your server. A system-wide `/etc/uv/uv.toml` applies to every `uv` process in the container regardless of inherited environment variables. On hosts where you cannot write `/etc/uv/uv.toml`, point `UV_CONFIG_FILE` at the same file (and optionally set `UV_OFFLINE=1` to disable all `uv` network access).

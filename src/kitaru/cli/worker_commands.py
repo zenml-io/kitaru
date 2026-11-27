@@ -19,9 +19,11 @@ from typing import Annotated
 
 from cyclopts import Parameter
 
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.cli import invocation_context, jobs, workers
 from kitaru.cli.command_registry import (
     ASSET_READ_ERRORS,
+    COLLECTION_READ_ERRORS,
     LIST_PARAMETERS,
     UUID_READ_ERRORS,
     build_spec,
@@ -41,14 +43,16 @@ _WORKER_START_PARAMETERS = (
         "option",
         False,
         "Claim the worker serves: agent, evaluator, importer, analyzer, or "
-        "agent=AGENT_VERSION_ID. Repeat for multiple claims.",
+        "agent=AGENT_VERSION_ID. Repeat for multiple claims. Any --claim replaces "
+        "the default claims (agent, evaluator, importer, analyzer). agent=ID serves "
+        "only that version.",
     ),
     ParameterSpec(
         "--selector",
         "KEY=[VALUE[,VALUE]][]|JSON[]",
         "option",
         False,
-        "Task label selectors, combined by conjunction.",
+        "Task label selector, combined by conjunction; repeat for each selector.",
     ),
     ParameterSpec("--job-id", "UUID", "option", False, "Restrict claims to one job."),
     ParameterSpec(
@@ -84,7 +88,11 @@ _WORKER_START_PARAMETERS = (
         "--payload-cache-root", "path", "option", False, "Payload cache directory."
     ),
     ParameterSpec(
-        "--metadata", "KEY=VALUE[]", "option", False, "Worker registration metadata."
+        "--metadata",
+        "KEY=VALUE[]",
+        "option",
+        False,
+        "Worker registration metadata entry; repeat for each key.",
     ),
     ParameterSpec(
         "--log-level",
@@ -122,12 +130,17 @@ async def worker_start(
         Parameter(
             name="--claim",
             help="Claim the worker serves: agent, evaluator, importer, analyzer, "
-            "or agent=AGENT_VERSION_ID. Repeat for multiple claims.",
+            "or agent=AGENT_VERSION_ID. Repeat for multiple claims. Any --claim "
+            "replaces the default claims (agent, evaluator, importer, analyzer). "
+            "agent=ID serves only that version.",
         ),
     ] = None,
     selectors: Annotated[
         list[str] | None,
-        Parameter(name="--selector", help="KEY=[VALUE[,VALUE]] or selector JSON."),
+        Parameter(
+            name="--selector",
+            help="KEY=[VALUE[,VALUE]] or selector JSON; repeat for each selector.",
+        ),
     ] = None,
     job_id: uuid.UUID | None = None,
     concurrency: int | None = None,
@@ -233,6 +246,53 @@ _JOB_ERRORS = (
     "network_error",
     "internal_error",
 )
+
+
+@register_command(
+    job_app,
+    build_spec(
+        ("job", "list"),
+        "List jobs.",
+        parameters=(
+            *LIST_PARAMETERS,
+            ParameterSpec(
+                "--kind",
+                "session_run|import|evaluation|replay|analysis",
+                "option",
+                False,
+                "Only jobs of this kind.",
+            ),
+            ParameterSpec(
+                "--status",
+                "pending|running|completed|failed|canceled",
+                "option",
+                False,
+                "Only jobs with this status.",
+            ),
+        ),
+        errors=COLLECTION_READ_ERRORS,
+    ),
+)
+async def job_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+    kind: JobKind | None = None,
+    status: JobStatus | None = None,
+) -> CommandResult:
+    """List one server page of jobs."""
+    async with invocation_context.open_asset_client() as client:
+        return await jobs.list_jobs(
+            client,
+            size=size,
+            cursor=cursor,
+            sort=sort,
+            filter=filter,
+            kind=kind,
+            status=status,
+        )
 
 
 @register_command(

@@ -50,6 +50,7 @@ from kitaru.api_models.v1.tag import (
 )
 from kitaru.api_models.v1.task import TaskKind, TaskResponse, TaskStatus
 from kitaru.cli import receipts
+from kitaru.cli.filters import list_validation_error, parse_filter_option
 from kitaru.cli.output import CLIError, CommandResult, emit_event
 from kitaru.cli.references import (
     ParentKind,
@@ -308,6 +309,9 @@ def _get_import_stats(
     return task, stats
 
 
+_MAX_ERROR_FAILURES = 5
+
+
 def _format_import_failure(failure: ImportFailure) -> str:
     """Render one import failure as a warning line."""
     item = f"line {failure.line}"
@@ -316,15 +320,64 @@ def _format_import_failure(failure: ImportFailure) -> str:
     return f"{item}: {failure.error}"
 
 
+def _build_import_failure_error(
+    job: JobResponse,
+    task: TaskResponse,
+    stats: ImportStats,
+    *,
+    receipt: dict[str, Any],
+    next_actions: list[str],
+    warnings: list[str],
+    all_failed: bool,
+) -> CLIError:
+    """Build a bounded remote failure error for rejected import record failures."""
+    if all_failed:
+        message = f"Import failed: all {stats.failed} item(s) failed to import."
+    else:
+        message = (
+            f"Import failed: {stats.failed} item(s) failed to import "
+            f"(created {stats.created}, skipped {stats.skipped})."
+        )
+    if stats.failures:
+        first_failure = receipts.truncate_diagnostic(
+            _format_import_failure(stats.failures[0])
+        )
+        if first_failure is not None:
+            message += f" First failure: {first_failure}"
+
+    bounded_failures = [
+        {
+            "line": failure.line,
+            "external_id": failure.external_id,
+            "error": receipts.truncate_diagnostic(failure.error) or "",
+        }
+        for failure in stats.failures[:_MAX_ERROR_FAILURES]
+    ]
+    details: dict[str, Any] = {
+        "job_id": str(job.id),
+        "task_id": str(task.id),
+        "stats": receipt["stats"],
+        "failures": bounded_failures,
+        "receipt": receipt,
+        "next_actions": next_actions,
+    }
+    if warnings:
+        details["warnings"] = warnings
+    return CLIError("remote_failed", message, details=details)
+
+
 def _terminal_import_result(
     job: JobResponse,
     tasks: list[TaskResponse],
     *,
     identity: dict[str, Any],
+    fail_on_failures: bool = False,
 ) -> CommandResult:
     """Validate an import task and map its settled outcome to a receipt."""
     task, stats = _get_import_stats(job, tasks)
+    follow_up = receipts.summarize_import_follow_up_tasks(tasks, identity=identity)
     task_action = receipts.get_task_filter_action("session", task.id)
+    next_actions = [task_action, *follow_up.next_actions]
     receipt: dict[str, Any] = {
         **identity,
         "operation": "session_import",
@@ -334,14 +387,22 @@ def _terminal_import_result(
     }
     if stats is not None:
         receipt["stats"] = stats.model_dump(mode="json")
+    if follow_up.analyzer_tasks:
+        receipt["analyzer_tasks"] = follow_up.analyzer_tasks
+    if follow_up.evaluator_summary is not None:
+        receipt["evaluator_summary"] = follow_up.evaluator_summary
+    if follow_up.evaluator_tasks:
+        receipt["evaluator_tasks"] = follow_up.evaluator_tasks
 
     if job.status in {JobStatus.FAILED, JobStatus.CANCELED}:
         error = receipts.terminal_job_error(job, receipt)
-        error.details["next_actions"] = [task_action]
+        error.details["next_actions"] = next_actions
+        if follow_up.warnings:
+            error.details["warnings"] = follow_up.warnings
         raise error
 
     assert stats is not None
-    warnings = []
+    warnings: list[str] = []
     if stats.failed:
         warnings.append(f"{stats.failed} item(s) failed to import.")
         warnings.extend(_format_import_failure(failure) for failure in stats.failures)
@@ -351,10 +412,25 @@ def _terminal_import_result(
         warnings.append(
             f"Import stopped after reaching the limit of {stats.created} session(s)."
         )
+    warnings.extend(follow_up.warnings)
+
+    all_failed = stats.created + stats.skipped == 0 and stats.failed > 0
+    if all_failed or (fail_on_failures and stats.failed > 0):
+        emit_event("terminal", receipt)
+        raise _build_import_failure_error(
+            job,
+            task,
+            stats,
+            receipt=receipt,
+            next_actions=next_actions,
+            warnings=follow_up.warnings,
+            all_failed=all_failed,
+        )
+
     return CommandResult(
         item=receipt,
         warnings=warnings,
-        next_actions=[task_action],
+        next_actions=next_actions,
         event="terminal",
     )
 
@@ -379,6 +455,7 @@ async def import_sessions(
     wait: bool,
     interval: float | None,
     timeout: float | None,
+    fail_on_failures: bool = False,
     join_on: str | None = None,
     since: str | None = None,
     until: str | None = None,
@@ -389,6 +466,11 @@ async def import_sessions(
 ) -> CommandResult:
     """Upload a local payload or an API selection, then create one import job."""
     tags = _normalize_import_tags(tags, wait=wait)
+    if fail_on_failures and not wait:
+        raise CLIError(
+            "invalid_arguments",
+            "--fail-on-failures requires --wait.",
+        )
     if evaluator_params and not evaluators:
         raise CLIError(
             "invalid_arguments",
@@ -640,7 +722,12 @@ async def import_sessions(
         timeout=wait_settings[1],
         initial_job=job,
     )
-    result = _terminal_import_result(terminal_job, tasks, identity=identity)
+    result = _terminal_import_result(
+        terminal_job,
+        tasks,
+        identity=identity,
+        fail_on_failures=fail_on_failures,
+    )
     if tags:
         task, _ = _get_import_stats(terminal_job, tasks)
         try:
@@ -768,14 +855,18 @@ async def list_session_nodes(
     filter: str | None = None,
 ) -> CommandResult:
     """List one bounded server page of session nodes in index order."""
-    params = SessionNodeListParams.model_validate(
-        {
-            "size": size,
-            "cursor": cursor,
-            "include_payloads": include_payloads,
-            "filter": filter,
-        }
-    )
+    parsed_filter = parse_filter_option(filter) if filter is not None else None
+    try:
+        params = SessionNodeListParams.model_validate(
+            {
+                "size": size,
+                "cursor": cursor,
+                "include_payloads": include_payloads,
+                "filter": parsed_filter,
+            }
+        )
+    except ValidationError as error:
+        raise list_validation_error(error) from None
     return page_result(await client.sessions.list_nodes(session_id, params), size=size)
 
 
