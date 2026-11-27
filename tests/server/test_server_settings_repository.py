@@ -23,6 +23,7 @@ from kitaru.server.adapters.db.repositories.server_settings_repository import (
     SQLServerSettingsRepository,
 )
 from kitaru.server.api.bootstrap import ensure_server_id
+from kitaru.server.application.models.workspace_identity import WorkspaceIdentity
 
 
 async def test_ensure_server_id_stores_the_first_id() -> None:
@@ -78,3 +79,20 @@ async def test_record_user_activity_never_moves_the_stored_time_backward() -> No
 
         await repository.record_user_activity(later + timedelta(hours=1))
         assert await repository.get_last_user_activity() == later + timedelta(hours=1)
+
+
+async def test_workspace_identity_round_trips() -> None:
+    """Store the workspace identity on the single row and read it back."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+
+    identity = WorkspaceIdentity(
+        organization_id=uuid.uuid4(), organization_name="acme", workspace_name="ml"
+    )
+    async with pg_session() as session:
+        repository = SQLServerSettingsRepository(session)
+        await repository.ensure_server_id(uuid.uuid4())
+        assert await repository.get_workspace_identity() is None
+
+        await repository.save_workspace_identity(identity)
+        assert await repository.get_workspace_identity() == identity

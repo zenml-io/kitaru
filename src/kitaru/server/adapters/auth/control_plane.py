@@ -27,7 +27,11 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.application.interfaces.account_repository import (
     AccountRepository,
 )
+from kitaru.server.application.interfaces.server_settings_repository import (
+    ServerSettingsRepository,
+)
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.workspace_identity import WorkspaceIdentity
 from kitaru.server.application.services.analytics_events import (
     build_account_created_properties,
     build_account_traits,
@@ -83,6 +87,8 @@ class ControlPlaneUser(BaseModel):
     username: str | None = None
     email: str | None = None
     is_service_account: bool = False
+    # Older control planes leave this out.
+    workspace: WorkspaceIdentity | None = None
 
 
 class ControlPlaneClient:
@@ -237,6 +243,7 @@ class ControlPlaneAuthenticator:
         self,
         client: ControlPlaneClient,
         account_repository: AccountRepository,
+        server_settings_repository: ServerSettingsRepository,
         server_id: uuid.UUID,
         analytics: ServerAnalytics | None = None,
     ) -> None:
@@ -245,11 +252,14 @@ class ControlPlaneAuthenticator:
         Args:
             client: Control plane API client.
             account_repository: Account repository holding mirrored accounts.
+            server_settings_repository: Repository storing the workspace this
+                server serves.
             server_id: Server instance this API represents.
             analytics: Analytics tracker, None skips tracking.
         """
         self._client = client
         self._account_repository = account_repository
+        self._server_settings_repository = server_settings_repository
         self._server_id = server_id
         self._analytics = analytics
 
@@ -267,8 +277,19 @@ class ControlPlaneAuthenticator:
             Request context for the mirrored account.
         """
         user = await self._client.authorize_user(credential, self._server_id)
+        if user.workspace is not None:
+            await self._update_workspace(user.workspace)
         account = await self._mirror_account(user)
         return AuthContext(account=account)
+
+    async def _update_workspace(self, workspace: WorkspaceIdentity) -> None:
+        # Before the account is mirrored, so its first events name the
+        # workspace. Stored, so a restarted server names it before anyone
+        # signs in.
+        if self._analytics is not None and self._analytics.set_workspace(
+            self._server_id, workspace
+        ):
+            await self._server_settings_repository.save_workspace_identity(workspace)
 
     async def _mirror_account(self, user: ControlPlaneUser) -> Account:
         name = self._get_account_name(user)

@@ -16,7 +16,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime
+from sqlalchemy import DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.server.adapters.db.orm.base import Base, TimestampMixin
@@ -32,3 +32,8 @@ class ServerSettingsORM(TimestampMixin, Base):
     singleton: Mapped[bool] = mapped_column(primary_key=True, default=True)
     server_id: Mapped[uuid.UUID]
     last_user_activity: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The control plane workspace this server serves, for analytics. Kept here
+    # because a warm workspace's server starts before anyone owns it.
+    organization_id: Mapped[uuid.UUID | None]
+    organization_name: Mapped[str | None] = mapped_column(Text)
+    workspace_name: Mapped[str | None] = mapped_column(Text)

@@ -48,6 +48,7 @@ from kitaru_test_support import (
     FakeApiKeyRepository,
     FakeControlPlaneClient,
     FakePasswordHasher,
+    FakeServerSettingsRepository,
 )
 
 CONTROL_PLANE_URL = "https://control-plane.example.com"
@@ -158,6 +159,7 @@ async def api_client(
         control_plane=ControlPlaneAuthenticator(
             client=authorizer,
             account_repository=account_repository,
+            server_settings_repository=FakeServerSettingsRepository(),
             server_id=settings.SERVER_ID or uuid.uuid4(),
         ),
     )

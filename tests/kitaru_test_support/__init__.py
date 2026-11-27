@@ -50,6 +50,7 @@ from kitaru_test_support.common import (
     UNSCOPED_WORKER_SCOPE,
     FakeControlPlaneClient,
     FakePasswordHasher,
+    FakeServerSettingsRepository,
     ListItemT,
 )
 from kitaru_test_support.evaluations import (
@@ -141,6 +142,7 @@ __all__ = [
     "FakePluginRepository",
     "FakeReplayRepository",
     "FakeSecretRepository",
+    "FakeServerSettingsRepository",
     "FakeSessionNodeRepository",
     "FakeSessionRepository",
     "FakeTagRepository",

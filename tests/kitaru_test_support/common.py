@@ -26,6 +26,7 @@ from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneError,
     ControlPlaneUser,
 )
+from kitaru.server.application.models.workspace_identity import WorkspaceIdentity
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.base import ListFilter
 from kitaru.server.filtering import (
@@ -287,3 +288,61 @@ def _refuse_unresolvable_fields(
         raise NotImplementedError(
             f"The fake cannot resolve the {expression.field} filter"
         )
+
+
+class FakeServerSettingsRepository:
+    """In-memory server settings repository."""
+
+    def __init__(self) -> None:
+        """Create an empty server settings repository."""
+        self.server_id: uuid.UUID | None = None
+        self.last_user_activity: datetime | None = None
+        self.workspace_identity: WorkspaceIdentity | None = None
+        self.saved_workspace_identities: list[WorkspaceIdentity] = []
+
+    async def ensure_server_id(self, server_id: uuid.UUID) -> uuid.UUID:
+        """Persist the server id when none is stored yet.
+
+        Args:
+            server_id: Server id stored when none is stored.
+
+        Returns:
+            Stored server id.
+        """
+        if self.server_id is None:
+            self.server_id = server_id
+        return self.server_id
+
+    async def get_last_user_activity(self) -> datetime | None:
+        """Load the time of the last recorded user activity.
+
+        Returns:
+            Stored timestamp, or ``None`` when none was recorded yet.
+        """
+        return self.last_user_activity
+
+    async def record_user_activity(self, at: datetime) -> None:
+        """Store a user activity time unless a later one is already stored.
+
+        Args:
+            at: Time of the activity.
+        """
+        if self.last_user_activity is None or self.last_user_activity < at:
+            self.last_user_activity = at
+
+    async def get_workspace_identity(self) -> WorkspaceIdentity | None:
+        """Load the stored control plane workspace of this server.
+
+        Returns:
+            Stored workspace identity, or ``None`` when none was stored yet.
+        """
+        return self.workspace_identity
+
+    async def save_workspace_identity(self, identity: WorkspaceIdentity) -> None:
+        """Store the control plane workspace of this server.
+
+        Args:
+            identity: Workspace identity to store.
+        """
+        self.workspace_identity = identity
+        self.saved_workspace_identities.append(identity)

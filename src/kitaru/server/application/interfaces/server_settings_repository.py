@@ -17,6 +17,8 @@ import uuid
 from datetime import datetime
 from typing import Protocol
 
+from kitaru.server.application.models.workspace_identity import WorkspaceIdentity
+
 
 class ServerSettingsRepository(Protocol):
     """Server settings persistence operations."""
@@ -45,5 +47,21 @@ class ServerSettingsRepository(Protocol):
 
         Args:
             at: Time of the activity.
+        """
+        ...
+
+    async def get_workspace_identity(self) -> WorkspaceIdentity | None:
+        """Load the stored control plane workspace of this server.
+
+        Returns:
+            Stored workspace identity, or ``None`` when none was stored yet.
+        """
+        ...
+
+    async def save_workspace_identity(self, identity: WorkspaceIdentity) -> None:
+        """Store the control plane workspace of this server.
+
+        Args:
+            identity: Workspace identity to store.
         """
         ...
