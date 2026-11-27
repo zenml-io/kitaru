@@ -319,20 +319,6 @@ async def test_rate_limits_retry_observation_pages(fake_langfuse, monkeypatch):
     assert sleeps == [3.0]
 
 
-async def test_non_rate_limit_api_errors_become_session_import_errors(
-    fake_langfuse, monkeypatch
-):
-    monkeypatch.setenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
-    fake_langfuse.trace_builders = [
-        ApiError(status_code=500, body={"message": "upstream failed"})
-    ]
-    with pytest.raises(
-        SessionImportError,
-        match=r"^Langfuse returned an error \(500\): upstream failed\.$",
-    ):
-        await collect_payloads(fetch({"trace_ids": ["trace"]}))
-
-
 async def test_unauthorized_errors_name_the_configured_host(fake_langfuse, monkeypatch):
     monkeypatch.setenv("LANGFUSE_BASE_URL", "https://us.cloud.langfuse.com")
     fake_langfuse.trace_builders = [
@@ -369,6 +355,77 @@ async def test_unreachable_host_errors_name_the_configured_host(
             r"^Couldn't reach Langfuse at https://langfuse\.example\.invalid\. "
             r"Check the host URL in the connection\.$"
         ),
+    ):
+        await collect_payloads(fetch({"trace_ids": ["trace"]}))
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (
+            ApiError(status_code=403, body={"message": "Forbidden"}),
+            (
+                "Langfuse refused access at https://cloud.langfuse.com (403). "
+                "Check that the keys belong to the project you want to import."
+            ),
+        ),
+        (
+            ApiError(status_code=404, body={"message": "Not Found"}),
+            (
+                "Langfuse at https://cloud.langfuse.com returned 404. Use the "
+                "base URL only, e.g. https://cloud.langfuse.com, without /api "
+                "or a project path."
+            ),
+        ),
+        (
+            ApiError(status_code=429, body={"message": "Too Many Requests"}),
+            (
+                "Langfuse kept rate-limiting the import from "
+                "https://cloud.langfuse.com. Try again in a few minutes, or "
+                "import a shorter time window."
+            ),
+        ),
+        (
+            ApiError(status_code=502, body={"message": "Bad Gateway"}),
+            (
+                "Langfuse at https://cloud.langfuse.com had a server error "
+                "(502). Try again in a few minutes."
+            ),
+        ),
+        (
+            httpx.ReadTimeout("timed out"),
+            (
+                "Langfuse at https://cloud.langfuse.com took too long to "
+                "respond. Try again, or import a shorter time window."
+            ),
+        ),
+        (
+            ApiError(status_code=422, body={"message": "validation failed"}),
+            "Langfuse returned an error (422): validation failed.",
+        ),
+    ],
+)
+def test_mapped_langfuse_failures_name_the_host(monkeypatch, exc, expected):
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
+    mapped = api_module._translate_langfuse_error(exc)
+    assert isinstance(mapped, SessionImportError)
+    assert str(mapped) == expected
+
+
+async def test_exhausted_rate_limits_use_the_clear_message(fake_langfuse, monkeypatch):
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
+
+    async def sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+    fake_langfuse.trace_builders = [
+        ApiError(status_code=429, body={"message": "Too Many Requests"})
+        for _ in range(11)
+    ]
+    with pytest.raises(
+        SessionImportError,
+        match=r"^Langfuse kept rate-limiting the import from https://cloud\.langfuse\.com\.",
     ):
         await collect_payloads(fetch({"trace_ids": ["trace"]}))
 

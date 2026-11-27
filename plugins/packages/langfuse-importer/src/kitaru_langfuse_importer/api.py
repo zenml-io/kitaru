@@ -116,7 +116,33 @@ def _translate_langfuse_error(exc: Exception) -> Exception:
         return SessionImportError(
             f"Couldn't reach Langfuse at {host}. Check the host URL in the connection."
         )
+    # ConnectTimeout is already treated as unreachable above.
+    if isinstance(exc, httpx.TimeoutException):
+        return SessionImportError(
+            f"Langfuse at {host} took too long to respond. Try again, or import "
+            f"a shorter time window."
+        )
     if isinstance(exc, ApiError):
+        if exc.status_code == 403:
+            return SessionImportError(
+                f"Langfuse refused access at {host} (403). Check that the keys "
+                f"belong to the project you want to import."
+            )
+        if exc.status_code == 404:
+            return SessionImportError(
+                f"Langfuse at {host} returned 404. Use the base URL only, e.g. "
+                f"https://cloud.langfuse.com, without /api or a project path."
+            )
+        if exc.status_code == 429:
+            return SessionImportError(
+                f"Langfuse kept rate-limiting the import from {host}. Try again "
+                f"in a few minutes, or import a shorter time window."
+            )
+        if exc.status_code is not None and exc.status_code >= 500:
+            return SessionImportError(
+                f"Langfuse at {host} had a server error ({exc.status_code}). "
+                f"Try again in a few minutes."
+            )
         status = "unknown" if exc.status_code is None else str(exc.status_code)
         message = _api_error_body_message(exc.body)
         return SessionImportError(f"Langfuse returned an error ({status}): {message}.")
