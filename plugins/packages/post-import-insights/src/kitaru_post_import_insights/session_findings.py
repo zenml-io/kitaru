@@ -124,7 +124,10 @@ MERGE_INSTRUCTIONS = (
     "earlier tool result explains what the agent did. Rate each finding's harm to "
     "users or the business as high, medium, or low, and give one concrete example "
     "in one sentence with the values involved, such as items, amounts, and tool "
-    "names, never record identifiers or people's names. Also provide: `check_first` "
+    "names, never record identifiers or people's names. Keep each finding `title` "
+    "concise (under 50 characters, at most 55) so it fits in the report sidebar "
+    "without truncating; put counts and specifics in `example`. Also provide: "
+    "`check_first` "
     "(one concrete thing the engineer should inspect first), `example_session` (the "
     "number of one listed session that best illustrates the problem), "
     "`mechanism_steps` (2 to 6 short ordered steps walking through how the failure "
@@ -176,7 +179,12 @@ class _StoryStepOutput(BaseModel):
 
 
 class _MergedFinding(BaseModel):
-    title: str = Field(description="Short description of the problem.")
+    title: str = Field(
+        description=(
+            "Short, sidebar-friendly description of the problem "
+            "(aim for under 50 characters, at most 55)."
+        )
+    )
     checks: list[str] = Field(
         description="Names of the merged checks, exactly as the list gives them."
     )

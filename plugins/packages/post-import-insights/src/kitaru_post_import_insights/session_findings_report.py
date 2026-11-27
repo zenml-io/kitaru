@@ -13,6 +13,7 @@
 #  limitations under the License.
 """Structured report assembly for verified session findings."""
 
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -21,6 +22,9 @@ from uuid import UUID
 
 from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.insight import (
+    AlignedStep,
+    CategoricalArtifact,
+    CategoryValue,
     EvidenceArtifact,
     EvidenceRow,
     InsightAction,
@@ -30,7 +34,11 @@ from kitaru.api_models.v1.insight import (
     InsightHighlight,
     InsightInput,
     RateArtifact,
+    SessionComparisonArtifact,
+    SessionSide,
     StepStoryArtifact,
+    StepStripArtifact,
+    StepStripRow,
     StoryStep,
     SuggestedQuestion,
     TextArtifact,
@@ -44,6 +52,10 @@ SESSION_FINDINGS_METADATA_KEY = "kitaru.session-findings/v1"
 MAX_FAILING_EVIDENCE_ROWS = 20
 MAX_COUNTEREXAMPLE_ROWS = 2
 MAX_PROMPT_SESSION_IDS = 50
+MAX_RATE_LEAD_FINDINGS = 2
+MAX_CATEGORY_BARS = 8
+MAX_COMPARISON_STEPS = 15
+MAX_STEP_STRIP_STEPS = 30
 
 Harm = Literal["high", "medium", "low"]
 StoryRole = Literal["user", "agent", "tool", "system"]
@@ -194,13 +206,7 @@ def _build_step_story(
     valid_steps = [step for step in finding.mechanism_steps if step.text.strip()]
     if not valid_steps:
         return None
-    example_idx = (
-        finding.example_session
-        if finding.example_session is not None
-        and finding.example_session in finding.sessions
-        else finding.sessions[0]
-    )
-    record = records[example_idx] if 0 <= example_idx < len(records) else None
+    record = _pick_example_record(finding, records)
     story_steps: list[StoryStep] = []
     for number, step in enumerate(valid_steps[:12], start=1):
         role: StoryRole | None = step.role if step.role in _VALID_ROLES else None
@@ -234,6 +240,232 @@ def _build_step_story(
         session_label=record.label if record is not None else None,
         steps=story_steps,
     )
+
+
+def _pick_example_record(
+    finding: Finding, records: Sequence[SessionRecord]
+) -> SessionRecord | None:
+    """Return the primary failing example session record for a finding."""
+    example_idx = (
+        finding.example_session
+        if finding.example_session is not None
+        and finding.example_session in finding.sessions
+        else finding.sessions[0]
+    )
+    return records[example_idx] if 0 <= example_idx < len(records) else None
+
+
+def _build_session_comparison(
+    finding: Finding, records: Sequence[SessionRecord]
+) -> SessionComparisonArtifact | None:
+    """Build a failing-vs-passing tool-sequence diff when the two paths differ."""
+    if not finding.counterexample_sessions:
+        return None
+    failing = _pick_example_record(finding, records)
+    counter_idx = finding.counterexample_sessions[0]
+    passing = records[counter_idx] if 0 <= counter_idx < len(records) else None
+    if failing is None or passing is None:
+        return None
+    if not failing.tool_nodes or not passing.tool_nodes:
+        return None
+    fail_names = [node.tool_name for node in failing.tool_nodes[:MAX_COMPARISON_STEPS]]
+    pass_names = [node.tool_name for node in passing.tool_nodes[:MAX_COMPARISON_STEPS]]
+    if fail_names == pass_names:
+        return None
+
+    left_steps: list[AlignedStep] = []
+    right_steps: list[AlignedStep] = []
+    i = j = 0
+    while (i < len(fail_names) or j < len(pass_names)) and len(
+        left_steps
+    ) < MAX_COMPARISON_STEPS:
+        if (
+            i < len(fail_names)
+            and j < len(pass_names)
+            and fail_names[i] == pass_names[j]
+        ):
+            f_node = failing.tool_nodes[i]
+            p_node = passing.tool_nodes[j]
+            left_steps.append(
+                AlignedStep(
+                    label=f_node.tool_name[:80],
+                    node_id=f_node.node_id,
+                    status="highlight_bad" if f_node.failed else "present",
+                )
+            )
+            right_steps.append(
+                AlignedStep(
+                    label=p_node.tool_name[:80],
+                    node_id=p_node.node_id,
+                    status="present",
+                )
+            )
+            i += 1
+            j += 1
+        elif j < len(pass_names) and pass_names[j] not in fail_names[i:]:
+            p_node = passing.tool_nodes[j]
+            left_steps.append(AlignedStep(label=None, status="missing"))
+            right_steps.append(
+                AlignedStep(
+                    label=p_node.tool_name[:80],
+                    node_id=p_node.node_id,
+                    status="highlight_good",
+                )
+            )
+            j += 1
+        elif i < len(fail_names):
+            f_node = failing.tool_nodes[i]
+            left_steps.append(
+                AlignedStep(
+                    label=f_node.tool_name[:80],
+                    node_id=f_node.node_id,
+                    status="highlight_bad",
+                )
+            )
+            right_steps.append(AlignedStep(label=None, status="missing"))
+            i += 1
+        else:
+            p_node = passing.tool_nodes[j]
+            left_steps.append(AlignedStep(label=None, status="missing"))
+            right_steps.append(
+                AlignedStep(
+                    label=p_node.tool_name[:80],
+                    node_id=p_node.node_id,
+                    status="highlight_good",
+                )
+            )
+            j += 1
+
+    return SessionComparisonArtifact(
+        title="Failing session vs passing counterexample",
+        left=SessionSide(
+            session_id=failing.session_id,
+            verdict="fail",
+            steps=left_steps,
+        ),
+        right=SessionSide(
+            session_id=passing.session_id,
+            verdict="pass",
+            steps=right_steps,
+        ),
+    )
+
+
+def _build_step_strip(
+    finding: Finding,
+    records: Sequence[SessionRecord],
+    mentioned_tools: Sequence[str],
+) -> StepStripArtifact | None:
+    """Build a step strip showing the median step where affected runs break."""
+    matched_steps: list[int] = []
+    max_step = 0
+    for idx in finding.sessions:
+        record = records[idx]
+        if record.tool_nodes:
+            max_step = max(max_step, max(node.step for node in record.tool_nodes))
+        node = _match_tool_node(record, mentioned_tools=mentioned_tools)
+        if node is not None and node.step >= 1:
+            matched_steps.append(node.step)
+    if not matched_steps:
+        return None
+    total_steps = min(MAX_STEP_STRIP_STEPS, max(2, max_step))
+    matched_steps.sort()
+    median_step = min(total_steps, matched_steps[len(matched_steps) // 2])
+    last_good = median_step - 1 if median_step > 1 else None
+    return StepStripArtifact(
+        title="Where the failure occurs by step",
+        presentation="rows",
+        total_steps=total_steps,
+        rows=[
+            StepStripRow(
+                label=finding.title[:80],
+                session_count=len(finding.sessions),
+                last_good_step=last_good,
+                first_wrong_step=median_step,
+                severity=finding.harm,
+                session_ids=[records[idx].session_id for idx in finding.sessions[:50]],
+            )
+        ],
+    )
+
+
+def _build_tool_breakdown(
+    finding: Finding,
+    records: Sequence[SessionRecord],
+    *,
+    tone: Tone,
+) -> CategoricalArtifact | None:
+    """Build a ranked bar breakdown of tools seen across affected sessions."""
+    tool_sessions: Counter[str] = Counter()
+    for idx in finding.sessions:
+        seen_in_session = {node.tool_name for node in records[idx].tool_nodes}
+        for tool_name in seen_in_session:
+            tool_sessions[tool_name] += 1
+    if len(tool_sessions) < 2:
+        return None
+    ranked = sorted(tool_sessions.items(), key=lambda item: (-item[1], item[0]))
+    if len(ranked) > MAX_CATEGORY_BARS:
+        head = ranked[: MAX_CATEGORY_BARS - 1]
+        other_total = sum(count for _, count in ranked[MAX_CATEGORY_BARS - 1 :])
+        head.append(("Other", other_total))
+        ranked = head
+    return CategoricalArtifact(
+        title="Tools in affected sessions",
+        presentation="ranked_bars",
+        unit="sessions",
+        values=[
+            CategoryValue(
+                label=label[:120],
+                value=count,
+                tone=tone if idx == 0 else "neutral",
+                focus=idx == 0,
+            )
+            for idx, (label, count) in enumerate(ranked)
+        ],
+    )
+
+
+def _select_lead_artifact(
+    position: int,
+    finding: Finding,
+    records: Sequence[SessionRecord],
+    *,
+    mentioned_tools: Sequence[str],
+    rate: float,
+    total: int,
+    tone: Tone,
+    used_lead_counts: Counter[str],
+) -> InsightArtifact:
+    """Pick a data-backed lead visual while limiting repeated rate share bars."""
+    rate_artifact = RateArtifact(
+        presentation="share_bar",
+        rate=round(rate, 4),
+        numerator=len(finding.sessions),
+        denominator=max(total, 1),
+        label=f"of {total} sessions",
+        basis=f"Verified across all {total} sessions",
+        tone=tone,
+    )
+    if position < MAX_RATE_LEAD_FINDINGS:
+        used_lead_counts["rate"] += 1
+        return rate_artifact
+
+    candidates: list[tuple[str, InsightArtifact | None]] = [
+        ("session_comparison", _build_session_comparison(finding, records)),
+        ("step_strip", _build_step_strip(finding, records, mentioned_tools)),
+        ("categorical", _build_tool_breakdown(finding, records, tone=tone)),
+    ]
+    available = [
+        (kind, artifact) for kind, artifact in candidates if artifact is not None
+    ]
+    if available:
+        available.sort(key=lambda item: used_lead_counts[item[0]])
+        chosen_kind, chosen = available[0]
+        used_lead_counts[chosen_kind] += 1
+        return chosen
+
+    used_lead_counts["rate"] += 1
+    return rate_artifact
 
 
 def _build_evidence_artifact(
@@ -463,6 +695,7 @@ def build_session_findings_report(
 
     insight_findings: list[InsightFinding] = []
     finding_metadata: dict[str, JsonValue] = {}
+    used_lead_counts: Counter[str] = Counter()
 
     for position, finding in enumerate(findings):
         finding_id = f"session-finding-{position + 1}"
@@ -486,21 +719,21 @@ def build_session_findings_report(
             if finding.harm == "high"
             else ("risk" if finding.harm == "medium" else "warn")
         )
-        artifacts: list[InsightArtifact] = [
-            RateArtifact(
-                presentation="share_bar",
-                rate=round(rate, 4),
-                numerator=len(matching_ids),
-                denominator=max(total, 1),
-                label=f"of {total} sessions",
-                basis=f"Verified across all {total} sessions",
-                tone=tone,
-            )
-        ]
+        lead_artifact = _select_lead_artifact(
+            position,
+            finding,
+            records,
+            mentioned_tools=mentioned_tools,
+            rate=rate,
+            total=total,
+            tone=tone,
+            used_lead_counts=used_lead_counts,
+        )
+        artifacts: list[InsightArtifact] = [lead_artifact]
         step_story = _build_step_story(finding, records)
         if step_story is not None:
             artifacts.append(step_story)
-        else:
+        elif isinstance(lead_artifact, RateArtifact):
             artifacts.append(TextArtifact(style="body", content=finding.example))
         artifacts.append(_build_evidence_artifact(finding, records, mentioned_tools))
 

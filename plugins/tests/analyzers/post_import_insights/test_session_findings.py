@@ -23,9 +23,12 @@ from typing import Any
 import pytest
 
 from kitaru.api_models.v1.insight import (
+    CategoricalArtifact,
     EvidenceArtifact,
     RateArtifact,
+    SessionComparisonArtifact,
     StepStoryArtifact,
+    StepStripArtifact,
     TextArtifact,
 )
 from kitaru.api_models.v1.session import (
@@ -611,3 +614,71 @@ async def test_failed_decisions_request_names_only_the_error_type() -> None:
         )
 
     assert str(raised.value) == "decisions request failed (PermissionError)"
+
+
+def test_session_findings_report_varies_lead_visuals_and_prompts_short_titles() -> None:
+    """Rotate beyond rate bars across multi-finding reports and guide short titles."""
+    from kitaru_post_import_insights.session_findings_report import (
+        Finding,
+        ReportContext,
+        SessionRecord,
+        ToolNodeRef,
+        build_session_findings_report,
+    )
+
+    assert "under 50 characters" in session_findings.MERGE_INSTRUCTIONS
+
+    s0_id = uuid.UUID("01990000-0000-7000-8000-000000000101")
+    s1_id = uuid.UUID("01990000-0000-7000-8000-000000000102")
+    n0 = uuid.UUID("01990000-0000-7000-8000-000000001001")
+    n1 = uuid.UUID("01990000-0000-7000-8000-000000001002")
+    n2 = uuid.UUID("01990000-0000-7000-8000-000000001003")
+    n3 = uuid.UUID("01990000-0000-7000-8000-000000001004")
+
+    records = [
+        SessionRecord(
+            session_id=s0_id,
+            session_number=1,
+            started_at=START,
+            status=SessionStatus.COMPLETED,
+            tool_call_count=2,
+            tool_nodes=(
+                ToolNodeRef(step=2, node_id=n0, tool_name="lookup_order", failed=False),
+                ToolNodeRef(step=4, node_id=n1, tool_name="issue_refund", failed=True),
+            ),
+            transcript="failing",
+        ),
+        SessionRecord(
+            session_id=s1_id,
+            session_number=2,
+            started_at=START + timedelta(minutes=1),
+            status=SessionStatus.COMPLETED,
+            tool_call_count=3,
+            tool_nodes=(
+                ToolNodeRef(step=2, node_id=n2, tool_name="lookup_order", failed=False),
+                ToolNodeRef(
+                    step=3, node_id=n3, tool_name="get_return_policy", failed=False
+                ),
+            ),
+            transcript="passing",
+        ),
+    ]
+    findings = [
+        Finding(
+            title=f"Finding {idx}",
+            harm="high" if idx == 1 else "medium",
+            example=f"Concrete example {idx}.",
+            checks=[f"check {idx} involving issue_refund"],
+            sessions=[0],
+            counterexample_sessions=[1],
+        )
+        for idx in range(1, 6)
+    ]
+
+    report = build_session_findings_report(findings, records, context=ReportContext())
+    lead_types = [type(f.artifacts[0]) for f in report.findings]
+
+    assert lead_types[:2] == [RateArtifact, RateArtifact]
+    assert SessionComparisonArtifact in lead_types[2:]
+    assert StepStripArtifact in lead_types[2:]
+    assert CategoricalArtifact in lead_types[2:]
