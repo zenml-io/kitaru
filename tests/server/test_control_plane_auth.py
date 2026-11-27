@@ -537,12 +537,21 @@ async def test_authenticate_names_the_workspace_before_the_account_exists(
     assert created_context["workspace_name"] == "ml"
     assert server_settings.saved_workspace_identities == [workspace]
 
+    # A request that failed after the write rolled it back.
+    server_settings.workspace_identity = None
+    await authenticator.authenticate("credential")
+    assert server_settings.saved_workspace_identities == [workspace, workspace]
+
     renamed = workspace.model_copy(update={"workspace_name": "renamed"})
     client.user = user.model_copy(update={"workspace": renamed})
     await authenticator.authenticate("credential")
 
     assert analytics._client.context["workspace_name"] == "renamed"
-    assert server_settings.saved_workspace_identities == [workspace, renamed]
+    assert server_settings.saved_workspace_identities == [
+        workspace,
+        workspace,
+        renamed,
+    ]
 
 
 def test_user_without_a_workspace_parses_from_an_older_control_plane() -> None:

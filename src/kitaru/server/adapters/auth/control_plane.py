@@ -285,10 +285,12 @@ class ControlPlaneAuthenticator:
     async def _update_workspace(self, workspace: WorkspaceIdentity) -> None:
         # Before the account is mirrored, so its first events name the
         # workspace. Stored, so a restarted server names it before anyone
-        # signs in.
-        if self._analytics is not None and self._analytics.set_workspace(
-            self._server_id, workspace
-        ):
+        # signs in. The stored row decides, because a request that fails
+        # after this rolls the write back.
+        if self._analytics is not None:
+            self._analytics.set_workspace(self._server_id, workspace)
+        stored = await self._server_settings_repository.get_workspace_identity()
+        if stored != workspace:
             await self._server_settings_repository.save_workspace_identity(workspace)
 
     async def _mirror_account(self, user: ControlPlaneUser) -> Account:
