@@ -49,6 +49,71 @@ def evaluate(session: SessionView, **params) -> list[EvaluationResult]:
 
 `SessionView` is the whole recording: `session.session` is the [session](../concepts/agents-and-sessions.md) with its inputs, outputs, and rollups; `session.nodes` is every model call and tool call with payloads. Return one result or a list; each becomes one stored evaluation. `evaluate` can also be `async def`, for example to call a model client asynchronously, and the task process awaits it. Pick the type by how you will read a thousand of them: **numbers average, booleans count, labels diff as transitions, free text gets read.** Use `passed` for the verdict and `explanation` for the sentence you will want when a gate goes red.
 
+## Inspecting session nodes
+
+Each entry in `session.nodes` is a `SessionNodeResponse` ordered by start time. Its main attributes are:
+
+| Attribute | Meaning |
+| --- | --- |
+| `node_type` | `"llm_call"`, `"tool_call"`, `"subagent_call"`, or `"span"` (`NodeType`). |
+| `name` | Display name for the node. |
+| `tool_name` | Tool name on `tool_call` nodes (`None` on other node types). |
+| `status`, `error` | `"in_progress"`, `"completed"`, or `"failed"` (`NodeStatus`), plus the error string on failed nodes. |
+| `inputs`, `outputs` | Recorded node payloads (populated on `SessionView`; structure depends on the adapter or importer). |
+| `model`, `requested_model`, `model_provider`, `model_params` | Served model, requested model, provider, and request parameters on `llm_call` nodes. |
+| `tokens`, `cost` | Token usage (`input_tokens`, `output_tokens`, `cached_input_tokens`, `cache_write_input_tokens`, `reasoning_tokens`) and call cost. |
+| `attributes`, `metadata` | Span attributes (for example `{"mocked": True, "policy": "history"}` on replayed tool nodes) and arbitrary metadata. |
+| `started_at`, `ended_at` | Node start and end timestamps (`datetime` or `None`). |
+| `external_id`, `parent_external_id` | Source node identifier and parent node identifier for walking the call tree. |
+
+Exact `inputs` and `outputs` shapes depend on the recording adapter or importer that produced the session. Inspect a real session first so your evaluator checks the actual keys your traces carry:
+
+```bash
+kitaru session read <session-id>
+kitaru session nodes <session-id> --include-payloads -o json
+```
+
+Guard payload lookups against missing keys or unexpected types when reading tool arguments and results:
+
+```python
+from kitaru.task.evaluator import EvaluationResult, SessionView
+
+
+def evaluate(session: SessionView, **params) -> EvaluationResult:
+    del params
+    refund_nodes = [
+        node
+        for node in session.nodes
+        if node.node_type == "tool_call" and node.tool_name == "refund_payment"
+    ]
+    if not refund_nodes:
+        return EvaluationResult(
+            name="refund_within_limit",
+            score=False,
+            passed=False,
+            explanation="No refund_payment tool call recorded.",
+        )
+
+    call = refund_nodes[0]
+    args = call.inputs if isinstance(call.inputs, dict) else {}
+    result = call.outputs if isinstance(call.outputs, dict) else {}
+    amount = args.get("amount")
+    accepted = result.get("accepted") is True
+    passed = (
+        call.status == "completed"
+        and accepted
+        and isinstance(amount, (int, float))
+        and amount <= 100
+    )
+
+    return EvaluationResult(
+        name="refund_within_limit",
+        score=passed,
+        passed=passed,
+        explanation=f"status={call.status}, amount={amount!r}, accepted={accepted!r}",
+    )
+```
+
 ## Keep expected answers in session metadata
 
 Store a reviewed expected answer, or gold label, in the original session's metadata, for example `{"expected_action": "refund"}`. Keep it out of the agent's inputs so the agent cannot use the answer to choose its action.
@@ -89,7 +154,6 @@ The baseline context contains metadata, not the baseline's full trace or outputs
 {% hint style="warning" %}
 Baseline metadata is read when the server supplies the evaluation task specification, not saved as a permanent label snapshot. Avoid editing gold labels while comparing a baseline and replay result. After changing a label, use `baseline_evaluation_mode=BaselineEvaluationMode.FORCE` (CLI: `--baseline-evaluation-mode force`) for the next replay: `IF_MISSING` can reuse an older baseline evaluation with the same evaluator version and parameters even though the metadata changed. See [Replay and overrides](replay-and-overrides.md).
 {% endhint %}
-
 ## An LLM judge is an evaluator
 
 For criteria that need judgment, such as tone, helpfulness, or whether the reply answered the question, call a model inside `evaluate`. Declare the dependency inline (PEP 723) and the worker builds the environment:
@@ -119,12 +183,24 @@ def evaluate(session: SessionView, **params) -> EvaluationResult:
 
 The judge runs on your [worker](../concepts/workers.md), so its API key is worker environment configuration, the same place your agent's keys live. `params` (here `judge_model`) are set per replay or experiment via `EvaluatorConfig(evaluator="tone-judge", params={...})`, so one evaluator serves cheap-per-PR and thorough-nightly configurations.
 
-## Test offline, then register
+## Check it loads, then register
 
 ```bash
 kitaru evaluator test refund_quality_evaluator.py --entrypoint evaluate
 kitaru evaluator register refund-quality \
   --script refund_quality_evaluator.py --entrypoint evaluate
+```
+
+`kitaru evaluator test` imports the script in a child process and checks that the entrypoint matches the callable signature (`loaded: true`, `invoked: false`). It does **not** call `evaluate` or build a `SessionView`, so bugs in your node parsing or payload assumptions only appear when a worker runs the evaluator against a real session.
+
+After registering, run the evaluator on one session you expect to fail and one session you expect to pass, then inspect the written verdicts:
+
+```bash
+kitaru session evaluate <expected-fail-session-id> \
+  --evaluator refund-quality@1 --wait
+kitaru session evaluate <expected-pass-session-id> \
+  --evaluator refund-quality@1 --wait
+kitaru evaluation list --size 20
 ```
 
 An evaluator that calls a provider, like the OpenAI judge above, can declare its provider and a [connection schema](provider-connections.md) on register with `--provider` and `--connection-schema`.

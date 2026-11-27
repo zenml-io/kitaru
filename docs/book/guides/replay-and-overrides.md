@@ -81,7 +81,7 @@ asyncio.run(main())
 Field by field:
 
 - `baseline_session_id`: the recording to re-run.
-- `agent_version_id`: which code runs. Omitted, it is the version the baseline was recorded with, which is the faithful choice. Point it at a newly registered version to replay old traffic **against your working tree**.
+- `agent_version_id`: which registered run spec executes. Omitted, it uses the version recorded on the baseline session. Point it at another registered version to replay old traffic against a candidate build. Because an agent version stores a `RunSpec` pointer (`command`, `working_dir`, environment, secrets) rather than a code snapshot or commit hash, keep each version in a separate directory, git worktree, or container image so editing code in place does not change what older versions run.
 - `override`: the fork. Omit it for a pure reproduction.
 - `tool_policy`: what tool calls hit. If omitted, the server applies its default, which currently passes calls through to live tools. For a replay that touches nothing real, set a `history` policy as above. Details in [Tool policies](tool-policies.md).
 - `evaluators`: at least one, always. A replay is evaluated on arrival.
@@ -110,7 +110,7 @@ One `ReplayOverride`, four knobs; change one at a time:
 | `prompt` | Replace the user prompt to ask a different question of the same recorded world. |
 | `model_params` | Adjust sampling parameters (temperature, etc.) at the adapter level. |
 
-Code changes need no override at all: register the new code as an agent version and pass its `agent_version_id`. Replays run **from the top**: the whole agent re-executes against the recorded world, so the entire decision path downstream of your change is real.
+Code changes need no override at all: put the candidate code in its own working directory, git worktree, or container image, register it as a new agent version with `--display-version`, and pass its `agent_version_id` (or `--agent NAME@VERSION`). Do not mutate the directory used by an earlier agent version in place, because an agent version stores only a `RunSpec` pointer (`command`, `working_dir`, environment, secrets), not a code snapshot or commit hash. Replays run **from the top**: the whole agent re-executes against the recorded world, so the entire decision path downstream of your change is real.
 
 {% hint style="warning" %} With the default `passthrough` policy, a replayed `refund_payment` call **refunds the card again**. Set a `history` policy for anything with side effects, or use `static` to inject a canned result. If your agent must behave differently under replay, check for the `KITARU_REPLAY_ID` environment variable; it is set only in replayed runs. {% endhint %}
 
@@ -151,7 +151,7 @@ A replay settles `failed` when its pipeline cannot produce the comparison: the a
 
 - **No run spec:** the agent version must carry a run command; registering with `--command` is what makes a session replayable.
 - **Worker environment:** the subprocess needs your agent's dependencies and provider keys; it inherits them from the worker's environment.
-- **Unrecorded tool call:** the fork took a path the baseline never took. That is information: widen the history scope, add a `static` case for it, or accept `error_result` and let the agent handle it.
+- **Unrecorded tool call:** the fork took a path or passed tool arguments the baseline never recorded. That is information: add a `static` case for side-effecting tools whose arguments changed, widen the history scope only if the tool's answer is independent of the conversation, or accept `error_result` and inspect the replayed session for failed or mocked tool nodes (`attributes.mocked: true`). See [Tool policies](tool-policies.md).
 
 ## From one replay to many
 

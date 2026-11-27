@@ -25,14 +25,14 @@ kitaru session import langfuse-export.jsonl \
 `--tag` labels the created sessions once the import completes (so it requires `--wait`); downstream commands select on it. On the Python client the same import is explicit:
 
 ```python
-from kitaru.api_models.v1.imports import ImportCreateRequest
+from kitaru.api_models.v1.imports import BlobImportSource, ImportCreateRequest
 
 job = await client.imports.create(
     ImportCreateRequest(
-        importer="langfuse",  # importer name in the registry
+        importer="kitaru/langfuse",  # importer name in the registry
         agent_id=AGENT_ID,  # sessions land under this agent
         agent_version_id=None,  # optional: stamp a version on them
-        payload_blob_id=blob.id,
+        source=BlobImportSource(blob_id=blob.id),
         params={"source_instance": "my-langfuse-project"},
     )
 )

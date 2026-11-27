@@ -47,7 +47,7 @@ The final receipt reports what happened: sessions `created`, `skipped`, and `fai
 kitaru session list --agent support-agent --origin imported
 ```
 
-The same import is two calls on the [Python client](../deploy/configuration.md) when you'd rather script it: upload the export with `client.blobs.upload(...)`, then create the import with `client.imports.create(ImportCreateRequest( importer="langfuse", agent_id=..., payload_blob_id=...))`.
+The same import is two calls on the [Python client](../deploy/configuration.md) when you'd rather script it: upload the export with `client.blobs.upload(...)`, then create the import with `client.imports.create(ImportCreateRequest(importer="kitaru/langfuse", agent_id=..., source=BlobImportSource(blob_id=...)))` (or `source={"type": "blob", "blob_id": ...}`).
 
 ## Or skip the export
 

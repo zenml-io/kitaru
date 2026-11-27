@@ -170,7 +170,7 @@ The selected value must be a non-empty string, number, or boolean. A missing, co
 The CLI validates `--join-on` and adds it to the importer parameter object, resolves each `--evaluator` plus any matching `--evaluator-connection` into an entry of the `evaluators` list, and resolves each `--analyzer` plus any matching `--analyzer-connection` into an entry of the `analyzers` list. SDK callers pass the same `join_on` parameter, evaluator configs, and analyzer configs directly:
 
 ```python
-from kitaru.api_models.v1.imports import ImportCreateRequest
+from kitaru.api_models.v1.imports import BlobImportSource, ImportCreateRequest
 from kitaru.api_models.v1.plugin import AnalyzerConfig, EvaluatorConfig
 
 created_import = await client.imports.create(
@@ -179,7 +179,7 @@ created_import = await client.imports.create(
         version=1,
         agent_id=agent_id,
         agent_version_id=agent_version_id,
-        payload_blob_id=blob_id,
+        source=BlobImportSource(blob_id=blob_id),
         params={"join_on": "/metadata/customer/case_id"},
         evaluators=[
             EvaluatorConfig(
@@ -205,7 +205,10 @@ The REST request uses the same structure:
   "version": 1,
   "agent_id": "00000000-0000-0000-0000-000000000000",
   "agent_version_id": "00000000-0000-0000-0000-000000000001",
-  "payload_blob_id": "00000000-0000-0000-0000-000000000002",
+  "source": {
+    "type": "blob",
+    "blob_id": "00000000-0000-0000-0000-000000000002"
+  },
   "params": {"join_on": "/metadata/customer/case_id"},
   "evaluators": [{"evaluator": "accuracy", "params": {"threshold": 0.8}}],
   "analyzers": [
