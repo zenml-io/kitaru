@@ -22,6 +22,15 @@ from typing import Any
 
 import pytest
 
+from kitaru.api_models.v1.insight import (
+    CategoricalArtifact,
+    EvidenceArtifact,
+    RateArtifact,
+    SessionComparisonArtifact,
+    StepStoryArtifact,
+    StepStripArtifact,
+    TextArtifact,
+)
 from kitaru.api_models.v1.session import (
     SessionDetailResponse,
     SessionOrigin,
@@ -45,25 +54,30 @@ from kitaru_post_import_insights.session_findings import (
     _MergedFinding,
     _MergePlan,
     _ReaderPlan,
+    _StoryStepOutput,
     analyze_session_findings,
     find_problems,
     render_session,
+    select_reader_indices,
 )
 
 START = datetime(2026, 11, 2, 9, tzinfo=UTC)
 OWNER_ID = uuid.UUID("01990000-0000-7000-8000-000000000001")
 AGENT_ID = uuid.UUID("01990000-0000-7000-8000-000000000002")
+IMPORT_ID = uuid.UUID("01990000-0000-7000-8000-000000000003")
 SYSTEM_PROMPT = "Refund defective items. Never refund final-sale items."
 
 
 def _node(session_id: uuid.UUID, position: int, **fields: Any) -> SessionNodeResponse:
     return SessionNodeResponse(
-        id=uuid.uuid4(),
+        id=uuid.UUID(
+            f"01990000-0000-7000-8000-{session_id.int % 10000:04d}{position:08d}"
+        ),
         session_id=session_id,
         external_id=f"node-{position}",
         parent_external_id=None,
         links=[],
-        status=NodeStatus.COMPLETED,
+        status=fields.pop("status", NodeStatus.COMPLETED),
         started_at=START,
         metadata={},
         **fields,
@@ -71,7 +85,15 @@ def _node(session_id: uuid.UUID, position: int, **fields: Any) -> SessionNodeRes
 
 
 def _session(
-    number: int, reply: str, *, outputs: Any = None
+    number: int,
+    reply: str,
+    *,
+    outputs: Any = None,
+    status: SessionStatus = SessionStatus.COMPLETED,
+    tool_status: NodeStatus = NodeStatus.COMPLETED,
+    origin: SessionOrigin = SessionOrigin.IMPORTED,
+    imported_from: str | None = "langfuse",
+    import_id: uuid.UUID | None = IMPORT_ID,
 ) -> SessionWithNodesResponse:
     session_id = uuid.UUID(f"01990000-0000-7000-8000-{100 + number:012d}")
     message = f"Ticket {number}: the strap snapped."
@@ -85,8 +107,10 @@ def _session(
             started_at=START + timedelta(minutes=number),
             agent_id=AGENT_ID,
             number=number,
-            origin=SessionOrigin.IMPORTED,
-            status=SessionStatus.COMPLETED,
+            import_id=import_id if origin is SessionOrigin.IMPORTED else None,
+            imported_from=imported_from if origin is SessionOrigin.IMPORTED else None,
+            origin=origin,
+            status=status,
             inputs=None,
             outputs=outputs,
             metadata={},
@@ -112,6 +136,7 @@ def _session(
                 node_type=NodeType.TOOL_CALL,
                 name="issue_refund",
                 tool_name="issue_refund",
+                status=tool_status,
                 inputs={"amount": 75},
                 outputs={"accepted": True},
             ),
@@ -166,19 +191,44 @@ class FakeOpenAI:
         return SimpleNamespace(answers=answers)
 
 
-def _check(name: str) -> _Check:
-    return _Check(name=name, check=f"The session shows {name}.")
+def _check(name: str, text: str | None = None) -> _Check:
+    return _Check(name=name, check=text or f"The session shows {name}.")
 
 
 def _finding(
-    checks: list[str], harm: Harm, drop: tuple[int, ...] = ()
+    checks: list[str],
+    harm: Harm,
+    drop: tuple[int, ...] = (),
+    **extra: Any,
 ) -> _MergedFinding:
     return _MergedFinding(
-        title=f"{harm} finding",
+        title=extra.pop("title", f"{harm} finding"),
         checks=checks,
         drop_sessions=list(drop),
         harm=harm,
-        example=f"Example of {harm}.",
+        example=extra.pop("example", f"Example of {harm}."),
+        **extra,
+    )
+
+
+def _stub_kitaru(
+    sessions: list[SessionWithNodesResponse],
+    *,
+    agent_name: str = "returns-agent",
+    base_url: str = "https://kitaru.example.test/",
+) -> SimpleNamespace:
+    by_id = {s.session.id: s for s in sessions}
+
+    async def get_with_nodes(session_id: uuid.UUID) -> SessionWithNodesResponse:
+        return by_id[session_id]
+
+    async def get_agent(_agent_id: uuid.UUID) -> SimpleNamespace:
+        return SimpleNamespace(name=agent_name)
+
+    return SimpleNamespace(
+        base_url=base_url,
+        sessions=SimpleNamespace(get_with_nodes=get_with_nodes),
+        agents=SimpleNamespace(get=get_agent),
     )
 
 
@@ -202,8 +252,33 @@ def test_render_session_falls_back_to_the_last_model_reply() -> None:
     assert transcript.splitlines()[-1] == "Agent answer: Refund issued."
 
 
+def test_select_reader_indices_mixes_targeted_and_deterministic_random_baseline() -> (
+    None
+):
+    """When budget is tight, prioritize older failures plus deterministic baseline."""
+    # 20 sessions of 100 chars each = 2040 chars; budget fits ~8 sessions (820 chars).
+    sections = [f"S{idx:02d}-" + ("x" * 96) for idx in range(20)]
+    # Oldest 3 sessions (0, 1, 2) are failures; newest sessions are clean.
+    targeted = {0, 1, 2}
+
+    first = select_reader_indices(
+        sections, targeted_indices=targeted, budget=820, seed="stable-seed"
+    )
+    second = select_reader_indices(
+        sections, targeted_indices=targeted, budget=820, seed="stable-seed"
+    )
+
+    assert first == second
+    assert first == sorted(first)
+    # All 3 older targeted failures are preserved despite being at the start!
+    assert {0, 1, 2} <= set(first)
+    # Baseline sessions are also included for contrast
+    assert len(set(first) - targeted) >= 3
+    assert len(first) < len(sections)
+
+
 async def test_findings_count_only_sessions_where_a_check_held() -> None:
-    """Count confident answers only, and let code decide each finding's sessions."""
+    """Count confident answers only, drop false positives, and pick counterexamples."""
     transcripts = [render_session(_session(n, "Done.")) for n in range(4)]
     client = FakeOpenAI(
         plans=[
@@ -239,6 +314,10 @@ async def test_findings_count_only_sessions_where_a_check_held() -> None:
         ("low", [0, 1, 3]),
     ]
     assert findings[0].checks == ["The session shows final_sale."]
+    # Sessions 1 and 3 had prob 0.1 (passing counterexamples); session 2 was dropped
+    assert findings[0].counterexample_sessions == [1, 3]
+    # Tone held on 0, 1, 3 and was refused/missing on 2 -> no passing counterexample
+    assert findings[1].counterexample_sessions == []
     reader_prompt, merge_prompt = client.prompts
     assert "The refund tool skips the approval limit." in reader_prompt
     assert "- final_sale: The session shows final_sale. Held in sessions [0, 2]." in (
@@ -249,23 +328,72 @@ async def test_findings_count_only_sessions_where_a_check_held() -> None:
     assert len(set(client.cache_keys)) == 1
 
 
-async def test_analyzer_writes_one_insight_per_finding(
+async def test_analyzer_writes_one_structured_multi_finding_report(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Name the verified sessions by ID, oldest first, in each insight."""
-    sessions = [_session(2, "Refunded."), _session(1, "Ok.")]
-    by_id = {s.session.id: s for s in sessions}
-
-    async def get_with_nodes(session_id: uuid.UUID) -> SessionWithNodesResponse:
-        return by_id[session_id]
-
-    kitaru = SimpleNamespace(sessions=SimpleNamespace(get_with_nodes=get_with_nodes))
+    """Emit one InsightInput report with Rate, StepStory, Evidence + counterexamples."""
+    sessions = [
+        _session(2, "Refunded.", tool_status=NodeStatus.FAILED),
+        _session(1, "Ok."),
+    ]
+    kitaru = _stub_kitaru(sessions)
     client = FakeOpenAI(
         plans=[
-            _ReaderPlan(checks=[_check("final_sale")]),
-            _MergePlan(findings=[_finding(["final_sale"], "high")]),
+            _ReaderPlan(
+                checks=[
+                    _check("final_sale", "issue_refund refunded a final-sale item."),
+                    _check("tone", "Agent used an abrupt closing."),
+                ]
+            ),
+            _MergePlan(
+                findings=[
+                    _finding(
+                        ["tone"],
+                        "low",
+                        title="Abrupt closing message",
+                        example="Agent ended without offering further help.",
+                    ),
+                    _finding(
+                        ["final_sale"],
+                        "high",
+                        title="Refunded final-sale item",
+                        example=(
+                            "Agent called issue_refund ($75) on a final-sale strap."
+                        ),
+                        check_first="Inspect issue_refund eligibility validation.",
+                        example_session=1,
+                        mechanism_steps=[
+                            _StoryStepOutput(
+                                text=(
+                                    "Customer asks to refund a broken final-sale strap."
+                                ),
+                                role="user",
+                            ),
+                            _StoryStepOutput(
+                                text=(
+                                    "Agent calls issue_refund without checking policy."
+                                ),
+                                role="tool",
+                                tool_name="issue_refund",
+                                is_bad_step=True,
+                                note="Refunded $75 despite final-sale flag.",
+                            ),
+                        ],
+                        counterexample_note=(
+                            "Passing session did not refund final-sale items."
+                        ),
+                        suggested_questions=[
+                            "Which final-sale items were refunded?",
+                            "Draft a policy guard for issue_refund",
+                        ],
+                    ),
+                ]
+            ),
         ],
-        held={"final_sale": {2: 0.97, 1: 0.05}},
+        held={
+            "final_sale": {2: 0.97, 1: 0.05},
+            "tone": {2: 0.91, 1: 0.92},
+        },
     )
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(
@@ -277,31 +405,182 @@ async def test_analyzer_writes_one_insight_per_finding(
         session_findings, "KitaruAPIClient", lambda: nullcontext(kitaru)
     )
 
-    insights = await analyze_session_findings([s.session.id for s in sessions])
+    reports = await analyze_session_findings([s.session.id for s in sessions])
 
-    [insight] = insights
-    assert insight.name == "session-finding-1"
-    assert insight.summary == "Verified in 1 of 2 imported sessions. Harm: high."
-    assert insight.findings[0].artifacts[0].type == "rate"
-    assert insight.findings[0].artifacts[1].model_dump() == {
-        "title": None,
-        "type": "text",
-        "style": "body",
-        "label": None,
-        "content": "Example of high.",
-        "file_path": None,
-        "revision": None,
-    }
-    assert insight.metadata[SESSION_FINDINGS_METADATA_KEY] == {
-        "harm": "high",
-        "checks": ["The session shows final_sale."],
-        "contributing_session_ids": [str(sessions[0].session.id)],
-    }
+    assert len(reports) == 1
+    report = reports[0]
+    assert report.name == "openai-session-findings"
+    assert report.title == "Refunded final-sale item"
+    assert report.source_provider == "langfuse"
+    assert report.coverage is not None
+    assert report.coverage.sessions_analyzed == 2
+    assert report.coverage.sessions_available == 2
+    assert report.coverage.started_after == START + timedelta(minutes=1)
+    assert report.coverage.started_before == START + timedelta(minutes=2)
+    assert report.highlight is not None
+    assert report.highlight.finding_id == "session-finding-1"
+    assert report.highlight.artifact_index == 0
+    assert report.next_step is not None
+    assert "returns-agent" in report.next_step.prompt
+    assert str(IMPORT_ID) in report.next_step.prompt
+    assert report.suggested_questions
+
+    # Findings ordered most harmful first: high then low
+    assert [f.id for f in report.findings] == [
+        "session-finding-1",
+        "session-finding-2",
+    ]
+    top = report.findings[0]
+    assert top.severity == "high"
+    assert top.check_first == "Inspect issue_refund eligibility validation."
+    assert top.contributing_session_ids == [sessions[0].session.id]
+
+    # Artifact 0: RateArtifact (share_bar)
+    rate = top.artifacts[0]
+    assert isinstance(rate, RateArtifact)
+    assert rate.presentation == "share_bar"
+    assert rate.numerator == 1
+    assert rate.denominator == 2
+    assert rate.tone == "danger"
+
+    # Artifact 1: StepStoryArtifact linked to session 2 & its issue_refund node
+    story = top.artifacts[1]
+    assert isinstance(story, StepStoryArtifact)
+    assert story.title == "How it happened"
+    assert story.session_id == sessions[0].session.id
+    assert story.session_label == "Session #2"
+    assert story.steps[1].tone == "danger"
+    assert story.steps[1].node_id == sessions[0].nodes[1].id
+
+    # Artifact 2: EvidenceArtifact (table) with failing row + passing counterexample
+    evidence = top.artifacts[2]
+    assert isinstance(evidence, EvidenceArtifact)
+    assert evidence.title == "Evidence"
+    assert evidence.presentation == "table"
+    assert evidence.total_sessions == 1
+    assert len(evidence.rows) == 2
+    fail_row, counter_row = evidence.rows
+    assert fail_row.session_id == sessions[0].session.id
+    assert fail_row.node_id == sessions[0].nodes[1].id
+    assert fail_row.step_label == "step 2"
+    assert fail_row.verdict == "fail"
+    assert fail_row.is_counterexample is False
+    assert counter_row.session_id == sessions[1].session.id
+    assert counter_row.verdict == "pass"
+    assert counter_row.is_counterexample is True
+    assert counter_row.counterexample_note == (
+        "Passing session did not refund final-sale items."
+    )
+
+    # Second finding has no mechanism_steps -> falls back to TextArtifact body
+    second = report.findings[1]
+    assert isinstance(second.artifacts[1], TextArtifact)
+    assert second.artifacts[1].content == "Agent ended without offering further help."
+    # All sessions failed "tone" -> no fabricated counterexample
+    second_ev = second.artifacts[2]
+    assert isinstance(second_ev, EvidenceArtifact)
+    assert all(not row.is_counterexample for row in second_ev.rows)
+
+    # Metadata stores schema_version 2 and exact session IDs
+    meta = report.metadata[SESSION_FINDINGS_METADATA_KEY]
+    assert isinstance(meta, dict)
+    assert meta["schema_version"] == "2"
+    assert meta["total_sessions"] == 2
+    assert meta["reader_sessions_inspected"] == 2
+
+    # Reader prompt stays oldest-first and unnumbered
     reader_prompt = client.prompts[0]
     assert reader_prompt.index("Started 2026-11-02 09:01") < (
         reader_prompt.index("Started 2026-11-02 09:02")
     )
     assert "Session 0" not in reader_prompt
+
+
+async def test_analyzer_discloses_reader_sampling_caveat_when_budget_exceeded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Add an honest coverage caveat when reader sampling could not fit all sessions."""
+    sessions = [
+        _session(
+            n,
+            "Done.",
+            status=SessionStatus.FAILED if n == 1 else SessionStatus.COMPLETED,
+        )
+        for n in range(1, 7)
+    ]
+    kitaru = _stub_kitaru(sessions)
+    client = FakeOpenAI(
+        plans=[
+            _ReaderPlan(checks=[_check("final_sale")]),
+            _MergePlan(findings=[_finding(["final_sale"], "high")]),
+        ],
+        held={"final_sale": {1: 0.95, 2: 0.1, 3: 0.1, 4: 0.1, 5: 0.1, 6: 0.1}},
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(session_findings, "MAX_PROMPT_LENGTH", 500)
+    monkeypatch.setattr(
+        session_findings,
+        "import_openai",
+        lambda: SimpleNamespace(AsyncOpenAI=lambda **_kwargs: client),
+    )
+    monkeypatch.setattr(
+        session_findings, "KitaruAPIClient", lambda: nullcontext(kitaru)
+    )
+
+    [report] = await analyze_session_findings([s.session.id for s in sessions])
+
+    assert report.coverage is not None
+    assert any(
+        "targeted + random sample" in caveat
+        and "verified across all 6 sessions" in caveat
+        for caveat in report.coverage.caveats
+    )
+    # Failed session 1 was prioritized into the reader prompt despite tight budget
+    assert "Ticket 1:" in client.prompts[0]
+
+
+async def test_analyzer_handles_live_recorded_and_mixed_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolve source_provider to 'recorded' or 'mixed' and validate max_findings."""
+    recorded = _session(1, "Ok.", origin=SessionOrigin.RECORDED)
+    imported = _session(
+        2, "Ok.", origin=SessionOrigin.IMPORTED, imported_from="langfuse"
+    )
+    kitaru = _stub_kitaru([recorded, imported])
+    client = FakeOpenAI(
+        plans=[
+            _ReaderPlan(checks=[_check("a"), _check("b")]),
+            _MergePlan(
+                findings=[
+                    _finding(["a"], "high", title="First"),
+                    _finding(["b"], "medium", title="Second"),
+                ]
+            ),
+        ],
+        held={"a": {1: 0.95, 2: 0.1}, "b": {1: 0.95, 2: 0.1}},
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(
+        session_findings,
+        "import_openai",
+        lambda: SimpleNamespace(AsyncOpenAI=lambda **_kwargs: client),
+    )
+    monkeypatch.setattr(
+        session_findings, "KitaruAPIClient", lambda: nullcontext(kitaru)
+    )
+
+    [report] = await analyze_session_findings(
+        [recorded.session.id, imported.session.id], max_findings=1
+    )
+    assert report.source_provider == "mixed"
+    assert len(report.findings) == 1
+    assert report.findings[0].title == "First"
+    assert report.next_step is not None
+    assert "Import id:" not in report.next_step.prompt
+
+    with pytest.raises(ValueError, match="max_findings"):
+        await analyze_session_findings([recorded.session.id], max_findings=0)
 
 
 async def test_missing_credential_fails_before_reading_sessions(
@@ -335,3 +614,71 @@ async def test_failed_decisions_request_names_only_the_error_type() -> None:
         )
 
     assert str(raised.value) == "decisions request failed (PermissionError)"
+
+
+def test_session_findings_report_varies_lead_visuals_and_prompts_short_titles() -> None:
+    """Rotate beyond rate bars across multi-finding reports and guide short titles."""
+    from kitaru_post_import_insights.session_findings_report import (
+        Finding,
+        ReportContext,
+        SessionRecord,
+        ToolNodeRef,
+        build_session_findings_report,
+    )
+
+    assert "under 50 characters" in session_findings.MERGE_INSTRUCTIONS
+
+    s0_id = uuid.UUID("01990000-0000-7000-8000-000000000101")
+    s1_id = uuid.UUID("01990000-0000-7000-8000-000000000102")
+    n0 = uuid.UUID("01990000-0000-7000-8000-000000001001")
+    n1 = uuid.UUID("01990000-0000-7000-8000-000000001002")
+    n2 = uuid.UUID("01990000-0000-7000-8000-000000001003")
+    n3 = uuid.UUID("01990000-0000-7000-8000-000000001004")
+
+    records = [
+        SessionRecord(
+            session_id=s0_id,
+            session_number=1,
+            started_at=START,
+            status=SessionStatus.COMPLETED,
+            tool_call_count=2,
+            tool_nodes=(
+                ToolNodeRef(step=2, node_id=n0, tool_name="lookup_order", failed=False),
+                ToolNodeRef(step=4, node_id=n1, tool_name="issue_refund", failed=True),
+            ),
+            transcript="failing",
+        ),
+        SessionRecord(
+            session_id=s1_id,
+            session_number=2,
+            started_at=START + timedelta(minutes=1),
+            status=SessionStatus.COMPLETED,
+            tool_call_count=3,
+            tool_nodes=(
+                ToolNodeRef(step=2, node_id=n2, tool_name="lookup_order", failed=False),
+                ToolNodeRef(
+                    step=3, node_id=n3, tool_name="get_return_policy", failed=False
+                ),
+            ),
+            transcript="passing",
+        ),
+    ]
+    findings = [
+        Finding(
+            title=f"Finding {idx}",
+            harm="high" if idx == 1 else "medium",
+            example=f"Concrete example {idx}.",
+            checks=[f"check {idx} involving issue_refund"],
+            sessions=[0],
+            counterexample_sessions=[1],
+        )
+        for idx in range(1, 6)
+    ]
+
+    report = build_session_findings_report(findings, records, context=ReportContext())
+    lead_types = [type(f.artifacts[0]) for f in report.findings]
+
+    assert lead_types[:2] == [RateArtifact, RateArtifact]
+    assert SessionComparisonArtifact in lead_types[2:]
+    assert StepStripArtifact in lead_types[2:]
+    assert CategoricalArtifact in lead_types[2:]
