@@ -877,6 +877,70 @@ async def session_analyze(
 
 
 @register_command(
+    session_app,
+    build_spec(
+        ("session", "delete"),
+        "Delete one or more sessions selected by ID, file, or filter.",
+        parameters=(
+            ParameterSpec(
+                "SESSION", "UUID[]", "argument", False, "Explicit session IDs."
+            ),
+            ParameterSpec(
+                "--sessions-file",
+                "path",
+                "option",
+                False,
+                "UTF-8 file with one session UUID per nonblank line.",
+            ),
+            ParameterSpec(
+                "--filter",
+                "JSON filter",
+                "option",
+                False,
+                "Delete sessions matching this JSON filter expression.",
+            ),
+            ParameterSpec(
+                "--force", "boolean", "option", False, "Confirm remote deletion."
+            ),
+        ),
+        read_only=False,
+        side_effects=(
+            "reads_local_file",
+            "mutates_remote_state",
+            "deletes_remote_state",
+        ),
+        idempotency="not_found after first removal",
+        errors=ASSET_WRITE_ERRORS,
+    ),
+)
+async def session_delete(
+    session: list[str] | None = None,
+    /,
+    *,
+    sessions_file: Path | None = None,
+    filter: str | None = None,
+    force: bool = False,
+) -> CommandResult:
+    """Delete one or more sessions selected by ID, file, or filter."""
+    if not force:
+        return await sessions.delete_sessions(
+            None,
+            session,
+            sessions_file=sessions_file,
+            filter=filter,
+            force=force,
+        )
+    async with invocation_context.open_asset_client() as client:
+        return await sessions.delete_sessions(
+            client,
+            session,
+            sessions_file=sessions_file,
+            filter=filter,
+            force=force,
+        )
+
+
+@register_command(
     evaluation_app,
     build_spec(
         ("evaluation", "list"),

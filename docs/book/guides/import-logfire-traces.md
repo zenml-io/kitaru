@@ -59,7 +59,7 @@ Export whole traces rather than filtered subsets. A span whose parent is missing
 Register the agent the traces belong to, if you have not, and start a worker:
 
 ```bash
-kitaru agent register support-agent --command "python support.py"
+kitaru agent register support-agent
 kitaru worker start
 ```
 

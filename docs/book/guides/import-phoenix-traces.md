@@ -35,7 +35,7 @@ Uploads are capped by the server's configurable blob limit. Split a larger expor
 Register the agent the traces belong to, if needed, and run a worker:
 
 ```bash
-kitaru agent register support-agent --command "python support.py"
+kitaru agent register support-agent
 kitaru worker start
 ```
 

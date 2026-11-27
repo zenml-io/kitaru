@@ -1,0 +1,4 @@
+- Added `kitaru job list` with `--kind`, `--status`, and standard pagination/filter options.
+- Allowed `kitaru agent register` and `kitaru agent version register` without `--command` for import-only agents, with clearer replay/experiment errors when a version has no run spec.
+- Added `kitaru agent version update AGENT@VERSION` to update an existing agent version in place (merging partial run-spec and capability overrides or applying `--spec`), and clarified `--spec` mutual exclusivity in help text.
+- Added `kitaru session delete` (by session IDs, `--sessions-file`, or `--filter` with `--force`), improved 409 `SessionInUse` errors to name the referencing resource, and expanded `kitaru agent delete` help and output to clarify soft-delete retention and report retained session and cohort counts.

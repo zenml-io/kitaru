@@ -496,6 +496,28 @@ _VIEWS: dict[str, HumanView] = {
     "agent.list": _build_view("Agents", _ASSET_FIELDS, _ASSET_SECTIONS),
     "agent.get": _build_view("Agent", _ASSET_FIELDS, _ASSET_SECTIONS),
     "agent.register": _build_view("Agent", (), _REGISTRATION_SECTIONS),
+    "agent.delete": _build_view(
+        "Deleted agent",
+        (),
+        (
+            HumanSection(
+                "Summary",
+                (
+                    _NAME,
+                    _ID,
+                    HumanField("deleted", "Deleted"),
+                    HumanField("soft_deleted", "Soft deleted"),
+                ),
+            ),
+            HumanSection(
+                "Retained resources",
+                (
+                    HumanField("retained_sessions", "Sessions"),
+                    HumanField("retained_cohorts", "Cohorts"),
+                ),
+            ),
+        ),
+    ),
     "agent.version.list": _build_view(
         "Agent versions", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
@@ -503,6 +525,30 @@ _VIEWS: dict[str, HumanView] = {
         "Agent version", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
     "agent.version.register": _build_view("Agent version", (), _REGISTRATION_SECTIONS),
+    "agent.version.update": _build_view(
+        "Agent version",
+        _VERSION_FIELDS,
+        (
+            HumanSection(
+                "Summary",
+                (
+                    HumanField("version", "Version"),
+                    HumanField("display_version", "Display version"),
+                    _DESCRIPTION,
+                    _ID,
+                ),
+            ),
+            HumanSection("Timing", (_CREATED, _UPDATED)),
+            HumanSection(
+                "Run spec",
+                (
+                    HumanField("previous_run_spec", "Previous run spec"),
+                    HumanField("run_spec", "Updated run spec"),
+                ),
+            ),
+            HumanSection("Capabilities", (HumanField("capabilities", "Capabilities"),)),
+        ),
+    ),
     "importer.list": _build_view(
         "Importers",
         (
@@ -915,6 +961,18 @@ _VIEWS: dict[str, HumanView] = {
             HumanSection("Metadata", (_METADATA,)),
         ),
     ),
+    "job.list": _build_view(
+        "Jobs",
+        (
+            _STATUS,
+            HumanField("kind", "Kind"),
+            _ID,
+            HumanField("started_at", "Started", 110),
+            HumanField("ended_at", "Ended", 150),
+            HumanField("error", "Error", 190),
+            _CREATED,
+        ),
+    ),
     "job.get": _build_view(
         "Job",
         (_STATUS, _ID),
@@ -943,6 +1001,19 @@ _VIEWS: dict[str, HumanView] = {
     "job.watch": _build_view("Job", (_STATUS, _ID), _JOB_SECTIONS),
     "job.cancel": _build_view("Job", (_STATUS, _ID), _JOB_SECTIONS),
     "session.import": _build_view("Import", (), _JOB_SECTIONS),
+    "session.delete": _build_view(
+        "Deleted sessions",
+        (),
+        (
+            HumanSection(
+                "Summary",
+                (
+                    HumanField("deleted_count", "Deleted"),
+                    HumanField("deleted_ids", "Session IDs"),
+                ),
+            ),
+        ),
+    ),
     "session.evaluate": _build_view("Evaluation job", (), _JOB_SECTIONS),
     "experiment.run.start": _build_view("Experiment run", (), _JOB_SECTIONS),
     "experiment.run.watch": _build_view("Experiment run", (), _JOB_SECTIONS),

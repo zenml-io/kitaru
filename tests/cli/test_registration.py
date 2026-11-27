@@ -21,6 +21,7 @@ from kitaru.api_models.v1.evaluator import EvaluatorCreateRequest
 from kitaru.api_models.v1.importer import ImporterCreateRequest
 from kitaru.cli import app as app_module
 from kitaru.cli import invocation_context
+from kitaru.cli.agents import load_agent_register_spec, normalize_agent_source
 from kitaru.cli.output import CLIError
 from kitaru.cli.registration import (
     PackageSource,
@@ -28,8 +29,6 @@ from kitaru.cli.registration import (
     get_agent_version,
     get_plugin_version,
     list_params,
-    load_agent_register_spec,
-    normalize_agent_source,
     page_result,
     parse_version_reference,
     plugin_parent_request,
@@ -94,7 +93,6 @@ class StubResource:
     async def list(self, params: Any = None) -> Any:
         """Return one configured bounded parent page."""
         assert params is not None
-        assert params.size == 2
         return SimpleNamespace(items=self.items[: params.size], next_cursor=None)
 
     async def get(self, item_id: uuid.UUID) -> StubModel:
@@ -184,6 +182,8 @@ class StubClient:
         self.importers = StubResource()
         self.evaluators = StubResource()
         self.analyzers = StubResource()
+        self.sessions = StubResource()
+        self.cohorts = StubResource()
         self.blobs = StubBlobs()
 
 
@@ -257,17 +257,16 @@ async def test_registration_receipt_returns_fresh_parent(
         assert result.warnings == []
 
 
-def test_agent_source_normalization_accepts_only_explicit_commands() -> None:
-    """Agent registration stores commands and rejects removed entrypoint syntax."""
+def test_agent_source_normalization_accepts_optional_commands() -> None:
+    """Agent registration allows omitting --command and rejects removed entrypoint."""
     assert normalize_agent_source(command="run-agent --fast", entrypoint=None) == (
         "run-agent --fast"
     )
+    assert normalize_agent_source(command=None, entrypoint=None) is None
     with pytest.raises(CLIError, match="not supported"):
         normalize_agent_source(command=None, entrypoint="pkg.agent:run")
     with pytest.raises(CLIError, match="not supported"):
         normalize_agent_source(command="run", entrypoint="pkg.agent:run")
-    with pytest.raises(CLIError, match="requires --command"):
-        normalize_agent_source(command=None, entrypoint=None)
     with pytest.raises(CLIError, match="cannot be blank"):
         normalize_agent_source(command="  ", entrypoint=None)
 
@@ -621,7 +620,16 @@ def test_cli_agent_delete_requires_force_before_network_access(
     assert app_module.main(["agent", "delete", str(parent.id), "--force"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["command"] == "agent.delete"
-    assert payload["item"] == {"id": str(parent.id), "deleted": True}
+    assert payload["item"] == {
+        "id": str(parent.id),
+        "name": "demo",
+        "deleted": True,
+        "soft_deleted": True,
+        "retained_sessions": 0,
+        "retained_sessions_truncated": False,
+        "retained_cohorts": 0,
+        "retained_cohorts_truncated": False,
+    }
     assert client.agents.deleted == [parent.id]
 
 
