@@ -39,6 +39,7 @@ from kitaru.cli import (  # noqa: F401
     root_commands,
     session_commands,
     worker_commands,
+    workspace_commands,
 )
 from kitaru.cli.command_registry import FUNCTION_SPECS, app
 from kitaru.cli.config import read_config

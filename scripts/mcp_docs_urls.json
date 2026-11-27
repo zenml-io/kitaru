@@ -58,6 +58,7 @@
   "deploy/workers.md": "https://docs.zenml.io/kitaru/running-in-production/workers",
   "deploy/authentication.md": "https://docs.zenml.io/kitaru/running-in-production/authentication",
   "deploy/secrets.md": "https://docs.zenml.io/kitaru/running-in-production/secrets",
+  "guides/push-workspace.md": "https://docs.zenml.io/kitaru/running-in-production/push-workspace",
   "getting-started/troubleshooting.md": "https://docs.zenml.io/kitaru/get-help/troubleshooting",
   "deploy/configuration.md": "https://docs.zenml.io/kitaru/get-help/configuration",
   "deploy/sdks.md": "https://docs.zenml.io/kitaru/get-help/sdks",
