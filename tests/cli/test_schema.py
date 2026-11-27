@@ -143,6 +143,20 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     names = {parameter["name"] for parameter in agent_register["parameters"]}
     assert "--command" in names
     assert "--entrypoint" not in names
+    spec_param = next(
+        parameter
+        for parameter in agent_register["parameters"]
+        if parameter["name"] == "--spec"
+    )
+    assert "cannot combine" in spec_param["description"].lower()
+
+    [agent_version_update] = describe_schema(("agent", "version", "update"))
+    assert agent_version_update["read_only"] is False
+    assert agent_version_update["side_effects"]["mutates_remote_state"] is True
+    assert "replays" in agent_version_update["description"]
+
+    [agent_delete] = describe_schema(("agent", "delete"))
+    assert "retaining" in agent_delete["description"]
 
     [importer_scaffold] = describe_schema(("importer", "scaffold"))
     assert importer_scaffold["side_effects"]["writes_local_file"] is True
@@ -218,6 +232,7 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     session_commands = {item["command"]: item for item in describe_schema(("session",))}
     assert set(session_commands) == {
         "session.analyze",
+        "session.delete",
         "session.evaluate",
         "session.get",
         "session.import",
@@ -228,8 +243,18 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert all(
         command["read_only"]
         for name, command in session_commands.items()
-        if name not in {"session.analyze", "session.evaluate", "session.import"}
+        if name
+        not in {
+            "session.analyze",
+            "session.delete",
+            "session.evaluate",
+            "session.import",
+        }
     )
+    session_delete = session_commands["session.delete"]
+    assert session_delete["read_only"] is False
+    assert session_delete["side_effects"]["deletes_remote_state"] is True
+    assert session_delete["side_effects"]["mutates_remote_state"] is True
     session_import = session_commands["session.import"]
     assert session_import["read_only"] is False
     assert session_import["streams"] is True

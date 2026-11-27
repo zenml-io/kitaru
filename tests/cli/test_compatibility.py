@@ -16,7 +16,7 @@ from tests.cli.test_registration import StubClient, StubModel
 
 from kitaru.cli import app as app_module
 from kitaru.cli import command_registry, invocation_context
-from kitaru.cli.registration import load_agent_register_spec, load_agent_version_spec
+from kitaru.cli.agents import load_agent_register_spec, load_agent_version_spec
 from kitaru.cli.schema import describe_schema
 
 

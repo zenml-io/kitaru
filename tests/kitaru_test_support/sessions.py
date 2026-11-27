@@ -853,17 +853,23 @@ class FakeSessionRepository:
         if session_id not in self._sessions:
             raise SessionNotFound(session_id)
         if self._cohort_membership_counts.get(session_id, 0) > 0:
-            raise SessionInUse(session_id)
+            raise SessionInUse(session_id, "a cohort version")
         if self._investigations is not None and any(
             link.session_id == session_id
             for link in self._investigations._sessions.values()
         ):
-            raise SessionInUse(session_id)
-        if self._replays is not None and any(
-            session_id in (replay.baseline_session_id, replay.result_session_id)
-            for replay in self._replays._replays.values()
-        ):
-            raise SessionInUse(session_id)
+            raise SessionInUse(session_id, "an investigation")
+        if self._replays is not None:
+            if any(
+                replay.baseline_session_id == session_id
+                for replay in self._replays._replays.values()
+            ):
+                raise SessionInUse(session_id, "a replay (as baseline session)")
+            if any(
+                replay.result_session_id == session_id
+                for replay in self._replays._replays.values()
+            ):
+                raise SessionInUse(session_id, "a replay (as result session)")
         del self._sessions[session_id]
         for members in self._groups.values():
             members.discard(session_id)

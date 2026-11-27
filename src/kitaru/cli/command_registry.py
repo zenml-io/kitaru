@@ -51,7 +51,7 @@ agent_app = App(
 )
 agent_version_app = App(
     name="version",
-    help="Register and inspect agent versions.",
+    help="Register, inspect, and update agent versions.",
     default_parameter=Parameter(negative=False),
 )
 cohort_app = App(

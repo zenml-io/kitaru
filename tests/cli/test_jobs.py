@@ -69,7 +69,13 @@ class StubJobs:
         self.responses = responses
         self.get_calls = 0
         self.cancel_calls = 0
+        self.list_calls: list[Any] = []
+        self.next_cursor: str | None = None
         self.tasks = [SimpleNamespace(model_dump=lambda **_: {"id": "task-1"})]
+
+    async def list(self, params: Any) -> Any:
+        self.list_calls.append(params)
+        return SimpleNamespace(items=self.responses, next_cursor=self.next_cursor)
 
     async def get(self, job_id: uuid.UUID) -> JobResponse:
         assert job_id == self.responses[0].id
@@ -518,7 +524,17 @@ def test_job_schema_is_offline_and_describes_streaming_and_mutation() -> None:
     """Offline metadata mirrors job output modes, exits, and side effects."""
     specs = {item["command"]: item for item in describe_schema(("job",))}
 
-    assert set(specs) == {"job.get", "job.watch", "job.cancel"}
+    assert set(specs) == {"job.list", "job.get", "job.watch", "job.cancel"}
+    assert specs["job.list"]["read_only"] is True
+    list_param_names = {p["name"] for p in specs["job.list"]["parameters"]}
+    assert {
+        "--kind",
+        "--status",
+        "--filter",
+        "--size/--limit",
+        "--cursor",
+        "--sort",
+    } <= list_param_names
     assert specs["job.watch"]["streams"] is True
     assert specs["job.watch"]["output_modes"] == ["auto", "text", "json", "jsonl"]
     watch_errors = {
@@ -526,6 +542,83 @@ def test_job_schema_is_offline_and_describes_streaming_and_mutation() -> None:
     }
     assert watch_errors["remote_failed"] == 8
     assert specs["job.cancel"]["side_effects"]["mutates_remote_state"] is True
+
+
+async def test_list_jobs_combines_kind_status_and_raw_filter() -> None:
+    """Job listing combines typed kind and status filters with raw --filter."""
+    job_id = uuid.uuid4()
+    resource = StubJobs([_job(job_id, JobStatus.FAILED)])
+    resource.next_cursor = "cursor-2"
+
+    result = await jobs.list_jobs(
+        SimpleNamespace(jobs=resource),
+        size=10,
+        cursor="cursor-1",
+        sort="created:asc",
+        filter=json.dumps({"field": "id", "op": "eq", "value": str(job_id)}),
+        kind=JobKind.IMPORT,
+        status=JobStatus.FAILED,
+    )
+
+    assert len(resource.list_calls) == 1
+    dumped = resource.list_calls[0].model_dump(mode="json")
+    assert dumped["size"] == 10
+    assert dumped["cursor"] == "cursor-1"
+    assert dumped["sort"] == "created:asc"
+    assert json.loads(dumped["filter"]) == {
+        "and": [
+            {"field": "id", "op": "eq", "value": str(job_id)},
+            {"field": "kind", "op": "eq", "value": "import"},
+            {"field": "status", "op": "eq", "value": "failed"},
+        ]
+    }
+    assert len(result.items or []) == 1
+    assert result.items is not None and result.items[0]["id"] == str(job_id)
+    assert result.page == {"limit": 10, "next_cursor": "cursor-2", "truncated": True}
+
+
+def test_cli_job_list_returns_structured_page(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`kitaru job list` filters by kind and status through the CLI envelope."""
+    job_id = uuid.uuid4()
+    resource = StubJobs([_job(job_id, JobStatus.RUNNING)])
+
+    @asynccontextmanager
+    async def open_client():
+        yield SimpleNamespace(jobs=resource)
+
+    monkeypatch.setattr(invocation_context, "open_asset_client", open_client)
+
+    assert (
+        app_module.main(
+            [
+                "job",
+                "list",
+                "--kind",
+                "replay",
+                "--status",
+                "running",
+                "--size",
+                "5",
+                "--output",
+                "json",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "job.list"
+    assert payload["count"] == 1
+    assert payload["items"][0]["id"] == str(job_id)
+    assert payload["items"][0]["kind"] == "replay"
+    assert payload["items"][0]["status"] == "running"
+    assert json.loads(resource.list_calls[0].model_dump(mode="json")["filter"]) == {
+        "and": [
+            {"field": "kind", "op": "eq", "value": "replay"},
+            {"field": "status", "op": "eq", "value": "running"},
+        ]
+    }
 
 
 async def test_watch_reports_analyzer_added_after_import_and_clears_warning() -> None:

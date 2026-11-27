@@ -20,11 +20,7 @@ import yaml
 from packaging.requirements import InvalidRequirement, Requirement
 
 from kitaru.api_models.v1.agent import AgentCreateRequest
-from kitaru.api_models.v1.agent_version import (
-    AgentCapabilities,
-    AgentVersionCreateRequest,
-    RunSpec,
-)
+from kitaru.api_models.v1.agent_version import AgentVersionCreateRequest
 from kitaru.api_models.v1.analyzer import (
     AnalyzerCreateRequest,
     AnalyzerVersionCreateRequest,
@@ -205,113 +201,6 @@ async def get_plugin_version(
     return parent, item
 
 
-def load_agent_register_spec(
-    name: str, path: Path
-) -> tuple[AgentCreateRequest, AgentVersionCreateRequest]:
-    """Load a strict parent-plus-version YAML or JSON document."""
-    data = _load_document(path)
-    spec = AgentRegistrationSpec.model_validate(data)
-    _validate_agent_version(spec.version)
-    return (
-        AgentCreateRequest(name=name, description=spec.get_agent_description()),
-        spec.version,
-    )
-
-
-def load_agent_version_spec(path: Path) -> AgentVersionCreateRequest:
-    """Load a strict agent version YAML or JSON document."""
-    request = AgentVersionCreateRequest.model_validate(_load_document(path))
-    _validate_agent_version(request)
-    return request
-
-
-def build_agent_requests(
-    name: str,
-    *,
-    command: str | None,
-    entrypoint: str | None,
-    description: str | None,
-    version_description: str | None,
-    display_version: str | None,
-    working_dir: str | None,
-    env: list[str] | None,
-    secret_ids: list[uuid.UUID] | None,
-    timeout_seconds: int | None,
-    tools: list[str] | None,
-    mcp_servers: list[str] | None,
-    skills: list[str] | None,
-) -> tuple[AgentCreateRequest, AgentVersionCreateRequest]:
-    """Build direct agent parent and version requests."""
-    normalized_command = normalize_agent_source(command=command, entrypoint=entrypoint)
-    run_options: dict[str, Any] = {
-        "command": normalized_command,
-        "working_dir": working_dir,
-        "env": parse_env(env or []),
-        "secret_ids": secret_ids or [],
-    }
-    if timeout_seconds is not None:
-        run_options["timeout_seconds"] = timeout_seconds
-    capabilities = AgentCapabilities(
-        tools=tools or [], mcp_servers=mcp_servers or [], skills=skills or []
-    )
-    return (
-        AgentCreateRequest(name=name, description=description),
-        AgentVersionCreateRequest(
-            display_version=display_version,
-            description=version_description,
-            run_spec=RunSpec(**run_options),
-            capabilities=capabilities,
-        ),
-    )
-
-
-def build_agent_version_request(
-    *,
-    command: str | None,
-    entrypoint: str | None,
-    description: str | None,
-    display_version: str | None,
-    working_dir: str | None,
-    env: list[str] | None,
-    secret_ids: list[uuid.UUID] | None,
-    timeout_seconds: int | None,
-    tools: list[str] | None,
-    mcp_servers: list[str] | None,
-    skills: list[str] | None,
-) -> AgentVersionCreateRequest:
-    """Build one direct agent version request."""
-    _, request = build_agent_requests(
-        "unused",
-        command=command,
-        entrypoint=entrypoint,
-        description=None,
-        version_description=description,
-        display_version=display_version,
-        working_dir=working_dir,
-        env=env,
-        secret_ids=secret_ids,
-        timeout_seconds=timeout_seconds,
-        tools=tools,
-        mcp_servers=mcp_servers,
-        skills=skills,
-    )
-    return request
-
-
-def normalize_agent_source(*, command: str | None, entrypoint: str | None) -> str:
-    """Validate one agent source and return the stored shell command."""
-    if entrypoint is not None:
-        raise CLIError(
-            "invalid_arguments",
-            "Agent --entrypoint is not supported; use --command.",
-        )
-    if command is None:
-        raise CLIError("invalid_arguments", "Agent registration requires --command.")
-    if not command.strip():
-        raise CLIError("invalid_arguments", "--command cannot be blank.")
-    return command
-
-
 def parse_env(values: list[str]) -> dict[str, str]:
     """Parse repeatable ``KEY=VALUE`` environment options."""
     result: dict[str, str] = {}
@@ -439,7 +328,7 @@ def read_json_object(path: Path | None, *, option: str) -> dict[str, Any] | None
     """Read a JSON object from a local file."""
     if path is None:
         return None
-    return _load_document(path, label=option)
+    return load_spec_document(path, label=option)
 
 
 def parse_replay_override(value: str, *, option: str) -> ReplayOverride:
@@ -803,7 +692,7 @@ def plugin_parent_request(
     return EvaluatorCreateRequest(**kwargs, agent_id=agent_id)
 
 
-def _load_document(path: Path, label: str = "Spec") -> dict[str, Any]:
+def load_spec_document(path: Path, label: str = "Spec") -> dict[str, Any]:
     """Read one YAML or JSON mapping."""
     if not path.exists() or not path.is_file():
         raise CLIError(
@@ -820,15 +709,6 @@ def _load_document(path: Path, label: str = "Spec") -> dict[str, Any]:
             "invalid_arguments", f"{label} must contain one mapping document."
         )
     return data
-
-
-def _validate_agent_version(request: AgentVersionCreateRequest) -> None:
-    """Require a nonblank run command for CLI-registered versions."""
-    if request.run_spec is None or not request.run_spec.command.strip():
-        raise CLIError(
-            "invalid_arguments",
-            "Agent specs must include a nonblank version.run_spec.command.",
-        )
 
 
 def _top_level_names(tree: ast.Module) -> set[str]:

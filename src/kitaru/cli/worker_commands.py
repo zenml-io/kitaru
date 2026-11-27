@@ -19,9 +19,11 @@ from typing import Annotated
 
 from cyclopts import Parameter
 
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.cli import invocation_context, jobs, workers
 from kitaru.cli.command_registry import (
     ASSET_READ_ERRORS,
+    COLLECTION_READ_ERRORS,
     LIST_PARAMETERS,
     UUID_READ_ERRORS,
     build_spec,
@@ -244,6 +246,53 @@ _JOB_ERRORS = (
     "network_error",
     "internal_error",
 )
+
+
+@register_command(
+    job_app,
+    build_spec(
+        ("job", "list"),
+        "List jobs.",
+        parameters=(
+            *LIST_PARAMETERS,
+            ParameterSpec(
+                "--kind",
+                "session_run|import|evaluation|replay|analysis",
+                "option",
+                False,
+                "Only jobs of this kind.",
+            ),
+            ParameterSpec(
+                "--status",
+                "pending|running|completed|failed|canceled",
+                "option",
+                False,
+                "Only jobs with this status.",
+            ),
+        ),
+        errors=COLLECTION_READ_ERRORS,
+    ),
+)
+async def job_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+    kind: JobKind | None = None,
+    status: JobStatus | None = None,
+) -> CommandResult:
+    """List one server page of jobs."""
+    async with invocation_context.open_asset_client() as client:
+        return await jobs.list_jobs(
+            client,
+            size=size,
+            cursor=cursor,
+            sort=sort,
+            filter=filter,
+            kind=kind,
+            status=status,
+        )
 
 
 @register_command(

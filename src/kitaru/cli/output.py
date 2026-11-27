@@ -654,6 +654,7 @@ def _get_human_error_hint(command: str, kind: str) -> str | None:
             "importer",
             "insight",
             "investigation",
+            "job",
             "session",
             "worker",
         }:

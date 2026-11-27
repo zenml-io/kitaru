@@ -34,6 +34,7 @@ from kitaru.api_models.v1.importer import ImporterListParams
 from kitaru.api_models.v1.imports import ImportListParams
 from kitaru.api_models.v1.insight import InsightListParams
 from kitaru.api_models.v1.investigation import InvestigationListParams
+from kitaru.api_models.v1.job import JobListParams
 from kitaru.api_models.v1.replay import ReplayListParams
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.cli.output import CLIError
@@ -227,6 +228,7 @@ def list_params(
         "importer",
         "insight",
         "investigation",
+        "job",
         "replay",
         "session",
     ],
@@ -250,6 +252,7 @@ def list_params(
         "importer": ImporterListParams,
         "insight": InsightListParams,
         "investigation": InvestigationListParams,
+        "job": JobListParams,
         "replay": ReplayListParams,
         "session": SessionListParams,
     }[kind]

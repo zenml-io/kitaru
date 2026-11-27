@@ -269,6 +269,24 @@ For direct SDK ingestion, `kitaru.task.importer.ingest_session` returns `None` o
 
 Kitaru 0.23.0 used the global `(imported_from, external_id)` key, so the same source identity could also collide across different agents. Check the destination server's version, rather than only the local SDK version. For other older versions or an unknown server version, verify the applicable contract before relying on duplicate skips or using a different agent to create a copy.
 
+### Replacing imported sessions
+
+Because re-importing skips sessions whose `(imported_from, external_id, agent_id)` identity is already stored, fixing an importer bug or correcting source identity requires deleting the earlier sessions before importing again. Every session created by an import records its `import_id`, so you can delete the batch by `import_id` and re-run the import:
+
+```bash
+kitaru session delete \
+  --filter '{"field":"import_id","op":"eq","value":"<import-id>"}' \
+  --force
+
+kitaru session import sessions.jsonl \
+  --importer kitaru/kitaru-jsonl@latest \
+  --agent customer-service@latest \
+  --media-type application/x-ndjson \
+  --wait
+```
+
+Deletion returns a 409 conflict naming the blocking resource when a session is still referenced by a cohort version, an investigation, or a replay. Remove that reference first, then delete the session and import again.
+
 ## No importer for your provider
 
 You have two ways in, and neither requires waiting for us to ship an importer.
