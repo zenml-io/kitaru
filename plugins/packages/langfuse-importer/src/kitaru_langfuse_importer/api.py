@@ -70,18 +70,35 @@ def _configured_host() -> str:
     return host or _DEFAULT_HOST
 
 
-def _api_error_body_message(body: Any) -> str:
-    """Return a short body message without headers or credential material."""
+_MAX_GENERIC_BODY_CHARS = 200
+
+
+def _api_error_body_message(body: Any) -> str | None:
+    """Return a short body message safe to store on an import error.
+
+    HTML pages and long payloads are dropped so the import error stays a
+    one-line diagnostic rather than an HTML document or response dump.
+    """
     if isinstance(body, dict):
         message = body.get("message")
         if isinstance(message, str) and message.strip():
-            return message.strip()
-        error = body.get("error")
-        if isinstance(error, str) and error.strip():
-            return error.strip()
-    if isinstance(body, str) and body.strip():
-        return body.strip()
-    return "unknown error"
+            text = message.strip()
+        else:
+            error = body.get("error")
+            if isinstance(error, str) and error.strip():
+                text = error.strip()
+            else:
+                return None
+    elif isinstance(body, str) and body.strip():
+        text = body.strip()
+    else:
+        return None
+    lowered = text[:200].lower()
+    if "<html" in lowered or "<!doctype" in lowered:
+        return None
+    if len(text) > _MAX_GENERIC_BODY_CHARS:
+        return None
+    return text
 
 
 def _is_unreachable(exc: BaseException) -> bool:
@@ -145,6 +162,10 @@ def _translate_langfuse_error(exc: Exception) -> Exception:
             )
         status = "unknown" if exc.status_code is None else str(exc.status_code)
         message = _api_error_body_message(exc.body)
+        if message is None:
+            return SessionImportError(
+                f"Langfuse at {host} returned an error ({status})."
+            )
         return SessionImportError(f"Langfuse returned an error ({status}): {message}.")
     return exc
 

@@ -403,6 +403,32 @@ async def test_unreachable_host_errors_name_the_configured_host(
             ApiError(status_code=422, body={"message": "validation failed"}),
             "Langfuse returned an error (422): validation failed.",
         ),
+        (
+            ApiError(
+                status_code=404,
+                body=(
+                    '<!DOCTYPE html><html lang="en"><head><title>Not Found'
+                    "</title></head><body>missing</body></html>"
+                ),
+            ),
+            # 404 has its own message; HTML body must not leak into it.
+            (
+                "Langfuse at https://cloud.langfuse.com returned 404. Use the "
+                "base URL only, e.g. https://cloud.langfuse.com, without /api "
+                "or a project path."
+            ),
+        ),
+        (
+            ApiError(
+                status_code=418,
+                body=("<!DOCTYPE html><html><body>" + ("x" * 50) + "</body></html>"),
+            ),
+            "Langfuse at https://cloud.langfuse.com returned an error (418).",
+        ),
+        (
+            ApiError(status_code=418, body={"message": "x" * 201}),
+            "Langfuse at https://cloud.langfuse.com returned an error (418).",
+        ),
     ],
 )
 def test_mapped_langfuse_failures_name_the_host(monkeypatch, exc, expected):
@@ -410,6 +436,8 @@ def test_mapped_langfuse_failures_name_the_host(monkeypatch, exc, expected):
     mapped = api_module._translate_langfuse_error(exc)
     assert isinstance(mapped, SessionImportError)
     assert str(mapped) == expected
+    assert "<!DOCTYPE" not in str(mapped)
+    assert "<html" not in str(mapped).lower()
 
 
 async def test_exhausted_rate_limits_use_the_clear_message(fake_langfuse, monkeypatch):

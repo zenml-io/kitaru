@@ -4,6 +4,7 @@
 
 - Report short Langfuse auth, host-reachability, and API errors from API imports, without the worker's process-exit and stderr wrapper. Requires Kitaru 0.27.8+dev for `SessionImportError` passthrough and import outcome recording that prefers the diagnostic failure text.
 - Map Langfuse 403, 404, 429, 5xx, and response timeouts to distinct host-specific messages.
+- Keep HTML and long Langfuse response bodies out of the generic import-error fallback.
 
 ## 0.6.0 - 2026-11-25
 
