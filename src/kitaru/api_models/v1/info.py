@@ -64,6 +64,13 @@ class ServerInfoResponse(ResponseModel):
         ge=0,
         description="Maximum accepted blob size in bytes.",
     )
+    evaluation_pair_limit: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Maximum accepted (session, evaluator) pairs per evaluation request."
+        ),
+    )
     last_user_activity: datetime | None = Field(
         default=None,
         description=(

@@ -1,0 +1,1 @@
+- Fixed `kitaru session evaluate` to split large session selections into sequential evaluation batches within the server's per-request `(session, evaluator)` pair limit and aggregate results when `--wait` is set.

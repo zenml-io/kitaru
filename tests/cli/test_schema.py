@@ -281,7 +281,12 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
         "--timeout",
     } <= set(evaluate_parameters)
     evaluate_errors = {error["kind"] for error in session_evaluate["errors"]}
-    assert {"timeout", "remote_failed", "remote_canceled"} <= evaluate_errors
+    assert {
+        "partial_failure",
+        "timeout",
+        "remote_failed",
+        "remote_canceled",
+    } <= evaluate_errors
 
     node_parameters = {
         parameter["name"]
