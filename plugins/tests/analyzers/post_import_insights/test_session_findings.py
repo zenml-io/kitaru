@@ -302,7 +302,7 @@ async def test_missing_credential_fails_before_reading_sessions(
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(session_findings, "KitaruAPIClient", pytest.fail)
 
-    with pytest.raises(MissingOpenAICredential):
+    with pytest.raises(MissingOpenAICredential, match="Set OPENAI_API_KEY"):
         await analyze_session_findings([uuid.uuid4()])
 
 

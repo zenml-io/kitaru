@@ -43,7 +43,8 @@ def get_openai_credential(api_key: str | None = None) -> str:
     credential = api_key or os.environ.get("OPENAI_API_KEY")
     if not credential or not credential.strip():
         raise MissingOpenAICredential(
-            "OpenAI credentials are required for model-backed insights"
+            "Insights need an OpenAI key. Set OPENAI_API_KEY and run the "
+            "analysis again."
         )
     return credential
 

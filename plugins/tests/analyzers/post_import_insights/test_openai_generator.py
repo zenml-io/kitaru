@@ -78,8 +78,9 @@ def _projection() -> AnalystProjection:
 
 def test_missing_credential_fails_closed(monkeypatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(MissingOpenAICredential):
+    with pytest.raises(MissingOpenAICredential, match="Set OPENAI_API_KEY") as caught:
         OpenAIInsightGenerator()
+    assert "Insights need an OpenAI key" in str(caught.value)
 
 
 @pytest.mark.parametrize("missing_module", ["openai", "openai_dependency"])

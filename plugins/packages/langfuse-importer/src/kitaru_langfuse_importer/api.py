@@ -15,19 +15,21 @@
 
 import asyncio
 import json
+import os
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from datetime import datetime
 from functools import partial
 from typing import Any
 
+import httpx
 from langfuse import get_client
 from langfuse.api import NotFoundError, ObservationV2
 from langfuse.api.core import ApiError, RequestOptions
 from pydantic import BaseModel, ConfigDict
 
 from kitaru.api_models.v1.imports import ImportQuery
-from kitaru.task.importer import retry_rate_limited, stream_bounded
+from kitaru.task.importer import SessionImportError, retry_rate_limited, stream_bounded
 
 __all__ = ["FetchedTrace", "fetch", "fetch_trace", "serialize_trace", "wait_for_trace"]
 
@@ -37,6 +39,12 @@ _DEFAULT_RETRY_AFTER = 60.0
 _OBSERVATION_FIELDS = "core,basic,time,io,metadata,model,usage,prompt,trace_context"
 _OBSERVATION_LIMIT = 500
 _EXPAND_METADATA = {"attributes", "resourceAttributes"}
+_DEFAULT_HOST = "https://cloud.langfuse.com"
+_AUTH_HELP = (
+    "Check that the public and secret key come from the same project, and that "
+    "the host matches where that project lives (EU: https://cloud.langfuse.com, "
+    "US: https://us.cloud.langfuse.com)."
+)
 
 
 def _get_retry_after(exc: Exception) -> float | None:
@@ -54,6 +62,112 @@ def _get_retry_after(exc: Exception) -> float | None:
         return float(retry_after) if retry_after is not None else _DEFAULT_RETRY_AFTER
     except (TypeError, ValueError):
         return _DEFAULT_RETRY_AFTER
+
+
+def _configured_host() -> str:
+    """Return the Langfuse host from the connection env, without credentials."""
+    host = os.environ.get("LANGFUSE_BASE_URL", _DEFAULT_HOST).strip()
+    return host or _DEFAULT_HOST
+
+
+_MAX_GENERIC_BODY_CHARS = 200
+
+
+def _api_error_body_message(body: Any) -> str | None:
+    """Return a short body message safe to store on an import error.
+
+    HTML pages and long payloads are dropped so the import error stays a
+    one-line diagnostic rather than an HTML document or response dump.
+    """
+    if isinstance(body, dict):
+        message = body.get("message")
+        if isinstance(message, str) and message.strip():
+            text = message.strip()
+        else:
+            error = body.get("error")
+            if isinstance(error, str) and error.strip():
+                text = error.strip()
+            else:
+                return None
+    elif isinstance(body, str) and body.strip():
+        text = body.strip()
+    else:
+        return None
+    lowered = text[:200].lower()
+    if "<html" in lowered or "<!doctype" in lowered:
+        return None
+    if len(text) > _MAX_GENERIC_BODY_CHARS:
+        return None
+    return text
+
+
+def _is_unreachable(exc: BaseException) -> bool:
+    """Return whether the failure is a host reachability problem."""
+    if isinstance(
+        exc,
+        (
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            httpx.NetworkError,
+            httpx.ProxyError,
+        ),
+    ):
+        return True
+    cause = exc.__cause__
+    return cause is not None and _is_unreachable(cause)
+
+
+def _translate_langfuse_error(exc: Exception) -> Exception:
+    """Map known Langfuse failures to short SessionImportError messages.
+
+    Unmapped exceptions are returned unchanged so call_fetcher can wrap them.
+    """
+    if isinstance(exc, SessionImportError):
+        return exc
+    host = _configured_host()
+    if isinstance(exc, ApiError) and exc.status_code == 401:
+        return SessionImportError(
+            f"Langfuse rejected the API keys for {host}. {_AUTH_HELP}"
+        )
+    if _is_unreachable(exc):
+        return SessionImportError(
+            f"Couldn't reach Langfuse at {host}. Check the host URL in the connection."
+        )
+    # ConnectTimeout is already treated as unreachable above.
+    if isinstance(exc, httpx.TimeoutException):
+        return SessionImportError(
+            f"Langfuse at {host} took too long to respond. Try again, or import "
+            f"a shorter time window."
+        )
+    if isinstance(exc, ApiError):
+        if exc.status_code == 403:
+            return SessionImportError(
+                f"Langfuse refused access at {host} (403). Check that the keys "
+                f"belong to the project you want to import."
+            )
+        if exc.status_code == 404:
+            return SessionImportError(
+                f"Langfuse at {host} returned 404. Use the base URL only, e.g. "
+                f"https://cloud.langfuse.com, without /api or a project path."
+            )
+        if exc.status_code == 429:
+            return SessionImportError(
+                f"Langfuse kept rate-limiting the import from {host}. Try again "
+                f"in a few minutes, or import a shorter time window."
+            )
+        if exc.status_code is not None and exc.status_code >= 500:
+            return SessionImportError(
+                f"Langfuse at {host} had a server error ({exc.status_code}). "
+                f"Try again in a few minutes."
+            )
+        status = "unknown" if exc.status_code is None else str(exc.status_code)
+        message = _api_error_body_message(exc.body)
+        if message is None:
+            return SessionImportError(
+                f"Langfuse at {host} returned an error ({status})."
+            )
+        return SessionImportError(f"Langfuse returned an error ({status}): {message}.")
+    return exc
 
 
 def _is_root(observation: ObservationV2) -> bool:
@@ -240,8 +354,24 @@ async def fetch(query: dict[str, Any]) -> AsyncGenerator[bytes, None]:
 
     Yields:
         Parser trace-list payloads, each containing one complete session.
+
+    Raises:
+        SessionImportError: A known Langfuse auth, reachability, or API failure.
     """
     parsed = LangfuseImportQuery.model_validate(query)
+    try:
+        async with aclosing(_fetch_sessions(parsed)) as payloads:
+            async for payload in payloads:
+                yield payload
+    except Exception as exc:
+        mapped = _translate_langfuse_error(exc)
+        if mapped is exc:
+            raise
+        raise mapped from exc
+
+
+async def _fetch_sessions(parsed: LangfuseImportQuery) -> AsyncGenerator[bytes, None]:
+    """Emit selected session payloads for a validated import query."""
     remaining: dict[str, int] = {}
     groups: dict[str, str] = {}
     window: tuple[datetime, datetime] | None = None

@@ -1,0 +1,3 @@
+- Failed Langfuse imports now store a short, host-specific error such as rejected API keys, an unreachable host, 403/404/429/5xx responses, or response timeouts, instead of the importer process exit and stderr tail.
+- Jobs no worker claims within the pending timeout now explain that a worker with the right `--claim` flags is missing, using minutes when the timeout divides evenly.
+- Missing OpenAI credentials for insights now say to set `OPENAI_API_KEY` and run the analysis again.

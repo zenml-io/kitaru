@@ -16,6 +16,8 @@
 import uuid
 from datetime import UTC, datetime
 
+from pydantic import ValidationError
+
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.imports import ImportStats
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
@@ -72,7 +74,17 @@ async def record_import_outcome(
         stats = ImportStats.model_validate(task.result)
         import_.record_stats(stats)
     else:
-        import_.record_error(task.error)
+        # Prefer the importer's own failure sample over the worker's process
+        # exit and stderr tail, which keep the raw log on the task for debugging.
+        error = task.error
+        if task.result is not None:
+            try:
+                diagnostic = ImportStats.model_validate(task.result)
+            except ValidationError:
+                diagnostic = None
+            if diagnostic is not None and diagnostic.failures:
+                error = diagnostic.failures[0].error
+        import_.record_error(error)
     await import_repository.update(import_)
     if stats is None or (not import_.evaluators and not import_.analyzers):
         return

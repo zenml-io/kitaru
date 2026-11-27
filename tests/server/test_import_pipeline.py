@@ -489,6 +489,49 @@ async def test_failed_import_stamps_error_and_appends_nothing(
     assert job.status is JobStatus.FAILED
 
 
+async def test_failed_import_prefers_diagnostic_failure_text(
+    services: ReplayServices,
+) -> None:
+    """A failed import stores the diagnostic failure over the process-exit tail."""
+    import_, _import_task = await _import_with_task(services, [])
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    clear_message = (
+        "Langfuse rejected the API keys for https://cloud.langfuse.com. "
+        "Check that the public and secret key come from the same project."
+    )
+    process_tail = (
+        "Importer process exited with code 1.\n\n"
+        "stderr tail:\nDownloading kitaru…\n"
+        "Fetcher raised an error: UnauthorizedError: …"
+    )
+
+    (running,) = await _claim_and_start(services, worker, 1)
+    await _finish(
+        services,
+        worker,
+        running,
+        TaskUpdate(
+            status=TaskStatus.FAILED,
+            error=process_tail,
+            result={
+                "created": 0,
+                "skipped": 0,
+                "failed": 1,
+                "failures": [
+                    {"line": 1, "external_id": None, "error": clear_message},
+                ],
+                "limit_reached": False,
+            },
+        ),
+    )
+
+    stored = await services.imports.get(import_.id)
+    assert stored.stats is None
+    assert stored.error == clear_message
+    task = await services.tasks.get(running.id)
+    assert task.error == process_tail
+
+
 async def test_task_without_import_row_is_ignored(services: ReplayServices) -> None:
     """A terminal import task whose import row is gone changes nothing."""
     job = await create_job(services.jobs, ACTOR.account.id, kind=JobKind.IMPORT)

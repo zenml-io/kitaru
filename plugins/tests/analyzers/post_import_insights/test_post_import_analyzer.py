@@ -556,7 +556,7 @@ async def test_openai_analyzer_requires_credentials_without_fallback(
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     if credential is not None:
         monkeypatch.setenv("OPENAI_API_KEY", credential)
-    with pytest.raises(MissingOpenAICredential):
+    with pytest.raises(MissingOpenAICredential, match="Set OPENAI_API_KEY"):
         await analyze_openai_post_import_sessions(
             client.add([_view(session_number)]), model="gpt-test"
         )

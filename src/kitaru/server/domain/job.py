@@ -88,7 +88,17 @@ def pending_timeout_error(timeout_seconds: int) -> str:
     Returns:
         Pending timeout error message.
     """
-    return f"Job was not claimed within {timeout_seconds} seconds"
+    if timeout_seconds > 0 and timeout_seconds % 60 == 0:
+        amount = timeout_seconds // 60
+        unit = "minute" if amount == 1 else "minutes"
+        waited = f"{amount} {unit}"
+    else:
+        unit = "second" if timeout_seconds == 1 else "seconds"
+        waited = f"{timeout_seconds} {unit}"
+    return (
+        f"No worker picked up this job within {waited}. Check that a worker "
+        f"is running with the right --claim flags."
+    )
 
 
 class Job(DomainModel):
