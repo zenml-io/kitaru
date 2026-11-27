@@ -36,7 +36,7 @@ Everything below is what the assistant creates on your behalf during the intervi
 
 An investigation belongs to one agent. It contains linked sessions, each with a `position` that determines the review order.
 
-Questions belong to individual linked sessions rather than to the investigation as a whole, so the review can ask different questions about different runs. Each question has a `key`, unique within its session, and display text such as `refund_justified="Was the refund justified?"`. A question can include highlights; each highlight has a selector and a description that point the reviewer at relevant evidence.
+Questions belong to individual linked sessions rather than to the investigation as a whole, so the review can ask different questions about different runs. Every linked session requires at least one question. Each question has a `key`, unique within its session, and display text such as `refund_justified="Was the refund justified?"`. A question can include highlights; each highlight has a selector and a description that point the reviewer at relevant evidence.
 
 The reviewer gives each linked session a verdict of `acceptable`, `problematic`, or `uncertain`. A session remains incomplete until it has a verdict; the investigation reports progress through `completed_sessions` and `total_sessions`, and tracks its own `status` as `pending`, `in_progress`, or `completed`.
 
@@ -50,7 +50,7 @@ kitaru investigation session list <investigation-id>
 kitaru investigation session verdict <investigation-id> <session-id> problematic
 ```
 
-Questions and highlights use the form `SESSION:KEY`, and the session must also appear in a `--session` argument. Highlights accept a JSON array with the selector inline:
+Questions and highlights use the form `SESSION:KEY`, the session must also appear in a `--session` argument, and every `--session` requires at least one `--session-question`. Highlights accept a JSON array with the selector inline:
 
 ```bash
 kitaru investigation create refund-complaints --agent support-agent \

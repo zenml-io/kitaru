@@ -46,6 +46,7 @@ from kitaru.server.domain.session import SessionNotFound
 INVESTIGATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": InvestigationORM.id,
     "agent_id": InvestigationORM.agent_id,
+    "name": InvestigationORM.name,
     "status": InvestigationORM.status,
 }
 

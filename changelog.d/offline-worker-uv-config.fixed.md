@@ -1,0 +1,1 @@
+- Documented how to run workers without internet access using pre-downloaded plugin wheels and `/etc/uv/uv.toml` (`no-index = true` and `find-links`), and fixed the quickstart CI workflow to enforce offline local wheel resolution instead of the ignored `UV_NO_INDEX` environment variable.
