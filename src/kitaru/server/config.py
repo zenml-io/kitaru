@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     IMPORTER_TASK_TIMEOUT_SECONDS: int = 1200
     ANALYZER_TASK_TIMEOUT_SECONDS: int = 900
     MAX_TASK_RESULT_BYTES: int = 1024 * 1024
-    EVALUATION_PAIR_LIMIT: int = 100
+    EVALUATION_PAIR_LIMIT: int = Field(default=100, ge=1)
     ANALYSIS_SESSION_LIMIT: int = 1000
 
     DB_HOST: str | None = None

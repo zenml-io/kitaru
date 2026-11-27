@@ -45,6 +45,9 @@ from kitaru.server.filtering import (
 class SessionFilter(ListFilter):
     """Session list filter."""
 
+    sortable_fields: ClassVar[frozenset[str]] = frozenset(
+        {"created", "started_at", "number"}
+    )
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
         "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "agent_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),

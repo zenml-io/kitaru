@@ -69,6 +69,7 @@ async def get_info(
         control_plane_api_url=control_plane_api_url,
         analytics_enabled=settings.ANALYTICS_OPT_IN,
         max_blob_size_bytes=settings.MAX_BLOB_SIZE_BYTES,
+        evaluation_pair_limit=settings.EVALUATION_PAIR_LIMIT,
         last_user_activity=(
             await activity.get_last_user_activity() if activity is not None else None
         ),

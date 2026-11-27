@@ -20,10 +20,11 @@ from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 
 
 def test_server_info_accepts_payloads_from_older_servers() -> None:
-    """Accept old server payloads that omit the optional limit."""
+    """Accept old server payloads that omit optional server limits."""
     response = ServerInfoResponse(version="1.0.0", auth_scheme=AuthScheme.LOCAL)
 
     assert response.max_blob_size_bytes is None
+    assert response.evaluation_pair_limit is None
 
 
 def test_server_info_accepts_zero_blob_limit() -> None:
@@ -44,4 +45,26 @@ def test_server_info_rejects_negative_blob_limit() -> None:
             version="1.0.0",
             auth_scheme=AuthScheme.LOCAL,
             max_blob_size_bytes=-1,
+        )
+
+
+def test_server_info_accepts_positive_evaluation_pair_limit() -> None:
+    """Accept a positive per-request evaluation pair limit."""
+    response = ServerInfoResponse(
+        version="1.0.0",
+        auth_scheme=AuthScheme.LOCAL,
+        evaluation_pair_limit=25,
+    )
+
+    assert response.evaluation_pair_limit == 25
+
+
+@pytest.mark.parametrize("limit", [0, -1])
+def test_server_info_rejects_nonpositive_evaluation_pair_limit(limit: int) -> None:
+    """Reject nonpositive evaluation pair limits."""
+    with pytest.raises(ValidationError):
+        ServerInfoResponse(
+            version="1.0.0",
+            auth_scheme=AuthScheme.LOCAL,
+            evaluation_pair_limit=limit,
         )

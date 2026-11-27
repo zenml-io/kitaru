@@ -498,5 +498,57 @@ def test_nested_secret_containers_are_redacted_in_structured_and_text_results() 
     assert json.loads(text.text) == result.structured_content
 
 
+def test_mcp_result_preserves_provider_token_counts_and_masks_credentials() -> None:
+    payload = {
+        "usage": {
+            "input_tokens": 10,
+            "cache_read_tokens": 5,
+            "total_tokens": 15,
+            "request_tokens": 3,
+            "completion_tokens": 7,
+            "prompt_tokens": 8,
+            "cache_creation_input_tokens": 12,
+        },
+        "model_settings": {"max_tokens": 1024, "max-tokens": 2048},
+        "provider_metadata": {
+            "api_key": "leak-api-key",
+            "access_token": "leak-access-token",
+            "access_tokens": 123,
+            "refresh_tokens": 456,
+            "github_token": 789,
+            "max_tokens": True,
+            "cache_read_tokens": "KITKEY_leak",
+        },
+    }
+    result = protocol_result(success_result(ToolResult, payload))
+    assert result.structured_content is not None
+    assert result.structured_content["data"] == {
+        "usage": {
+            "input_tokens": 10,
+            "cache_read_tokens": 5,
+            "total_tokens": 15,
+            "request_tokens": 3,
+            "completion_tokens": 7,
+            "prompt_tokens": 8,
+            "cache_creation_input_tokens": 12,
+        },
+        "model_settings": {"max_tokens": 1024, "max-tokens": 2048},
+        "provider_metadata": {
+            "api_key": "***",
+            "access_token": "***",
+            "access_tokens": "***",
+            "refresh_tokens": "***",
+            "github_token": "***",
+            "max_tokens": "***",
+            "cache_read_tokens": "***",
+        },
+    }
+    text = result.content[0]
+    assert isinstance(text, TextContent)
+    assert json.loads(text.text) == result.structured_content
+    for leaked in ("leak-api-key", "leak-access-token", "KITKEY_leak"):
+        assert leaked not in text.text
+
+
 def _compact_size(value: object) -> int:
     return len(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())
