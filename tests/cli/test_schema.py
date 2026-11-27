@@ -86,6 +86,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         "status",
         "version",
         "worker",
+        "workspace",
     }
     descriptions = {item["name"]: item["description"] for item in describe_schema()}
     assert descriptions["agent"] == "Register and inspect agents."
