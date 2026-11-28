@@ -102,6 +102,7 @@ The quickstart example lives in `examples/python/pydantic_ai_ticket_resolver/`. 
 - Never include a `[Codex] ` prefix in PR titles.
 - Link related issues when applicable.
 - Every PR description should include a concise `Reviewer Notes` H2 or H3 section focused on anything unusual, risky, or needing special attention; wrap `Release context`, `Reproduction`, and `Local checks run` in collapsed `<details>` blocks, surfacing any notable release dependencies or failed/skipped checks in the `<summary>` line or outside the block.
+- Default PR reviewers: request `schustmi` on PRs opened by `strickvl`, request `strickvl` on PRs opened by `schustmi`, and request both `schustmi` and `strickvl` on PRs opened by anyone else.
 - Track deprecated surfaces in `DEPRECATIONS.md` at the repository root.
 - Never merge a PR that has not received an approving human review — this includes dependabot bumps and trivial changes, and it must not be bypassed with `gh pr merge --admin` or similar. Documented review of every change is part of our change-management controls (relevant to compliance frameworks such as SOC 2). Prepare the PR, request review, and wait.
 

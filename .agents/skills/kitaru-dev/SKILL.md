@@ -102,7 +102,7 @@ Analytics events live in `src/kitaru/analytics/events.py`; source attribution li
 
 ## Pull Requests
 
-Use a clear human-readable title without a `[Codex]` prefix. Include what changed, why it was needed, important implementation decisions, and reviewer focus areas. Link related issues when applicable.
+Use a clear human-readable title without a `[Codex]` prefix. Include what changed, why it was needed, important implementation decisions, and reviewer focus areas. Link related issues when applicable. Request `schustmi` as reviewer by default (request `strickvl` when `schustmi` opens the PR, and request both `schustmi` and `strickvl` when someone else opens it).
 
 Add a `changelog.d/<pr-number>.<section>.md` fragment for user-facing changes instead of editing `CHANGELOG.md`. Any slug works in place of the number while the PR does not exist yet. See `changelog.d/README.md` for the format.
 
