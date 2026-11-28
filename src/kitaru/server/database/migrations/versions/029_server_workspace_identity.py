@@ -33,8 +33,12 @@ def upgrade() -> None:
     """Upgrade database schema and/or data, creating a new revision."""
     with op.batch_alter_table("server_settings", schema=None) as batch_op:
         batch_op.add_column(sa.Column("organization_id", sa.Uuid(), nullable=True))
-        batch_op.add_column(sa.Column("organization_name", sa.Text(), nullable=True))
-        batch_op.add_column(sa.Column("workspace_name", sa.Text(), nullable=True))
+        batch_op.add_column(
+            sa.Column("organization_name", sa.String(length=255), nullable=True)
+        )
+        batch_op.add_column(
+            sa.Column("workspace_name", sa.String(length=255), nullable=True)
+        )
 
 
 def downgrade() -> None:

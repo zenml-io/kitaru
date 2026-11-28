@@ -184,22 +184,13 @@ class ServerAnalytics:
             _BufferedAlias(user_id=user_id, previous_id=previous_id)
         )
 
-    def set_workspace(self, server_id: uuid.UUID, workspace: WorkspaceIdentity) -> None:
-        """Name a control plane workspace in every message from now on.
+    def set_workspace(self, workspace: WorkspaceIdentity) -> None:
+        """Name a control plane workspace in track properties from now on.
 
         Args:
-            server_id: Persisted server id.
             workspace: Workspace this server serves.
         """
-        self._client.set_context(
-            build_analytics_context(
-                server_id=server_id,
-                auth_scheme=AuthScheme.CONTROL_PLANE,
-                organization_id=workspace.organization_id,
-                organization_name=workspace.organization_name,
-                workspace_name=workspace.workspace_name,
-            )
-        )
+        self._client.update_context(workspace.model_dump())
 
     def _get_buffer(self) -> _AnalyticsBuffer:
         """Get the session's buffer, creating it on first use.

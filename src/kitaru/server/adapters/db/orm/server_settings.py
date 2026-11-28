@@ -16,10 +16,11 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Text
+from sqlalchemy import DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.server.adapters.db.orm.base import Base, TimestampMixin
+from kitaru.server.domain.names import MAX_NAME_LENGTH
 
 
 class ServerSettingsORM(TimestampMixin, Base):
@@ -35,5 +36,5 @@ class ServerSettingsORM(TimestampMixin, Base):
     # The control plane workspace this server serves, for analytics. Kept here
     # because a warm workspace's server starts before anyone owns it.
     organization_id: Mapped[uuid.UUID | None]
-    organization_name: Mapped[str | None] = mapped_column(Text)
-    workspace_name: Mapped[str | None] = mapped_column(Text)
+    organization_name: Mapped[str | None] = mapped_column(String(MAX_NAME_LENGTH))
+    workspace_name: Mapped[str | None] = mapped_column(String(MAX_NAME_LENGTH))
