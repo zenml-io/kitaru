@@ -20,6 +20,7 @@ from kitaru.api_models.v1.experiment import (
     ExperimentCreateRequest,
     ExperimentUpdateRequest,
 )
+from kitaru.cli.links import resolve_dashboard_links
 from kitaru.cli.output import CLIError, CommandResult
 from kitaru.cli.registration import (
     list_params,
@@ -29,6 +30,7 @@ from kitaru.cli.registration import (
     resolve_asset,
     resolve_evaluator_configs,
 )
+from kitaru.client.dashboard_urls import get_experiment_url
 
 
 async def create_experiment(
@@ -61,7 +63,19 @@ async def create_experiment(
     experiment = await client.experiments.create(
         ExperimentCreateRequest(**fields), idempotency_key=idempotency_key
     )
-    return CommandResult(item=experiment.model_dump(mode="json"))
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {"dashboard": get_experiment_url(base, experiment.id)},
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. The experiment was created."
+        ),
+    )
+    return CommandResult(
+        item=experiment.model_dump(mode="json"),
+        links=links,
+        warnings=warnings,
+    )
 
 
 async def list_experiments(
@@ -82,7 +96,19 @@ async def list_experiments(
 async def get_experiment(client: Any, reference: str) -> CommandResult:
     """Get one experiment by exact UUID or case-sensitive name."""
     experiment = await resolve_asset(client.experiments, reference, "Experiment")
-    return CommandResult(item=experiment.model_dump(mode="json"))
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {"dashboard": get_experiment_url(base, experiment.id)},
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. The experiment read succeeded."
+        ),
+    )
+    return CommandResult(
+        item=experiment.model_dump(mode="json"),
+        links=links,
+        warnings=warnings,
+    )
 
 
 async def update_experiment(
@@ -146,7 +172,19 @@ async def update_experiment(
     updated = await client.experiments.update(
         experiment.id, ExperimentUpdateRequest(**fields)
     )
-    return CommandResult(item=updated.model_dump(mode="json"))
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {"dashboard": get_experiment_url(base, updated.id)},
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. The experiment was updated."
+        ),
+    )
+    return CommandResult(
+        item=updated.model_dump(mode="json"),
+        links=links,
+        warnings=warnings,
+    )
 
 
 async def delete_experiment(

@@ -15,10 +15,20 @@
 
 import uuid
 
+import pytest
+
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.client.dashboard_urls import (
+    get_agent_sessions_url,
+    get_cohort_url,
     get_dashboard_base_url,
+    get_experiment_run_url,
+    get_experiment_url,
+    get_investigation_review_page_url,
     get_investigation_review_url,
+    get_job_url,
+    get_session_url,
+    validate_dashboard_base_url,
 )
 
 API_URL = "https://api.example.com/"
@@ -80,3 +90,73 @@ def test_review_url_is_none_without_a_dashboard() -> None:
         _info(), API_URL, agent_id=uuid.uuid4(), investigation_id=uuid.uuid4()
     )
     assert url is None
+
+
+@pytest.mark.parametrize(
+    "base",
+    [
+        "https://cloud.example.com",
+        "https://cloud.example.com/kitaru-workspaces/ws-1",
+        "http://localhost:8000",
+    ],
+)
+def test_validate_dashboard_base_url_accepts_safe_http_bases(base: str) -> None:
+    """Plain HTTP(S) base URLs with optional path prefixes are accepted."""
+    assert validate_dashboard_base_url(base) == base
+
+
+@pytest.mark.parametrize(
+    "base",
+    [
+        "javascript:alert(1)",
+        "file:///etc/passwd",
+        "https://",
+        "https://user:pass@cloud.example.com",
+        "https://user@cloud.example.com",
+        "https://cloud.example.com?token=secret",
+        "https://cloud.example.com#section",
+    ],
+)
+def test_validate_dashboard_base_url_rejects_unsafe_bases(base: str) -> None:
+    """Non-HTTP schemes, credentials, queries, and fragments are rejected."""
+    with pytest.raises(ValueError, match="invalid dashboard URL"):
+        validate_dashboard_base_url(base)
+
+
+def test_resource_url_builders_match_dashboard_routes() -> None:
+    """Each resource builder joins the base with its exact dashboard route."""
+    base = "https://cloud.example.com/kitaru-workspaces/ws-1"
+    agent_id = uuid.uuid4()
+    agent_version_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    experiment_id = uuid.uuid4()
+    cohort_id = uuid.uuid4()
+    job_id = uuid.uuid4()
+    investigation_id = uuid.uuid4()
+
+    assert get_session_url(base, session_id) == f"{base}/sessions/{session_id}"
+    assert (
+        get_agent_sessions_url(base, agent_id) == f"{base}/agents/{agent_id}/sessions"
+    )
+    assert (
+        get_agent_sessions_url(base, agent_id, agent_version_id=agent_version_id)
+        == f"{base}/agents/{agent_id}/sessions?version={agent_version_id}"
+    )
+    assert (
+        get_experiment_url(base, experiment_id) == f"{base}/experiments/{experiment_id}"
+    )
+    assert (
+        get_experiment_run_url(base, experiment_id, 4)
+        == f"{base}/experiments/{experiment_id}?run=4"
+    )
+    assert (
+        get_cohort_url(base, agent_id=agent_id, cohort_id=cohort_id)
+        == f"{base}/agents/{agent_id}/cohorts/{cohort_id}"
+    )
+    assert get_job_url(base, job_id) == f"{base}/jobs/{job_id}"
+    assert (
+        get_investigation_review_page_url(
+            base, agent_id=agent_id, investigation_id=investigation_id
+        )
+        == f"{base}/agents/{agent_id}/investigations/{investigation_id}/review"
+    )

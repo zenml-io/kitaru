@@ -28,6 +28,7 @@ from kitaru.api_models.v1.cohort_version import (
     CohortVersionResponse,
     CohortVersionUpdateRequest,
 )
+from kitaru.cli.links import resolve_dashboard_links
 from kitaru.cli.output import CLIError, CommandResult
 from kitaru.cli.registration import (
     list_params,
@@ -43,6 +44,7 @@ from kitaru.cli.session_selection import (
     parse_session_uuid_file,
     select_session_ids,
 )
+from kitaru.client.dashboard_urls import get_cohort_url
 
 _INLINE_RETRY_SESSION_LIMIT = 10
 
@@ -102,7 +104,23 @@ async def create_cohort(
         idempotency_key=idempotency_key,
     )
     if selected_session_ids is None:
-        return CommandResult(item=created_cohort.model_dump(mode="json"))
+        links, warnings = await resolve_dashboard_links(
+            client,
+            lambda base: {
+                "dashboard": get_cohort_url(
+                    base, agent_id=created_cohort.agent_id, cohort_id=created_cohort.id
+                )
+            },
+            warning=(
+                "Could not resolve a dashboard link because the server info "
+                "request failed. The cohort was created."
+            ),
+        )
+        return CommandResult(
+            item=created_cohort.model_dump(mode="json"),
+            links=links,
+            warnings=warnings,
+        )
     try:
         version = await client.cohorts.create_version(
             created_cohort.id,
@@ -138,13 +156,27 @@ async def create_cohort(
             },
             hint=hint,
         ) from error
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {
+            "dashboard": get_cohort_url(
+                base, agent_id=created_cohort.agent_id, cohort_id=created_cohort.id
+            )
+        },
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. The cohort was created."
+        ),
+    )
     return CommandResult(
         item={
             "cohort": created_cohort.model_dump(mode="json"),
             "version": version.model_dump(mode="json"),
             "reference": f"{created_cohort.name}@{version.version}",
             "session_count": len(selected_session_ids),
-        }
+        },
+        links=links,
+        warnings=warnings,
     )
 
 
@@ -164,7 +196,23 @@ async def list_cohorts(
 async def get_cohort(client: Any, reference: str) -> CommandResult:
     """Get one cohort by exact UUID or case-sensitive name."""
     cohort = await resolve_asset(client.cohorts, reference, "Cohort")
-    return CommandResult(item=cohort.model_dump(mode="json"))
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {
+            "dashboard": get_cohort_url(
+                base, agent_id=cohort.agent_id, cohort_id=cohort.id
+            )
+        },
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. The cohort read succeeded."
+        ),
+    )
+    return CommandResult(
+        item=cohort.model_dump(mode="json"),
+        links=links,
+        warnings=warnings,
+    )
 
 
 async def update_cohort(
@@ -196,7 +244,23 @@ async def update_cohort(
 
     cohort = await resolve_asset(client.cohorts, reference, "Cohort")
     updated = await client.cohorts.update(cohort.id, CohortUpdateRequest(**fields))
-    return CommandResult(item=updated.model_dump(mode="json"))
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {
+            "dashboard": get_cohort_url(
+                base, agent_id=updated.agent_id, cohort_id=updated.id
+            )
+        },
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. The cohort was updated."
+        ),
+    )
+    return CommandResult(
+        item=updated.model_dump(mode="json"),
+        links=links,
+        warnings=warnings,
+    )
 
 
 async def delete_cohort(client: Any, reference: str, *, force: bool) -> CommandResult:
@@ -289,7 +353,23 @@ async def create_cohort_version(
                 "No sessions were added or removed; the new version copies "
                 f"the membership of baseline {baseline_id}."
             )
-    return CommandResult(item=version.model_dump(mode="json"), warnings=warnings)
+    links, link_warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {
+            "dashboard": get_cohort_url(
+                base, agent_id=cohort.agent_id, cohort_id=cohort.id
+            )
+        },
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. The cohort version was created."
+        ),
+    )
+    return CommandResult(
+        item=version.model_dump(mode="json"),
+        links=links,
+        warnings=[*warnings, *link_warnings],
+    )
 
 
 async def list_cohort_versions(
@@ -315,8 +395,24 @@ async def get_cohort_version(
 
 async def get_cohort_version_result(client: Any, reference: str) -> CommandResult:
     """Get one exact cohort version."""
-    _, version = await get_cohort_version(client, reference)
-    return CommandResult(item=version.model_dump(mode="json"))
+    cohort, version = await get_cohort_version(client, reference)
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {
+            "dashboard": get_cohort_url(
+                base, agent_id=cohort.agent_id, cohort_id=cohort.id
+            )
+        },
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. The cohort version read succeeded."
+        ),
+    )
+    return CommandResult(
+        item=version.model_dump(mode="json"),
+        links=links,
+        warnings=warnings,
+    )
 
 
 async def update_cohort_version(
@@ -338,12 +434,28 @@ async def update_cohort_version(
             "Select exactly one of --display-version or --clear-display-version.",
         )
 
-    _, version = await get_cohort_version(client, reference)
+    cohort, version = await get_cohort_version(client, reference)
     request = CohortVersionUpdateRequest(
         display_version=None if clear_display_version else display_version
     )
     updated = await client.cohort_versions.update(version.id, request)
-    return CommandResult(item=updated.model_dump(mode="json"))
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {
+            "dashboard": get_cohort_url(
+                base, agent_id=cohort.agent_id, cohort_id=cohort.id
+            )
+        },
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. The cohort version was updated."
+        ),
+    )
+    return CommandResult(
+        item=updated.model_dump(mode="json"),
+        links=links,
+        warnings=warnings,
+    )
 
 
 async def delete_cohort_version(

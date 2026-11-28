@@ -22,9 +22,11 @@ from typing import Any
 
 from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
 from kitaru.api_models.v1.job import JobKind, JobListParams, JobResponse, JobStatus
+from kitaru.cli.links import resolve_dashboard_links
 from kitaru.cli.output import CLIError, CommandResult, emit_event
 from kitaru.cli.registration import list_params, page_result
 from kitaru.cli.task_diagnostics import get_task_diagnostics
+from kitaru.client.dashboard_urls import get_job_url
 
 _TERMINAL_EXIT_CODES = {
     JobStatus.COMPLETED: 0,
@@ -80,7 +82,19 @@ async def get_job(client: Any, job_id: uuid.UUID, *, tasks: bool) -> CommandResu
     item["task_diagnostics"] = (
         diagnostics.model_dump(mode="json") if diagnostics else None
     )
-    return CommandResult(item=item, warnings=warnings)
+    links, link_warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {"dashboard": get_job_url(base, job.id)},
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. The job read succeeded."
+        ),
+    )
+    return CommandResult(
+        item=item,
+        links=links,
+        warnings=[*warnings, *link_warnings],
+    )
 
 
 async def poll_job(
@@ -182,7 +196,17 @@ async def watch_job(
     )
     item = job.model_dump(mode="json")
     if job.status is JobStatus.COMPLETED:
-        return CommandResult(item=item, event="terminal")
+        links, warnings = await resolve_dashboard_links(
+            client,
+            lambda base: {"dashboard": get_job_url(base, job.id)},
+            warning=(
+                "Could not resolve a dashboard link because the server info "
+                "request failed. The job completed."
+            ),
+        )
+        return CommandResult(
+            item=item, links=links, warnings=warnings, event="terminal"
+        )
 
     emit_event("terminal", item)
     kind = "remote_failed" if job.status is JobStatus.FAILED else "remote_canceled"
@@ -198,8 +222,18 @@ async def cancel_job(client: Any, job_id: uuid.UUID) -> CommandResult:
     job = await client.jobs.cancel(job_id)
     item = job.model_dump(mode="json")
     item["cancellation_requested"] = True
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {"dashboard": get_job_url(base, job.id)},
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. Cancellation was requested."
+        ),
+    )
     return CommandResult(
         item=item,
+        links=links,
+        warnings=warnings,
         next_actions=[f"kitaru job watch {job_id}"],
     )
 

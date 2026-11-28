@@ -33,9 +33,10 @@ from kitaru.api_models.v1.investigation import (
     InvestigationStatus,
     InvestigationUpdateRequest,
 )
+from kitaru.cli.links import resolve_dashboard_links
 from kitaru.cli.output import CLIError, CommandResult
 from kitaru.cli.registration import list_params, page_result, resolve_asset
-from kitaru.client.dashboard_urls import get_investigation_review_url
+from kitaru.client.dashboard_urls import get_investigation_review_page_url
 from kitaru.client.exceptions import APIError
 
 _INVESTIGATION_LOOKUP_LIMIT = 10
@@ -360,7 +361,6 @@ async def create_investigation(
         ),
         idempotency_key=idempotency_key,
     )
-    review_url: str | None = None
     warnings: list[str] = []
     existing_id = next(
         (
@@ -376,26 +376,24 @@ async def create_investigation(
             f"{resolved_agent.name!r} (for example {existing_id}). "
             "Pass --idempotency-key to avoid creating duplicates on retries."
         )
-    try:
-        info = await client.info.get()
-    # ValueError covers malformed info payloads: JSON decoding and Pydantic
-    # validation errors both derive from it, and a version-skewed server must
-    # not fail a create that already succeeded.
-    except (APIError, httpx.HTTPError, ValueError):
-        warnings.append(
+    links, link_warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {
+            "review": get_investigation_review_page_url(
+                base,
+                agent_id=investigation.agent_id,
+                investigation_id=investigation.id,
+            )
+        },
+        warning=(
             "Could not resolve a dashboard review link because the server "
             "info request failed. The investigation was created."
-        )
-    else:
-        review_url = get_investigation_review_url(
-            info,
-            client.base_url,
-            agent_id=investigation.agent_id,
-            investigation_id=investigation.id,
-        )
+        ),
+    )
+    warnings.extend(link_warnings)
     return CommandResult(
         item=investigation.model_dump(mode="json"),
-        links={"review": review_url} if review_url else {},
+        links=links,
         warnings=warnings,
         next_actions=[
             f"kitaru investigation session list {investigation.id}",
@@ -427,7 +425,25 @@ async def get_investigation(
 ) -> CommandResult:
     """Get one investigation by exact UUID or unambiguous case-sensitive name."""
     resolved = await _resolve_investigation(client, investigation, agent=agent)
-    return CommandResult(item=resolved.model_dump(mode="json"))
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {
+            "review": get_investigation_review_page_url(
+                base,
+                agent_id=resolved.agent_id,
+                investigation_id=resolved.id,
+            )
+        },
+        warning=(
+            "Could not resolve a dashboard review link because the server "
+            "info request failed. The investigation read succeeded."
+        ),
+    )
+    return CommandResult(
+        item=resolved.model_dump(mode="json"),
+        links=links,
+        warnings=warnings,
+    )
 
 
 async def update_investigation(
@@ -463,7 +479,25 @@ async def update_investigation(
     updated = await client.investigations.update(
         investigation_id, InvestigationUpdateRequest(**fields)
     )
-    return CommandResult(item=updated.model_dump(mode="json"))
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {
+            "review": get_investigation_review_page_url(
+                base,
+                agent_id=updated.agent_id,
+                investigation_id=updated.id,
+            )
+        },
+        warning=(
+            "Could not resolve a dashboard review link because the server "
+            "info request failed. The investigation was updated."
+        ),
+    )
+    return CommandResult(
+        item=updated.model_dump(mode="json"),
+        links=links,
+        warnings=warnings,
+    )
 
 
 async def delete_investigation(
