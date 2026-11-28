@@ -16,6 +16,7 @@
 import asyncio
 import json
 import logging
+import os
 import tempfile
 import uuid
 from pathlib import Path
@@ -48,6 +49,10 @@ from kitaru.worker.process import run_task_process
 logger = logging.getLogger(__name__)
 
 MAX_RESULT_BYTES = 1024 * 1024
+MAX_LOG_TAIL_CHARS = 300
+
+_STDOUT_TAIL_HEADER = "stdout tail:\n"
+_STDERR_TAIL_HEADER = "stderr tail:\n"
 
 _LABELS: dict[TaskKind, str] = {
     TaskKind.AGENT: "Agent",
@@ -71,6 +76,9 @@ class TaskRunner:
             ctx: Execution context.
         """
         self._ctx = ctx
+        self._logged_agent_commands: set[tuple[uuid.UUID | None, str, str | None]] = (
+            set()
+        )
 
     async def execute(
         self, claimed: TaskWithSpec, canceled: asyncio.Event
@@ -109,6 +117,7 @@ class TaskRunner:
             return await self._fail(
                 client, task, attempt, f"Failed to prepare the {label} process: {exc}"
             )
+        self._log_agent_command_once(task, spec)
 
         with tempfile.TemporaryDirectory(
             prefix="kitaru-task-", ignore_cleanup_errors=True
@@ -158,7 +167,11 @@ class TaskRunner:
                 )
                 return updated if updated is not None else task
             logger.info(
-                "Task %s timed out after %s seconds.", task.id, spec.timeout_seconds
+                "Task %s (job %s) timed out after %s seconds. %s",
+                task.id,
+                task.job_id,
+                spec.timeout_seconds,
+                _format_tail_log_suffix(task.job_id, result.tail),
             )
             error = _with_tail(
                 f"Task timed out after {spec.timeout_seconds} seconds.", result.tail
@@ -216,6 +229,40 @@ class TaskRunner:
                 )
         return await self._complete(client, task, spec, attempt, label, result_value)
 
+    def _log_agent_command_once(
+        self, task: TaskResponse, spec: TaskSpecResponse
+    ) -> None:
+        """Log an agent version's command and working directory once per runner.
+
+        Args:
+            task: Claimed task.
+            spec: Execution spec of the task.
+        """
+        if spec.kind is not TaskKind.AGENT or spec.run is None:
+            return
+        key = (task.agent_version_id, spec.run.command, spec.run.working_dir)
+        if key in self._logged_agent_commands:
+            return
+        self._logged_agent_commands.add(key)
+        working_dir = (
+            spec.run.working_dir
+            if spec.run.working_dir is not None
+            else f"{os.getcwd()} (inherited from worker)"
+        )
+        if task.agent_version_id is not None:
+            logger.info(
+                "Agent version %s command: %s (working_dir: %s)",
+                task.agent_version_id,
+                spec.run.command,
+                working_dir,
+            )
+        else:
+            logger.info(
+                "Agent command: %s (working_dir: %s)",
+                spec.run.command,
+                working_dir,
+            )
+
     async def _fail_exit(
         self,
         client: KitaruAPIClient,
@@ -241,10 +288,12 @@ class TaskRunner:
             Task carrying the transition the runner was able to write.
         """
         logger.info(
-            "Task %s failed: %s process exited with code %s.",
+            "Task %s (job %s) failed: %s process exited with code %s. %s",
             task.id,
+            task.job_id,
             label,
             returncode,
+            _format_tail_log_suffix(task.job_id, tail),
         )
         error = _with_tail(f"{label} process exited with code {returncode}.", tail)
         result_value = _read_diagnostic_result(result_path)
@@ -551,3 +600,84 @@ def _with_tail(message: str, tail: str) -> str:
     if not tail:
         return message
     return f"{message}\n\n{tail}"
+
+
+def _format_tail_log_suffix(job_id: uuid.UUID, tail: str) -> str:
+    """Build a console log suffix with a short tail snippet and job command.
+
+    Args:
+        job_id: Owning job id.
+        tail: Captured stdout/stderr tail.
+
+    Returns:
+        Single-line suffix carrying the tail summary (when non-empty) and the
+        CLI command that shows the full task error.
+    """
+    hint = f"(inspect with: kitaru job get {job_id} --tasks)"
+    summary = _summarize_tail(tail)
+    if summary:
+        return f"Last output: {summary} {hint}"
+    return hint
+
+
+def _summarize_tail(tail: str) -> str:
+    """Summarize a captured stdout/stderr tail into one bounded console line.
+
+    Prefers non-empty lines from stderr over stdout so the final exception line
+    is preserved without dumping a full traceback to the console.
+
+    Args:
+        tail: Captured stdout/stderr tail.
+
+    Returns:
+        Single-line summary capped at MAX_LOG_TAIL_CHARS, or an empty string
+        when the tail has no non-whitespace content.
+    """
+    if not tail:
+        return ""
+    stdout_text, stderr_text = _split_tail_sections(tail)
+    lines = _extract_non_empty_lines(stderr_text) or _extract_non_empty_lines(
+        stdout_text
+    )
+    if not lines:
+        return ""
+    last = lines[-1]
+    if len(lines) >= 2:
+        combined = f"{lines[-2]} | {last}"
+        if len(combined) <= MAX_LOG_TAIL_CHARS:
+            return combined
+    if len(last) <= MAX_LOG_TAIL_CHARS:
+        return last
+    return f"{last[: MAX_LOG_TAIL_CHARS - 3]}..."
+
+
+def _split_tail_sections(tail: str) -> tuple[str, str]:
+    """Split a formatted tail string into stdout and stderr bodies.
+
+    Args:
+        tail: Formatted or raw tail string.
+
+    Returns:
+        Pair of (stdout_body, stderr_body).
+    """
+    if tail.startswith(_STDERR_TAIL_HEADER):
+        return "", tail.removeprefix(_STDERR_TAIL_HEADER)
+    marker = f"\n{_STDERR_TAIL_HEADER}"
+    if marker in tail:
+        before, _, stderr_body = tail.rpartition(marker)
+        return before.removeprefix(_STDOUT_TAIL_HEADER), stderr_body
+    if tail.startswith(_STDOUT_TAIL_HEADER):
+        return tail.removeprefix(_STDOUT_TAIL_HEADER), ""
+    return tail, ""
+
+
+def _extract_non_empty_lines(text: str) -> list[str]:
+    """Return stripped non-empty lines from text.
+
+    Args:
+        text: Output body to split.
+
+    Returns:
+        Non-empty stripped lines in order.
+    """
+    return [line.strip() for line in text.splitlines() if line.strip()]

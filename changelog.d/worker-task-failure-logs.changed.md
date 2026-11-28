@@ -1,0 +1,1 @@
+- Improved worker failure and timeout logs to include a bounded snippet of the captured process output (preferring `stderr`) plus a `kitaru job get <job_id> --tasks` hint, and to log each agent version's run command and working directory once.
