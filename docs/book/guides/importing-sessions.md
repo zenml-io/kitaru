@@ -133,7 +133,7 @@ kitaru session import sessions.jsonl \
   --wait
 ```
 
-The command prints the created import id and the job running it. One evaluator task runs per imported session and evaluator, and one analyzer task runs per analyzer over every session the import created, so a failed evaluator or analyzer marks the job failed while the import itself still records how many sessions it created.
+The command prints the created import id and the job running it. With `--wait`, the receipt also summarizes every follow-up analyzer and evaluator task on the job (including skip reasons, insight or evaluation counts, and warnings when an analyzer is skipped, fails, or produces zero insights). If every record fails to import (`created + skipped == 0` and `failed > 0`), `--wait` exits non-zero; pass `--fail-on-failures` with `--wait` to also exit non-zero when any individual record fails. One evaluator task runs per imported session and evaluator, and one analyzer task runs per analyzer over every session the import created, so a failed evaluator or analyzer marks the job failed while the import itself still records how many sessions it created.
 
 ## Join provider traces into sessions
 
@@ -170,7 +170,7 @@ The selected value must be a non-empty string, number, or boolean. A missing, co
 The CLI validates `--join-on` and adds it to the importer parameter object, resolves each `--evaluator` plus any matching `--evaluator-connection` into an entry of the `evaluators` list, and resolves each `--analyzer` plus any matching `--analyzer-connection` into an entry of the `analyzers` list. SDK callers pass the same `join_on` parameter, evaluator configs, and analyzer configs directly:
 
 ```python
-from kitaru.api_models.v1.imports import ImportCreateRequest
+from kitaru.api_models.v1.imports import BlobImportSource, ImportCreateRequest
 from kitaru.api_models.v1.plugin import AnalyzerConfig, EvaluatorConfig
 
 created_import = await client.imports.create(
@@ -179,7 +179,7 @@ created_import = await client.imports.create(
         version=1,
         agent_id=agent_id,
         agent_version_id=agent_version_id,
-        payload_blob_id=blob_id,
+        source=BlobImportSource(blob_id=blob_id),
         params={"join_on": "/metadata/customer/case_id"},
         evaluators=[
             EvaluatorConfig(
@@ -205,7 +205,10 @@ The REST request uses the same structure:
   "version": 1,
   "agent_id": "00000000-0000-0000-0000-000000000000",
   "agent_version_id": "00000000-0000-0000-0000-000000000001",
-  "payload_blob_id": "00000000-0000-0000-0000-000000000002",
+  "source": {
+    "type": "blob",
+    "blob_id": "00000000-0000-0000-0000-000000000002"
+  },
   "params": {"join_on": "/metadata/customer/case_id"},
   "evaluators": [{"evaluator": "accuracy", "params": {"threshold": 0.8}}],
   "analyzers": [
@@ -265,6 +268,24 @@ A session skipped because it already existed before this import is not refreshed
 For direct SDK ingestion, `kitaru.task.importer.ingest_session` returns `None` only when that source identity already exists under the destination agent. Other conflicts, such as a session that no longer accepts nodes, raise `APIError` instead of reporting a duplicate skip. For native recording and importer-backed adapters, follow the [session-writing recipe](../adapters/custom.md).
 
 Kitaru 0.23.0 used the global `(imported_from, external_id)` key, so the same source identity could also collide across different agents. Check the destination server's version, rather than only the local SDK version. For other older versions or an unknown server version, verify the applicable contract before relying on duplicate skips or using a different agent to create a copy.
+
+### Replacing imported sessions
+
+Because re-importing skips sessions whose `(imported_from, external_id, agent_id)` identity is already stored, fixing an importer bug or correcting source identity requires deleting the earlier sessions before importing again. Every session created by an import records its `import_id`, so you can delete the batch by `import_id` and re-run the import:
+
+```bash
+kitaru session delete \
+  --filter '{"field":"import_id","op":"eq","value":"<import-id>"}' \
+  --force
+
+kitaru session import sessions.jsonl \
+  --importer kitaru/kitaru-jsonl@latest \
+  --agent customer-service@latest \
+  --media-type application/x-ndjson \
+  --wait
+```
+
+Deletion returns a 409 conflict naming the blocking resource when a session is still referenced by a cohort version, an investigation, or a replay. Remove that reference first, then delete the session and import again.
 
 ## No importer for your provider
 

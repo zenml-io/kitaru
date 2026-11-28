@@ -51,7 +51,7 @@ agent_app = App(
 )
 agent_version_app = App(
     name="version",
-    help="Register and inspect agent versions.",
+    help="Register, inspect, and update agent versions.",
     default_parameter=Parameter(negative=False),
 )
 cohort_app = App(
@@ -164,6 +164,11 @@ local_app = App(
     help=GROUP_DESCRIPTIONS["local"],
     default_parameter=Parameter(negative=False),
 )
+workspace_app = App(
+    name="workspace",
+    help=GROUP_DESCRIPTIONS["workspace"],
+    default_parameter=Parameter(negative=False),
+)
 agent_app.command(agent_version_app, name="version")
 cohort_app.command(cohort_version_app, name="version")
 investigation_app.command(investigation_session_app, name="session")
@@ -189,6 +194,7 @@ app.command(worker_app, name="worker")
 app.command(job_app, name="job")
 app.command(replay_app, name="replay")
 app.command(local_app, name="local")
+app.command(workspace_app, name="workspace")
 
 FUNCTION_SPECS: dict[Callable[..., Any], CommandSpec] = {}
 
@@ -351,6 +357,17 @@ LIST_PARAMETERS = (
         "JSON filter expression, e.g. "
         '\'{"field":"status","op":"eq","value":"failed"}\'.',
     ),
+)
+SESSION_LIST_PARAMETERS = (
+    *LIST_PARAMETERS[:2],
+    ParameterSpec(
+        "--sort",
+        "field:direction",
+        "option",
+        False,
+        "Sort by created, started_at, or number, each with :asc or :desc.",
+    ),
+    LIST_PARAMETERS[3],
 )
 VERSION_LIST_PARAMETERS = LIST_PARAMETERS[:-1]
 WAIT_PARAMETERS = (

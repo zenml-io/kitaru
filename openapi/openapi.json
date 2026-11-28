@@ -8084,6 +8084,19 @@
             "description": "URL the dashboard is reachable at.",
             "title": "Dashboard Url"
           },
+          "evaluation_pair_limit": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum accepted (session, evaluator) pairs per evaluation request.",
+            "title": "Evaluation Pair Limit"
+          },
           "id": {
             "anyOf": [
               {

@@ -85,6 +85,8 @@ class CLIError(Exception):
     details: Any = None
     hint: str | None = None
     exit_code: int | None = None
+    text: str | None = None
+    """Prerendered text that text mode prints after the message."""
 
     def __post_init__(self) -> None:
         """Initialize the base exception message."""
@@ -330,6 +332,8 @@ def emit_error(
             )
             console.print(f"[bold red]Error: {title}[/bold red]")
             console.print(Text(redact(error.message)))
+            if error.text:
+                console.print(Text(redact(error.text)))
             hint = error.hint or _get_human_error_hint(context.command, error.kind)
             if hint:
                 label = Text("Try:", style="bold")
@@ -337,6 +341,8 @@ def emit_error(
                 console.print(label)
         else:
             print(f"Error: {redact(error.message)}", file=context.stderr)
+            if error.text:
+                print(redact(error.text), file=context.stderr)
             if error.hint:
                 print(f"Hint: {redact(error.hint)}", file=context.stderr)
         if debug:
@@ -648,6 +654,7 @@ def _get_human_error_hint(command: str, kind: str) -> str | None:
             "importer",
             "insight",
             "investigation",
+            "job",
             "session",
             "worker",
         }:

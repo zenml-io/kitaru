@@ -75,6 +75,7 @@
 - [Workers in production](deploy/workers.md)
 - [Authentication & API keys](deploy/authentication.md)
 - [Secrets](deploy/secrets.md)
+- [Move a workspace to another server](guides/push-workspace.md)
 
 ## Get Help
 

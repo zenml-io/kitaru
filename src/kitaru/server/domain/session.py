@@ -94,15 +94,16 @@ class DuplicateSessionExternalId(ConflictError):
 class SessionInUse(ConflictError):
     """Raised when a cohort version, investigation, or replay references a session."""
 
-    def __init__(self, session_id: uuid.UUID) -> None:
+    def __init__(self, session_id: uuid.UUID, referenced_by: str | None = None) -> None:
         """Initialize the error.
 
         Args:
             session_id: Id of the session that cannot be deleted.
+            referenced_by: Specific referencing resource description, when known.
         """
+        holder = referenced_by or "a cohort version, investigation, or replay"
         super().__init__(
-            f"Session {session_id} is referenced by a cohort version, "
-            "investigation, or replay and cannot be deleted"
+            f"Session {session_id} is referenced by {holder} and cannot be deleted"
         )
 
 

@@ -535,3 +535,60 @@ async def test_replay_creation_succeeds_when_diagnostics_are_unavailable() -> No
     assert result.event == "created"
     assert len(client.create_calls) == 1
     assert "unavailable" in result.warnings[0]
+
+
+def test_public_create_hints_agent_flag_when_baseline_has_no_agent_version(
+    argv_client: StubReplayClient, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Replaying a session without an agent version suggests --agent NAME@VERSION."""
+    client = argv_client
+    client.create_error = APIError(
+        422,
+        f"Session {client.baseline_id} carries no agent version, "
+        "agent_version_id must be given",
+    )
+
+    assert (
+        app_module.main(
+            [
+                "replay",
+                "create",
+                str(client.baseline_id),
+                "--evaluator",
+                "quality@3",
+                "--output",
+                "json",
+            ]
+        )
+        == 2
+    )
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["kind"] == "invalid_arguments"
+    assert error["details"] == {"status_code": 422}
+    assert "--agent NAME@VERSION" in error["hint"]
+
+
+def test_public_create_keeps_unrelated_validation_error_without_agent_hint(
+    argv_client: StubReplayClient, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Other 422 errors do not receive the missing-agent-version hint."""
+    client = argv_client
+    client.create_error = APIError(422, "Agent version has no run spec")
+
+    assert (
+        app_module.main(
+            [
+                "replay",
+                "create",
+                str(client.baseline_id),
+                "--evaluator",
+                "quality@3",
+                "--output",
+                "json",
+            ]
+        )
+        == 2
+    )
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["kind"] == "invalid_arguments"
+    assert "hint" not in error

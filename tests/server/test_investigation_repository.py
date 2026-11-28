@@ -263,6 +263,74 @@ async def test_query_filters_by_status(setup: Setup) -> None:
     assert investigations == []
 
 
+async def test_query_filters_by_name(setup: Setup) -> None:
+    """Filter investigations by name using string filter operators."""
+    repository, owner_id, agent_id, _, _ = setup
+    refund = await _create_investigation(
+        repository, owner_id, agent_id, name="refund-triage"
+    )
+    billing = await _create_investigation(
+        repository, owner_id, agent_id, name="billing-triage"
+    )
+    latency = await _create_investigation(
+        repository, owner_id, agent_id, name="latency-check"
+    )
+
+    exact, _ = await repository.query(
+        InvestigationFilter(
+            expression=FilterCondition(
+                field="name", op=FilterOp.EQ, value="refund-triage"
+            )
+        )
+    )
+    assert [item.id for item in exact] == [refund.id]
+
+    excluded, _ = await repository.query(
+        InvestigationFilter(
+            expression=FilterCondition(
+                field="name", op=FilterOp.NE, value="refund-triage"
+            )
+        )
+    )
+    assert {item.id for item in excluded} == {billing.id, latency.id}
+
+    in_set, _ = await repository.query(
+        InvestigationFilter(
+            expression=FilterCondition(
+                field="name",
+                op=FilterOp.IN,
+                value=("refund-triage", "latency-check"),
+            )
+        )
+    )
+    assert {item.id for item in in_set} == {refund.id, latency.id}
+
+    prefix, _ = await repository.query(
+        InvestigationFilter(
+            expression=FilterCondition(
+                field="name", op=FilterOp.STARTSWITH, value="billing"
+            )
+        )
+    )
+    assert [item.id for item in prefix] == [billing.id]
+
+    suffix, _ = await repository.query(
+        InvestigationFilter(
+            expression=FilterCondition(
+                field="name", op=FilterOp.ENDSWITH, value="-triage"
+            )
+        )
+    )
+    assert {item.id for item in suffix} == {refund.id, billing.id}
+
+    contains, _ = await repository.query(
+        InvestigationFilter(
+            expression=FilterCondition(field="name", op=FilterOp.CONTAINS, value="ency")
+        )
+    )
+    assert [item.id for item in contains] == [latency.id]
+
+
 async def test_query_walks_pages(setup: Setup) -> None:
     """Walk every page via next_cursor without duplicates or gaps."""
     repository, owner_id, agent_id, _, _ = setup

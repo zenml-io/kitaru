@@ -24,7 +24,7 @@ from kitaru.api_models.v1.investigation import (
 )
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
-from kitaru.server.filtering import EQUALITY_OPS, NULLABLE_OPS, FilterField
+from kitaru.server.filtering import EQUALITY_OPS, NULLABLE_OPS, STRING_OPS, FilterField
 
 
 class InvestigationFilter(ListFilter):
@@ -33,6 +33,7 @@ class InvestigationFilter(ListFilter):
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
         "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "agent_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
+        "name": FilterField(value_type=str, ops=STRING_OPS),
         "status": FilterField(value_type=InvestigationStatus, ops=EQUALITY_OPS),
     }
 

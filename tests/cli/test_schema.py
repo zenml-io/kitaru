@@ -86,6 +86,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         "status",
         "version",
         "worker",
+        "workspace",
     }
     descriptions = {item["name"]: item["description"] for item in describe_schema()}
     assert descriptions["agent"] == "Register and inspect agents."
@@ -142,6 +143,20 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     names = {parameter["name"] for parameter in agent_register["parameters"]}
     assert "--command" in names
     assert "--entrypoint" not in names
+    spec_param = next(
+        parameter
+        for parameter in agent_register["parameters"]
+        if parameter["name"] == "--spec"
+    )
+    assert "cannot combine" in spec_param["description"].lower()
+
+    [agent_version_update] = describe_schema(("agent", "version", "update"))
+    assert agent_version_update["read_only"] is False
+    assert agent_version_update["side_effects"]["mutates_remote_state"] is True
+    assert "replays" in agent_version_update["description"]
+
+    [agent_delete] = describe_schema(("agent", "delete"))
+    assert "retaining" in agent_delete["description"]
 
     [importer_scaffold] = describe_schema(("importer", "scaffold"))
     assert importer_scaffold["side_effects"]["writes_local_file"] is True
@@ -217,6 +232,7 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     session_commands = {item["command"]: item for item in describe_schema(("session",))}
     assert set(session_commands) == {
         "session.analyze",
+        "session.delete",
         "session.evaluate",
         "session.get",
         "session.import",
@@ -227,8 +243,18 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert all(
         command["read_only"]
         for name, command in session_commands.items()
-        if name not in {"session.analyze", "session.evaluate", "session.import"}
+        if name
+        not in {
+            "session.analyze",
+            "session.delete",
+            "session.evaluate",
+            "session.import",
+        }
     )
+    session_delete = session_commands["session.delete"]
+    assert session_delete["read_only"] is False
+    assert session_delete["side_effects"]["deletes_remote_state"] is True
+    assert session_delete["side_effects"]["mutates_remote_state"] is True
     session_import = session_commands["session.import"]
     assert session_import["read_only"] is False
     assert session_import["streams"] is True
@@ -252,6 +278,7 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
         "--wait",
         "--interval",
         "--timeout",
+        "--fail-on-failures",
     } <= set(import_parameters)
     import_errors = {error["kind"] for error in session_import["errors"]}
     assert {
@@ -281,7 +308,12 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
         "--timeout",
     } <= set(evaluate_parameters)
     evaluate_errors = {error["kind"] for error in session_evaluate["errors"]}
-    assert {"timeout", "remote_failed", "remote_canceled"} <= evaluate_errors
+    assert {
+        "partial_failure",
+        "timeout",
+        "remote_failed",
+        "remote_canceled",
+    } <= evaluate_errors
 
     node_parameters = {
         parameter["name"]
@@ -510,8 +542,13 @@ def test_help_exposes_only_the_schema_command_surface(capsys) -> None:
     assert "Cursor from the previous page (page.next_cursor in CLI JSON output)." in (
         help_text
     )
-    assert "created:asc or created:desc" in help_text
+    assert "created, started_at, or number" in help_text
+    assert ":asc or :desc" in help_text
     assert "JSON filter expression" in help_text
+
+    assert app_module.main(["agent", "list", "--help"]) == 0
+    agent_help_text = _normalize_help_text(capsys.readouterr().out)
+    assert "created:asc or created:desc" in agent_help_text
 
     assert app_module.main(["session", "nodes", "--help"]) == 0
     nodes_help = _normalize_help_text(capsys.readouterr().out)

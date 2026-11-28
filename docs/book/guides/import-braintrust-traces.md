@@ -49,7 +49,7 @@ Rows that carry `span_id`, `root_span_id`, or `span_attributes` are treated as a
 Register the agent the traces belong to, if you have not, and start a worker:
 
 ```bash
-kitaru agent register support-agent --command "python support.py"
+kitaru agent register support-agent
 kitaru worker start
 ```
 

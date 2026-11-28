@@ -21,7 +21,16 @@ from typing import Annotated
 from cyclopts import Parameter
 
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
-from kitaru.cli import evaluations, imports, invocation_context, registration, sessions
+from kitaru.cli import (
+    evaluations,
+    imports,
+    invocation_context,
+    registration,
+    sessions,
+)
+from kitaru.cli import (
+    session_delete as session_delete_module,
+)
 from kitaru.cli.command_registry import (
     ASSET_READ_ERRORS,
     ASSET_WRITE_ERRORS,
@@ -29,6 +38,7 @@ from kitaru.cli.command_registry import (
     IDEMPOTENCY_KEY_PARAMETER,
     JOB_WAIT_ERRORS,
     LIST_PARAMETERS,
+    SESSION_LIST_PARAMETERS,
     UUID_READ_ERRORS,
     WAIT_PARAMETERS,
     build_spec,
@@ -303,6 +313,13 @@ async def import_analyze(
                 "Stop the import after creating this many sessions.",
             ),
             *WAIT_PARAMETERS,
+            ParameterSpec(
+                "--fail-on-failures",
+                "boolean",
+                "option",
+                False,
+                "Exit non-zero if any record fails to import; requires --wait.",
+            ),
             IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
@@ -341,6 +358,7 @@ async def session_import(
     wait: bool = False,
     interval: float | None = None,
     timeout: float | None = None,
+    fail_on_failures: bool = False,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Upload a local payload or an API selection, then create one import job."""
@@ -370,6 +388,7 @@ async def session_import(
             wait=wait,
             interval=interval,
             timeout=timeout,
+            fail_on_failures=fail_on_failures,
             idempotency_key=idempotency_key,
         )
 
@@ -381,7 +400,7 @@ async def session_import(
         "List one page of sessions. Continue with --cursor using page.next_cursor; "
         "--size/--limit sets the page size, not a total across pages.",
         parameters=(
-            *LIST_PARAMETERS,
+            *SESSION_LIST_PARAMETERS,
             ParameterSpec(
                 "--status",
                 "in_progress|completed|failed",
@@ -680,7 +699,7 @@ async def session_read(
         side_effects=("reads_local_file", "creates_remote_state"),
         idempotency="non_idempotent_job_created_per_request",
         errors=(
-            *ASSET_READ_ERRORS,
+            *ASSET_WRITE_ERRORS,
             *JOB_WAIT_ERRORS,
         ),
         streams=True,
@@ -863,6 +882,70 @@ async def session_analyze(
             interval=interval,
             timeout=timeout,
             idempotency_key=idempotency_key,
+        )
+
+
+@register_command(
+    session_app,
+    build_spec(
+        ("session", "delete"),
+        "Delete one or more sessions selected by ID, file, or filter.",
+        parameters=(
+            ParameterSpec(
+                "SESSION", "UUID[]", "argument", False, "Explicit session IDs."
+            ),
+            ParameterSpec(
+                "--sessions-file",
+                "path",
+                "option",
+                False,
+                "UTF-8 file with one session UUID per nonblank line.",
+            ),
+            ParameterSpec(
+                "--filter",
+                "JSON filter",
+                "option",
+                False,
+                "Delete sessions matching this JSON filter expression.",
+            ),
+            ParameterSpec(
+                "--force", "boolean", "option", False, "Confirm remote deletion."
+            ),
+        ),
+        read_only=False,
+        side_effects=(
+            "reads_local_file",
+            "mutates_remote_state",
+            "deletes_remote_state",
+        ),
+        idempotency="not_found after first removal",
+        errors=ASSET_WRITE_ERRORS,
+    ),
+)
+async def session_delete(
+    session: list[str] | None = None,
+    /,
+    *,
+    sessions_file: Path | None = None,
+    filter: str | None = None,
+    force: bool = False,
+) -> CommandResult:
+    """Delete one or more sessions selected by ID, file, or filter."""
+    if not force:
+        return await session_delete_module.delete_sessions(
+            None,
+            session,
+            sessions_file=sessions_file,
+            filter=filter,
+            force=force,
+        )
+    async with invocation_context.open_asset_client() as client:
+        return await session_delete_module.delete_sessions(
+            client,
+            session,
+            sessions_file=sessions_file,
+            filter=filter,
+            force=force,
         )
 
 

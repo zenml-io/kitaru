@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayCreateRequest
-from kitaru.cli.output import CommandResult
+from kitaru.cli.output import CLIError, CommandResult
 from kitaru.cli.registration import (
     get_agent_version,
     list_params,
@@ -20,6 +20,7 @@ from kitaru.cli.registration import (
     resolve_evaluator_configs,
 )
 from kitaru.cli.task_diagnostics import get_task_diagnostics
+from kitaru.client.exceptions import APIError
 
 
 async def create_replay(
@@ -50,9 +51,26 @@ async def create_replay(
     fields["evaluators"] = configs
     fields["baseline_evaluation_mode"] = baseline_evaluation_mode
 
-    replay = await client.replays.create(
-        ReplayCreateRequest(**fields), idempotency_key=idempotency_key
-    )
+    try:
+        replay = await client.replays.create(
+            ReplayCreateRequest(**fields), idempotency_key=idempotency_key
+        )
+    except APIError as error:
+        if (
+            agent is None
+            and error.status_code == 422
+            and "carries no agent version" in error.detail
+        ):
+            raise CLIError(
+                "invalid_arguments",
+                error.detail.strip(),
+                details={"status_code": error.status_code},
+                hint=(
+                    "Pass `--agent NAME@VERSION` to choose which registered "
+                    "agent version replays this session."
+                ),
+            ) from error
+        raise
     next_actions = []
     if replay.job_id is not None:
         next_actions += [

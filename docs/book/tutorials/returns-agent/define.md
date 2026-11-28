@@ -154,7 +154,7 @@ If you want coding-agent help, ask it to implement only the accepted behavior fr
 
 Do not map ticket or session identifiers to expected answers. Do not search the customer reply for words such as `refund` when tool results provide stronger evidence. A useful evaluator distinguishes, for example, an accepted refund from a claimed refund, multiple accepted terminal actions from one, and missing action evidence from a pass.
 
-Validate and register the implementation:
+Check that the script loads cleanly and register it:
 
 ```bash
 uv run kitaru evaluator test \
@@ -169,7 +169,7 @@ uv run kitaru evaluator register \
   --display-version initial-review
 ```
 
-Kitaru assigns the first version the reference `returns-behavior@1`. The version pins the evaluator code and parameters used by later comparisons.
+`kitaru evaluator test` checks imports and the callable signature without calling `evaluate` (`invoked: false`). The calibration step below is what executes `evaluate` against your recorded sessions. Kitaru assigns the first version the reference `returns-behavior@1`. The version pins the evaluator code and parameters used by later comparisons.
 
 Save that reference:
 

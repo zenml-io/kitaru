@@ -22,7 +22,11 @@ kitaru agent register support-agent \
   --description "Resolves support tickets"
 ```
 
-This creates the agent and its first **agent version** in one step. A version pins what "the agent" meant at a point in time: a run spec (the command that starts your agent, its working directory, environment, secrets, and timeout) plus optional capability metadata (tools, MCP servers, skills). The run spec is what a [worker](workers.md) executes when a replay or experiment re-runs the agent in your environment.
+This creates the agent and its first **agent version** in one step. An agent version stores an optional `RunSpec` pointer (the command that starts your agent, its working directory, environment, secrets, and timeout) plus optional capability metadata (tools, MCP servers, skills). Omit `--command` when registering an agent that only receives imported traces; attempting a replay or experiment against a version with no run spec returns an actionable error until you register or update a version with `--command`. The run spec is what a [worker](workers.md) executes when a replay or experiment re-runs the agent in your environment.
+
+{% hint style="warning" %}
+An agent version does **not** snapshot your source code or pin a git commit hash. If you edit files in place inside the same working directory, older agent versions pointing at that directory run the mutated code rather than the code they were registered with. For reproducible baselines, point each version at its own directory, git worktree, or container image, and attach a `--display-version` label (such as a git SHA or tag).
+{% endhint %}
 
 To register from a YAML or JSON spec, put the agent's description under `parent` and the version's description under `version`:
 
@@ -49,7 +53,7 @@ kitaru agent version register support-agent \
   --display-version "pr-1284"
 ```
 
-Register a new version when the code changes. An [experiment](experiments.md) is precisely "replay this cohort on that agent version and see what moved."
+Register a new version when the code changes. An [experiment](experiments.md) is precisely "replay this cohort on that agent version and see what moved." When you need to fix a moved `--working-dir`, environment variable, or `runtime_capabilities` on an existing version without creating a new version number, use `kitaru agent version update support-agent@1 ...` (updating in place changes what recorded replays and experiments run against).
 
 Credentials the agent needs at run time, such as a model provider key, go into a [secret](../deploy/secrets.md) rather than `--env`. Reference the secret in the version, and the worker injects each of its keys as an environment variable when it runs the agent:
 
@@ -186,6 +190,19 @@ asyncio.run(main())
 `list()` returns one page, while `iter()` follows cursors until all matching sessions have been read. Session list and detail responses include the currently linked tags; sessions without tags return an empty list. The Python client also accepts older server responses without the `tags` field, using an empty list, so an empty list from an older server does not establish that the session has no tags.
 
 The native MCP server can list and filter tags, use existing filtered reads to rediscover tagged resources, and create, rename, link, unlink, or delete tags according to its capability mode. It cannot enumerate every link belonging to a tag. Deleting a tag removes all of its resource links; it does not delete the linked resources.
+
+## Deleting agents and sessions
+
+Deleting an agent with `kitaru agent delete <agent> --force` is a **soft delete**. It hides the agent from `kitaru agent list` and blocks new sessions, versions, cohorts, or runs under that agent, while keeping all existing sessions, versions, cohorts, investigations, and imports stored under the old `agent_id`. Soft-deleted agents cannot be restored. If you register a new agent with the same name later, it receives a new `agent_id`, so name-based filters such as `--agent support-agent` point at the new agent rather than the old data.
+
+The `agent delete` output prints the deleted agent's `id` along with bounded counts of retained sessions and cohorts. Use that old `agent_id` to inspect or remove retained sessions:
+
+```bash
+kitaru session list --filter '{"field":"agent_id","op":"eq","value":"<old-agent-id>"}'
+kitaru session delete --filter '{"field":"agent_id","op":"eq","value":"<old-agent-id>"}' --force
+```
+
+`kitaru session delete` also accepts explicit session UUIDs or `--sessions-file` alongside `--force`. A session that is still referenced by a cohort version, an investigation, or a replay cannot be deleted until that reference is removed; the server returns a 409 conflict naming what still references it.
 
 ## Where sessions come from
 

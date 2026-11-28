@@ -839,7 +839,7 @@ async def test_delete_in_use_by_cohort_version(cohort_setup: CohortSetup) -> Non
         [member.id],
     )
 
-    with pytest.raises(SessionInUse):
+    with pytest.raises(SessionInUse, match="referenced by a cohort version"):
         await sessions.delete(member.id)
 
 
@@ -875,7 +875,7 @@ async def test_delete_restricted_by_investigation_membership(
         ],
     )
 
-    with pytest.raises(SessionInUse, match=f"Session {member.id} is referenced"):
+    with pytest.raises(SessionInUse, match="referenced by an investigation"):
         await sessions.delete(member.id)
 
 
@@ -902,7 +902,7 @@ async def test_delete_restricted_by_replay_baseline(replay_setup: ReplaySetup) -
         )
     )
 
-    with pytest.raises(SessionInUse, match=f"Session {baseline.id} is referenced"):
+    with pytest.raises(SessionInUse, match=r"by a replay \(as baseline session\)"):
         await sessions.delete(baseline.id)
 
 
@@ -938,7 +938,7 @@ async def test_delete_restricted_by_replay_result(replay_setup: ReplaySetup) -> 
         )
     )
 
-    with pytest.raises(SessionInUse, match=f"Session {result.id} is referenced"):
+    with pytest.raises(SessionInUse, match=r"by a replay \(as result session\)"):
         await sessions.delete(result.id)
 
 

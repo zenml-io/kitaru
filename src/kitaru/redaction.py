@@ -67,6 +67,49 @@ _CREDENTIAL_ENDINGS = (
     "secrets",
     "token",
 )
+# Explicit credential qualifiers before `token`/`tokens` always mask regardless
+# of value type, taking precedence over numeric token-count exemptions.
+_CREDENTIAL_TOKEN_WORDS = frozenset(
+    {
+        "access",
+        "api",
+        "auth",
+        "authentication",
+        "authorization",
+        "bearer",
+        "credential",
+        "credentials",
+        "csrf",
+        "device",
+        "id",
+        "identity",
+        "invitation",
+        "invite",
+        "jwt",
+        "key",
+        "login",
+        "mfa",
+        "oauth",
+        "otp",
+        "password",
+        "passwords",
+        "pat",
+        "private",
+        "recovery",
+        "refresh",
+        "reset",
+        "secret",
+        "secrets",
+        "security",
+        "session",
+        "signing",
+        "sso",
+        "totp",
+        "verification",
+        "webhook",
+        "xsrf",
+    }
+)
 # A name ending in `tokens` counts tokens when any earlier word is one of
 # these, as in `MAX_TOKENS`, `max_new_tokens`, or `prompt_tokens`; otherwise it
 # holds them, as in `GITHUB_TOKENS` or `new_tokens`.
@@ -89,6 +132,7 @@ _TOKEN_COUNT_WORDS = frozenset(
         "used",
     }
 )
+_PLURAL_TOKEN_KEY = re.compile(r"[a-z0-9][_-]tokens$", re.IGNORECASE)
 _SECRET_VALUE = re.compile(r"(?i)(bearer\s+|KITKEY_|ZENPROKEY_)[^\s,;\]\}\"']+")
 
 MASKED = "***"
@@ -99,23 +143,53 @@ _DIGITS = re.compile(r"[0-9]+")
 _MAX_DEPTH = 64
 
 
-def is_credential_name(name: str) -> bool:
-    """Return whether a setting or field name says its value is a credential."""
+def _split_name_words(name: str) -> list[str]:
+    """Split a setting or field name into lowercase alphabetic words."""
     # One capital before the word, not `[A-Z]+`: the same split, without
     # backtracking that grows with the square of a long all-caps name.
     spaced = re.sub(r"([A-Z])([A-Z][a-z])", r"\1_\2", name)
     spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", spaced)
     # Digits drop out, so `API_KEY1` and `TOKEN2` end in their nouns.
-    words = re.findall(r"[a-z]+", spaced.lower())
+    return re.findall(r"[a-z]+", spaced.lower())
+
+
+def _is_explicit_credential_token_name(words: list[str]) -> bool:
+    """Return whether parsed name words name an explicit credential token."""
+    return (
+        len(words) >= 2
+        and words[-1] in {"token", "tokens"}
+        and words[-2] in _CREDENTIAL_TOKEN_WORDS
+    )
+
+
+def _is_token_count_name(words: list[str]) -> bool:
+    """Return whether parsed name words describe a plural token-count field."""
+    return (
+        len(words) >= 2
+        and words[-1] == "tokens"
+        and not _is_explicit_credential_token_name(words)
+        and not _TOKEN_COUNT_WORDS.isdisjoint(words[:-1])
+    )
+
+
+def _is_credential_words(words: list[str]) -> bool:
+    """Return whether parsed name words say a value is a credential."""
     if not words:
         return False
+    if _is_explicit_credential_token_name(words):
+        return True
     if words[-1] == "tokens":
-        return _TOKEN_COUNT_WORDS.isdisjoint(words[:-1])
+        return not _is_token_count_name(words)
     tails = (words[-1], "".join(words[-2:]))
     return any(
         tail in _CREDENTIAL_NOUNS or tail.endswith(_CREDENTIAL_ENDINGS)
         for tail in tails
     )
+
+
+def is_credential_name(name: str) -> bool:
+    """Return whether a setting or field name says its value is a credential."""
+    return _is_credential_words(_split_name_words(name))
 
 
 def redact(value: str) -> str:
@@ -144,14 +218,7 @@ def _redact_data(
     value: Any, *, key: str | None, depth: int, active_ids: set[int], mask: bool
 ) -> Any:
     """Normalize one value while retaining key context and active ancestors."""
-    if (
-        mask
-        and key is not None
-        # A token usage field holds a count, so anything else under it is
-        # masked like a credential.
-        and (is_credential_name(key) or key in _TOKEN_USAGE_KEYS)
-        and not _is_token_usage(value, key=key)
-    ):
+    if mask and key is not None and _should_mask_key(key, value):
         return MASKED
     if depth >= _MAX_DEPTH:
         return "[depth limit]"
@@ -208,19 +275,36 @@ def _redact_data(
     return "[unavailable]"
 
 
-def _is_token_usage(value: Any, *, key: str) -> bool:
+def _should_mask_key(key: str, value: Any) -> bool:
+    """Return whether a mapping key must be masked for the given value."""
+    words = _split_name_words(key)
+    if _is_explicit_credential_token_name(words):
+        return True
+    is_token_count = _is_token_count_name(words)
+    # Token usage and plural token-count fields hold counts, so non-count
+    # values under them are masked like credentials.
+    if not (_is_credential_words(words) or key in _TOKEN_USAGE_KEYS or is_token_count):
+        return False
+    return not _is_token_usage(value, key=key, is_token_count=is_token_count)
+
+
+def _is_token_usage(value: Any, *, key: str, is_token_count: bool = False) -> bool:
     """Recognize only numeric token usage fields, including per-call means."""
     if key in _TOKEN_USAGE_KEYS:
         return _is_usage_count(value)
-    if key != "tokens":
-        return False
-    if isinstance(value, dict):
-        return all(
-            field in _TOKEN_USAGE_KEYS and _is_usage_count(count)
-            for field, count in value.items()
-        )
-    # A bare `tokens` total is a raw API count, so a fractional one is suspect.
-    return _is_token_count(value) and not isinstance(value, float)
+    if key == "tokens":
+        if isinstance(value, dict):
+            return all(
+                field in _TOKEN_USAGE_KEYS and _is_usage_count(count)
+                for field, count in value.items()
+            )
+        # A bare `tokens` total is a raw API count, so a fractional one is suspect.
+        return _is_whole_token_count(value)
+    if is_token_count:
+        return _is_whole_usage_count(value)
+    if _PLURAL_TOKEN_KEY.search(key):
+        return _is_whole_token_count(value)
+    return False
 
 
 def _is_usage_count(value: Any) -> bool:
@@ -230,8 +314,18 @@ def _is_usage_count(value: Any) -> bool:
     )
 
 
+def _is_whole_usage_count(value: Any) -> bool:
+    """Recognize a whole-number token count, including a setting held as digits."""
+    return _is_whole_token_count(value) or (
+        isinstance(value, str) and _DIGITS.fullmatch(value) is not None
+    )
+
+
 def _is_token_count(value: Any) -> bool:
     """Recognize a missing, whole, or averaged token count."""
-    return value is None or (
-        isinstance(value, (int, float)) and not isinstance(value, bool)
-    )
+    return _is_whole_token_count(value) or isinstance(value, float)
+
+
+def _is_whole_token_count(value: Any) -> bool:
+    """Recognize a missing or whole-number token count."""
+    return value is None or (isinstance(value, int) and not isinstance(value, bool))

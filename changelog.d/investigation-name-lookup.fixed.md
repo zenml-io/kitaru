@@ -1,0 +1,1 @@
+- Validated upfront in `kitaru investigation create` that every `--session` has a matching `--session-question`, added `name` filtering on investigations, enabled unambiguous lookup by name (with optional `--agent` scoping) across `kitaru investigation` commands, and added a duplicate-name warning on `kitaru investigation create`.
