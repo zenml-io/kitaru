@@ -15,13 +15,11 @@
 
 import uuid
 from pathlib import Path
-from typing import Literal
 
-from kitaru.cli import invocation_context, registration, scaffold
+from kitaru.cli import plugins, scaffold
 from kitaru.cli.command_registry import (
     ASSET_READ_ERRORS,
     ASSET_WRITE_ERRORS,
-    IDEMPOTENCY_KEY_PARAMETER,
     LIST_PARAMETERS,
     VERSION_LIST_PARAMETERS,
     analyzer_app,
@@ -35,168 +33,6 @@ from kitaru.cli.command_registry import (
 )
 from kitaru.cli.output import CommandResult
 from kitaru.cli.schema import ParameterSpec
-
-_PLUGIN_SOURCE_PARAMETERS = (
-    ParameterSpec("--script", "path", "option", False, "Python script to upload."),
-    ParameterSpec(
-        "--package", "requirement", "option", False, "Pinned package requirement."
-    ),
-    ParameterSpec(
-        "--entrypoint",
-        "string",
-        "option",
-        True,
-        "Script attribute or module reference.",
-    ),
-    ParameterSpec(
-        "--display-version", "string", "option", False, "Human-readable version."
-    ),
-)
-
-
-def _plugin_register_parameters(kind: str) -> tuple[ParameterSpec, ...]:
-    """Build metadata for one plugin register command."""
-    parent = [
-        ParameterSpec("NAME", "string", "argument", True, f"New {kind} name."),
-        ParameterSpec(
-            "--description", "string", "option", False, "Parent description."
-        ),
-        ParameterSpec("--metadata", "JSON object", "option", False, "Parent metadata."),
-    ]
-    if kind in {"importer", "analyzer", "evaluator"}:
-        parent.append(
-            ParameterSpec("--provider", "string", "option", False, "Source provider.")
-        )
-    if kind in {"importer", "analyzer", "evaluator"}:
-        parent.append(
-            ParameterSpec(
-                "--connection-schema",
-                "path",
-                "option",
-                False,
-                "JSON Schema file describing the connection values.",
-            )
-        )
-    if kind == "evaluator":
-        parent.append(
-            ParameterSpec("--agent-id", "UUID", "option", False, "Scoping agent.")
-        )
-    return (*parent, *_PLUGIN_SOURCE_PARAMETERS)
-
-
-async def _register_plugin_command(
-    kind: str,
-    name: str,
-    *,
-    script: Path | None,
-    package: str | None,
-    entrypoint: str | None,
-    description: str | None,
-    provider: str | None,
-    metadata: str | None,
-    agent_id: uuid.UUID | None,
-    display_version: str | None,
-    connection_schema: Path | None = None,
-) -> CommandResult:
-    """Run one kind-specific parent-plus-version registration."""
-    source = registration.prepare_plugin_source(
-        script=script, package=package, entrypoint=entrypoint
-    )
-    parent = registration.plugin_parent_request(
-        kind,
-        name,
-        description=description,
-        provider=provider,
-        metadata=metadata,
-        agent_id=agent_id,
-        connection_schema=connection_schema,
-    )
-    async with invocation_context.open_asset_client() as client:
-        return await registration.register_plugin(
-            client,
-            kind=kind,
-            parent_request=parent,
-            source=source,
-            display_version=display_version,
-        )
-
-
-async def _register_plugin_version_command(
-    kind: str,
-    reference: str,
-    *,
-    script: Path | None,
-    package: str | None,
-    entrypoint: str | None,
-    display_version: str | None,
-    idempotency_key: str | None = None,
-) -> CommandResult:
-    """Run one kind-specific version registration."""
-    source = registration.prepare_plugin_source(
-        script=script, package=package, entrypoint=entrypoint
-    )
-    async with invocation_context.open_asset_client() as client:
-        return await registration.register_plugin_version(
-            client,
-            kind=kind,
-            reference=reference,
-            source=source,
-            display_version=display_version,
-            idempotency_key=idempotency_key,
-        )
-
-
-async def _list_plugin_command(
-    kind: Literal["importer", "evaluator", "analyzer"],
-    *,
-    size: int,
-    cursor: str | None,
-    sort: str,
-    filter: str | None,
-) -> CommandResult:
-    """List one server page for a plugin kind."""
-    params = registration.list_params(
-        kind, size=size, cursor=cursor, sort=sort, filter=filter
-    )
-    async with invocation_context.open_asset_client() as client:
-        resource = registration.get_plugin_resource(client, kind)
-        return registration.page_result(await resource.list(params), size=size)
-
-
-async def _get_plugin_command(kind: str, reference: str) -> CommandResult:
-    """Get one exact importer, evaluator, or analyzer."""
-    async with invocation_context.open_asset_client() as client:
-        resource = registration.get_plugin_resource(client, kind)
-        item = await registration.resolve_asset(resource, reference, kind.title())
-        return CommandResult(item=item.model_dump(mode="json"))
-
-
-async def _list_plugin_versions_command(
-    kind: str,
-    reference: str,
-    *,
-    size: int,
-    cursor: str | None,
-    sort: str,
-) -> CommandResult:
-    """List one server page of importer, evaluator, or analyzer versions."""
-    params = registration.version_list_params(size=size, cursor=cursor, sort=sort)
-    async with invocation_context.open_asset_client() as client:
-        resource = registration.get_plugin_resource(client, kind)
-        parent = await registration.resolve_asset(resource, reference, kind.title())
-        return registration.page_result(
-            await resource.list_versions(parent.id, params), size=size
-        )
-
-
-async def _get_plugin_version_command(kind: str, reference: str) -> CommandResult:
-    """Get one exact importer, evaluator, or analyzer version."""
-    async with invocation_context.open_asset_client() as client:
-        resource = registration.get_plugin_resource(client, kind)
-        _, item = await registration.get_plugin_version(
-            resource, reference, kind.title()
-        )
-        return CommandResult(item=item.model_dump(mode="json"))
 
 
 @register_command(
@@ -272,7 +108,7 @@ def importer_test(
     build_spec(
         ("importer", "register"),
         "Create an importer and its first version.",
-        parameters=_plugin_register_parameters("importer"),
+        parameters=plugins.build_plugin_register_parameters("importer"),
         read_only=False,
         side_effects=("reads_local_file", "uploads_data", "creates_remote_state"),
         idempotency="non_idempotent_parent_then_version",
@@ -293,7 +129,7 @@ async def importer_register(
     display_version: str | None = None,
 ) -> CommandResult:
     """Create an importer parent, source, and initial version."""
-    return await _register_plugin_command(
+    return await plugins.register_plugin_command(
         "importer",
         name,
         script=script,
@@ -325,7 +161,7 @@ async def importer_list(
     filter: str | None = None,
 ) -> CommandResult:
     """List one server page of importers."""
-    return await _list_plugin_command(
+    return await plugins.list_plugin_command(
         "importer", size=size, cursor=cursor, sort=sort, filter=filter
     )
 
@@ -345,7 +181,45 @@ async def importer_list(
 )
 async def importer_get(importer: str, /) -> CommandResult:
     """Get one exact importer."""
-    return await _get_plugin_command("importer", importer)
+    return await plugins.get_plugin_command("importer", importer)
+
+
+@register_command(
+    importer_app,
+    build_spec(
+        ("importer", "update"),
+        "Update selected fields on an exact importer.",
+        parameters=plugins.build_plugin_update_parameters("importer"),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent replacement",
+        errors=ASSET_WRITE_ERRORS,
+    ),
+)
+async def importer_update(
+    importer: str,
+    /,
+    *,
+    description: str | None = None,
+    clear_description: bool = False,
+    logo_url: str | None = None,
+    clear_logo_url: bool = False,
+    metadata: str | None = None,
+    connection_schema: Path | None = None,
+    clear_connection_schema: bool = False,
+) -> CommandResult:
+    """Update selected fields on one exact importer."""
+    return await plugins.update_plugin_command(
+        "importer",
+        importer,
+        description=description,
+        clear_description=clear_description,
+        logo_url=logo_url,
+        clear_logo_url=clear_logo_url,
+        metadata=metadata,
+        connection_schema=connection_schema,
+        clear_connection_schema=clear_connection_schema,
+    )
 
 
 @register_command(
@@ -353,13 +227,7 @@ async def importer_get(importer: str, /) -> CommandResult:
     build_spec(
         ("importer", "version", "register"),
         "Create the next version of an existing importer.",
-        parameters=(
-            ParameterSpec(
-                "IMPORTER", "reference", "argument", True, "Importer UUID or name."
-            ),
-            *_PLUGIN_SOURCE_PARAMETERS,
-            IDEMPOTENCY_KEY_PARAMETER,
-        ),
+        parameters=plugins.build_plugin_version_register_parameters("importer"),
         read_only=False,
         side_effects=("reads_local_file", "uploads_data", "creates_remote_state"),
         idempotency="non_idempotent_server_assigned_version",
@@ -374,16 +242,18 @@ async def importer_version_register(
     package: str | None = None,
     entrypoint: str | None = None,
     display_version: str | None = None,
+    description: str | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create the next importer version."""
-    return await _register_plugin_version_command(
+    return await plugins.register_plugin_version_command(
         "importer",
         importer,
         script=script,
         package=package,
         entrypoint=entrypoint,
         display_version=display_version,
+        description=description,
         idempotency_key=idempotency_key,
     )
 
@@ -411,7 +281,7 @@ async def importer_version_list(
     sort: str = "created:desc",
 ) -> CommandResult:
     """List one server page of importer versions."""
-    return await _list_plugin_versions_command(
+    return await plugins.list_plugin_versions_command(
         "importer", importer, size=size, cursor=cursor, sort=sort
     )
 
@@ -435,7 +305,7 @@ async def importer_version_list(
 )
 async def importer_version_get(importer_version: str, /) -> CommandResult:
     """Get one exact importer version, accepting @latest for reads."""
-    return await _get_plugin_version_command("importer", importer_version)
+    return await plugins.get_plugin_version_command("importer", importer_version)
 
 
 @register_command(
@@ -495,7 +365,7 @@ def evaluator_test(
     build_spec(
         ("evaluator", "register"),
         "Create an evaluator and its first version.",
-        parameters=_plugin_register_parameters("evaluator"),
+        parameters=plugins.build_plugin_register_parameters("evaluator"),
         read_only=False,
         side_effects=("reads_local_file", "uploads_data", "creates_remote_state"),
         idempotency="non_idempotent_parent_then_version",
@@ -517,7 +387,7 @@ async def evaluator_register(
     display_version: str | None = None,
 ) -> CommandResult:
     """Create an evaluator parent, source, and initial version."""
-    return await _register_plugin_command(
+    return await plugins.register_plugin_command(
         "evaluator",
         name,
         script=script,
@@ -549,7 +419,7 @@ async def evaluator_list(
     filter: str | None = None,
 ) -> CommandResult:
     """List one server page of evaluators."""
-    return await _list_plugin_command(
+    return await plugins.list_plugin_command(
         "evaluator", size=size, cursor=cursor, sort=sort, filter=filter
     )
 
@@ -569,7 +439,45 @@ async def evaluator_list(
 )
 async def evaluator_get(evaluator: str, /) -> CommandResult:
     """Get one exact evaluator."""
-    return await _get_plugin_command("evaluator", evaluator)
+    return await plugins.get_plugin_command("evaluator", evaluator)
+
+
+@register_command(
+    evaluator_app,
+    build_spec(
+        ("evaluator", "update"),
+        "Update selected fields on an exact evaluator.",
+        parameters=plugins.build_plugin_update_parameters("evaluator"),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent replacement",
+        errors=ASSET_WRITE_ERRORS,
+    ),
+)
+async def evaluator_update(
+    evaluator: str,
+    /,
+    *,
+    description: str | None = None,
+    clear_description: bool = False,
+    logo_url: str | None = None,
+    clear_logo_url: bool = False,
+    metadata: str | None = None,
+    connection_schema: Path | None = None,
+    clear_connection_schema: bool = False,
+) -> CommandResult:
+    """Update selected fields on one exact evaluator."""
+    return await plugins.update_plugin_command(
+        "evaluator",
+        evaluator,
+        description=description,
+        clear_description=clear_description,
+        logo_url=logo_url,
+        clear_logo_url=clear_logo_url,
+        metadata=metadata,
+        connection_schema=connection_schema,
+        clear_connection_schema=clear_connection_schema,
+    )
 
 
 @register_command(
@@ -577,13 +485,7 @@ async def evaluator_get(evaluator: str, /) -> CommandResult:
     build_spec(
         ("evaluator", "version", "register"),
         "Create the next version of an existing evaluator.",
-        parameters=(
-            ParameterSpec(
-                "EVALUATOR", "reference", "argument", True, "Evaluator UUID or name."
-            ),
-            *_PLUGIN_SOURCE_PARAMETERS,
-            IDEMPOTENCY_KEY_PARAMETER,
-        ),
+        parameters=plugins.build_plugin_version_register_parameters("evaluator"),
         read_only=False,
         side_effects=("reads_local_file", "uploads_data", "creates_remote_state"),
         idempotency="non_idempotent_server_assigned_version",
@@ -598,16 +500,18 @@ async def evaluator_version_register(
     package: str | None = None,
     entrypoint: str | None = None,
     display_version: str | None = None,
+    description: str | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create the next evaluator version."""
-    return await _register_plugin_version_command(
+    return await plugins.register_plugin_version_command(
         "evaluator",
         evaluator,
         script=script,
         package=package,
         entrypoint=entrypoint,
         display_version=display_version,
+        description=description,
         idempotency_key=idempotency_key,
     )
 
@@ -635,7 +539,7 @@ async def evaluator_version_list(
     sort: str = "created:desc",
 ) -> CommandResult:
     """List one server page of evaluator versions."""
-    return await _list_plugin_versions_command(
+    return await plugins.list_plugin_versions_command(
         "evaluator", evaluator, size=size, cursor=cursor, sort=sort
     )
 
@@ -659,7 +563,7 @@ async def evaluator_version_list(
 )
 async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
     """Get one exact evaluator version, accepting @latest for reads."""
-    return await _get_plugin_version_command("evaluator", evaluator_version)
+    return await plugins.get_plugin_version_command("evaluator", evaluator_version)
 
 
 @register_command(
@@ -667,7 +571,7 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
     build_spec(
         ("analyzer", "register"),
         "Create an analyzer and its first version.",
-        parameters=_plugin_register_parameters("analyzer"),
+        parameters=plugins.build_plugin_register_parameters("analyzer"),
         read_only=False,
         side_effects=("reads_local_file", "uploads_data", "creates_remote_state"),
         idempotency="non_idempotent_parent_then_version",
@@ -688,7 +592,7 @@ async def analyzer_register(
     display_version: str | None = None,
 ) -> CommandResult:
     """Create an analyzer parent, source, and initial version."""
-    return await _register_plugin_command(
+    return await plugins.register_plugin_command(
         "analyzer",
         name,
         script=script,
@@ -720,7 +624,7 @@ async def analyzer_list(
     filter: str | None = None,
 ) -> CommandResult:
     """List one server page of analyzers."""
-    return await _list_plugin_command(
+    return await plugins.list_plugin_command(
         "analyzer", size=size, cursor=cursor, sort=sort, filter=filter
     )
 
@@ -740,7 +644,45 @@ async def analyzer_list(
 )
 async def analyzer_get(analyzer: str, /) -> CommandResult:
     """Get one exact analyzer."""
-    return await _get_plugin_command("analyzer", analyzer)
+    return await plugins.get_plugin_command("analyzer", analyzer)
+
+
+@register_command(
+    analyzer_app,
+    build_spec(
+        ("analyzer", "update"),
+        "Update selected fields on an exact analyzer.",
+        parameters=plugins.build_plugin_update_parameters("analyzer"),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent replacement",
+        errors=ASSET_WRITE_ERRORS,
+    ),
+)
+async def analyzer_update(
+    analyzer: str,
+    /,
+    *,
+    description: str | None = None,
+    clear_description: bool = False,
+    logo_url: str | None = None,
+    clear_logo_url: bool = False,
+    metadata: str | None = None,
+    connection_schema: Path | None = None,
+    clear_connection_schema: bool = False,
+) -> CommandResult:
+    """Update selected fields on one exact analyzer."""
+    return await plugins.update_plugin_command(
+        "analyzer",
+        analyzer,
+        description=description,
+        clear_description=clear_description,
+        logo_url=logo_url,
+        clear_logo_url=clear_logo_url,
+        metadata=metadata,
+        connection_schema=connection_schema,
+        clear_connection_schema=clear_connection_schema,
+    )
 
 
 @register_command(
@@ -748,13 +690,7 @@ async def analyzer_get(analyzer: str, /) -> CommandResult:
     build_spec(
         ("analyzer", "version", "register"),
         "Create the next version of an existing analyzer.",
-        parameters=(
-            ParameterSpec(
-                "ANALYZER", "reference", "argument", True, "Analyzer UUID or name."
-            ),
-            *_PLUGIN_SOURCE_PARAMETERS,
-            IDEMPOTENCY_KEY_PARAMETER,
-        ),
+        parameters=plugins.build_plugin_version_register_parameters("analyzer"),
         read_only=False,
         side_effects=("reads_local_file", "uploads_data", "creates_remote_state"),
         idempotency="non_idempotent_server_assigned_version",
@@ -769,16 +705,18 @@ async def analyzer_version_register(
     package: str | None = None,
     entrypoint: str | None = None,
     display_version: str | None = None,
+    description: str | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create the next analyzer version."""
-    return await _register_plugin_version_command(
+    return await plugins.register_plugin_version_command(
         "analyzer",
         analyzer,
         script=script,
         package=package,
         entrypoint=entrypoint,
         display_version=display_version,
+        description=description,
         idempotency_key=idempotency_key,
     )
 
@@ -806,7 +744,7 @@ async def analyzer_version_list(
     sort: str = "created:desc",
 ) -> CommandResult:
     """List one server page of analyzer versions."""
-    return await _list_plugin_versions_command(
+    return await plugins.list_plugin_versions_command(
         "analyzer", analyzer, size=size, cursor=cursor, sort=sort
     )
 
@@ -830,4 +768,4 @@ async def analyzer_version_list(
 )
 async def analyzer_version_get(analyzer_version: str, /) -> CommandResult:
     """Get one exact analyzer version, accepting @latest for reads."""
-    return await _get_plugin_version_command("analyzer", analyzer_version)
+    return await plugins.get_plugin_version_command("analyzer", analyzer_version)

@@ -6,6 +6,7 @@
 """Shared asset registration, upload, and exact-resolution helpers."""
 
 import ast
+import inspect
 import json
 import re
 import shlex
@@ -23,15 +24,18 @@ from kitaru.api_models.v1.agent import AgentCreateRequest
 from kitaru.api_models.v1.agent_version import AgentVersionCreateRequest
 from kitaru.api_models.v1.analyzer import (
     AnalyzerCreateRequest,
+    AnalyzerUpdateRequest,
     AnalyzerVersionCreateRequest,
 )
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
+    EvaluatorUpdateRequest,
     EvaluatorVersionCreateRequest,
 )
 from kitaru.api_models.v1.importer import (
     ImporterCreateRequest,
+    ImporterUpdateRequest,
     ImporterVersionCreateRequest,
 )
 from kitaru.api_models.v1.plugin import (
@@ -86,6 +90,7 @@ class ScriptSource:
     path: Path
     content: bytes
     entrypoint: str
+    description: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,7 +265,12 @@ def validate_script_source(path: Path, entrypoint: str) -> ScriptSource:
             "invalid_arguments",
             f"Script {str(path)!r} has no top-level attribute {entrypoint!r}.",
         )
-    return ScriptSource(path=path, content=content, entrypoint=entrypoint)
+    return ScriptSource(
+        path=path,
+        content=content,
+        entrypoint=entrypoint,
+        description=_extract_script_description(tree),
+    )
 
 
 def validate_package_source(requirement: str, entrypoint: str) -> PackageSource:
@@ -627,20 +637,13 @@ async def register_plugin_version(
     reference: str,
     source: PluginSourceInput,
     display_version: str | None,
+    description: str | None = None,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Resolve a plugin parent, upload if needed, and create a version."""
     resource = get_plugin_resource(client, kind)
     parent = await resolve_asset(resource, reference, kind.title())
-    if isinstance(parent.name, str) and parent.name.startswith(
-        _RESERVED_PLUGIN_NAMESPACE_PREFIX
-    ):
-        raise CLIError(
-            "forbidden",
-            f"{parent.name} is a built-in {kind} and is read-only. "
-            f"Register your own {kind} under a new name with "
-            f"`kitaru {kind} register`.",
-        )
+    reject_builtin_plugin(parent, kind)
     plugin_source, blob = await upload_plugin_source(client, source)
     request_type = _plugin_version_request_type(kind)
     try:
@@ -660,6 +663,35 @@ async def register_plugin_version(
             hint="The blob is stored and may be reused; no version was created.",
             parent_created=False,
         ) from error
+    if description is not None:
+        update_request = get_plugin_update_request_type(kind)(description=description)
+        try:
+            parent = await resource.update(parent.id, update_request)
+        except Exception as error:
+            details: dict[str, Any] = {
+                "asset_type": kind,
+                "parent": {"id": str(parent.id)},
+                "version": {
+                    "completed": True,
+                    "id": str(version.id),
+                    "version": version.version,
+                },
+                "parent_update": {"completed": False},
+                "cause": str(error),
+            }
+            if blob is not None:
+                details["blob"] = {"completed": True, "id": str(blob.id)}
+            raise CLIError(
+                "partial_failure",
+                f"Created {kind} version {version.version} but failed to update "
+                "the parent description.",
+                details=details,
+                hint=(
+                    f"Version {version.version} exists. Retry the description update "
+                    f"with `kitaru {kind} update {shlex.quote(str(parent.id))} "
+                    "--description ...`."
+                ),
+            ) from error
     return await build_registration_result(kind, resource, parent, version, blob=blob)
 
 
@@ -709,6 +741,66 @@ def load_spec_document(path: Path, label: str = "Spec") -> dict[str, Any]:
             "invalid_arguments", f"{label} must contain one mapping document."
         )
     return data
+
+
+def _extract_script_description(tree: ast.Module) -> str | None:
+    """Extract a static DESCRIPTION string or module docstring from an AST."""
+    description_attr: str | None = None
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            if any(
+                isinstance(target, ast.Name) and target.id == "DESCRIPTION"
+                for target in node.targets
+            ):
+                description_attr = _extract_string_constant(node.value)
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "DESCRIPTION"
+            and node.value is not None
+        ):
+            description_attr = _extract_string_constant(node.value)
+    if description_attr is not None:
+        return description_attr
+    docstring = ast.get_docstring(tree, clean=True)
+    if docstring is None:
+        return None
+    cleaned = docstring.strip()
+    return cleaned or None
+
+
+def _extract_string_constant(node: ast.expr) -> str | None:
+    """Return a cleaned nonblank string when an AST node is a string literal."""
+    if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+        return None
+    cleaned = inspect.cleandoc(node.value).strip()
+    return cleaned or None
+
+
+def reject_builtin_plugin(parent: Any, kind: str) -> None:
+    """Raise a forbidden CLI error when targeting a built-in kitaru/ plugin."""
+    if isinstance(parent.name, str) and parent.name.startswith(
+        _RESERVED_PLUGIN_NAMESPACE_PREFIX
+    ):
+        raise CLIError(
+            "forbidden",
+            f"{parent.name} is a built-in {kind} and is read-only. "
+            f"Register your own {kind} under a new name with "
+            f"`kitaru {kind} register`.",
+        )
+
+
+def get_plugin_update_request_type(
+    kind: str,
+) -> type[ImporterUpdateRequest | EvaluatorUpdateRequest | AnalyzerUpdateRequest]:
+    """Return the update request type for one plugin kind."""
+    if kind == "importer":
+        return ImporterUpdateRequest
+    if kind == "evaluator":
+        return EvaluatorUpdateRequest
+    if kind == "analyzer":
+        return AnalyzerUpdateRequest
+    raise ValueError(f"Unsupported plugin kind {kind!r}")
 
 
 def _top_level_names(tree: ast.Module) -> set[str]:

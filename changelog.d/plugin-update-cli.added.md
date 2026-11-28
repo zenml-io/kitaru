@@ -1,0 +1,2 @@
+- Added `kitaru evaluator update`, `kitaru importer update`, and `kitaru analyzer update` to update parent plugin metadata such as `--description`, `--metadata`, `--connection-schema`, and `--logo-url` (with corresponding `--clear-*` flags).
+- Added script description fallback on `kitaru {evaluator,importer,analyzer} register --script`, reading a top-level `DESCRIPTION` string literal or the module docstring when `--description` is omitted, and added an explicit `--description` option on `kitaru {evaluator,importer,analyzer} version register`.

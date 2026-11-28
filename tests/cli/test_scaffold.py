@@ -25,6 +25,7 @@ from kitaru.api_models.v1.session_node import (
 )
 from kitaru.cli import scaffold as scaffold_module
 from kitaru.cli.output import CLIError
+from kitaru.cli.registration import ScriptSource, prepare_plugin_source
 from kitaru.cli.scaffold import (
     scaffold_asset,
 )
@@ -335,3 +336,19 @@ async def test_evaluator_scaffold_reads_session_nodes_and_validates(
     assert evaluation.score == 2
     assert evaluation.passed is True
     assert evaluation.explanation == "Observed 2 tool call(s)."
+
+
+@pytest.mark.parametrize(
+    ("kind", "entrypoint"),
+    [("importer", "parse"), ("evaluator", "evaluate")],
+)
+def test_scaffold_templates_do_not_inject_placeholder_description(
+    tmp_path: Path, kind: str, entrypoint: str
+) -> None:
+    """Fresh scaffold files leave the extracted script description unset."""
+    target = tmp_path / f"sample_{kind}.py"
+    scaffold_asset(kind, "sample", path=target, force=False)
+
+    source = prepare_plugin_source(script=target, package=None, entrypoint=entrypoint)
+    assert isinstance(source, ScriptSource)
+    assert source.description is None

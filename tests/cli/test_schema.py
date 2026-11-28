@@ -174,6 +174,32 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     }
     assert {"--provider", "--connection-schema"} <= evaluator_register_names
 
+    for plugin_kind in ("importer", "evaluator", "analyzer"):
+        [plugin_update] = describe_schema((plugin_kind, "update"))
+        assert plugin_update["read_only"] is False
+        assert plugin_update["side_effects"]["mutates_remote_state"] is True
+        assert plugin_update["idempotency"] == "idempotent replacement"
+        plugin_update_names = {
+            parameter["name"] for parameter in plugin_update["parameters"]
+        }
+        assert {
+            "--description",
+            "--clear-description",
+            "--logo-url",
+            "--clear-logo-url",
+            "--metadata",
+            "--connection-schema",
+            "--clear-connection-schema",
+        } <= plugin_update_names
+
+        [plugin_version_register] = describe_schema(
+            (plugin_kind, "version", "register")
+        )
+        plugin_version_names = {
+            parameter["name"] for parameter in plugin_version_register["parameters"]
+        }
+        assert "--description" in plugin_version_names
+
     [connection_create] = describe_schema(("connection", "create"))
     connection_create_names = {
         parameter["name"] for parameter in connection_create["parameters"]
