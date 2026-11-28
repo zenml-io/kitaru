@@ -394,6 +394,7 @@ _VIEWS: dict[str, HumanView] = {
     ),
     "importer.get": _build_view("Importer", _ASSET_FIELDS, _ASSET_SECTIONS),
     "importer.register": _build_view("Importer", (), _REGISTRATION_SECTIONS),
+    "importer.update": _build_view("Importer", _ASSET_FIELDS, _ASSET_SECTIONS),
     "importer.version.list": _build_view(
         "Importer versions", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
@@ -416,6 +417,7 @@ _VIEWS: dict[str, HumanView] = {
     ),
     "evaluator.get": _build_view("Evaluator", _ASSET_FIELDS, _ASSET_SECTIONS),
     "evaluator.register": _build_view("Evaluator", (), _REGISTRATION_SECTIONS),
+    "evaluator.update": _build_view("Evaluator", _ASSET_FIELDS, _ASSET_SECTIONS),
     "evaluator.version.list": _build_view(
         "Evaluator versions", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
@@ -425,6 +427,7 @@ _VIEWS: dict[str, HumanView] = {
     "evaluator.version.register": _build_view(
         "Evaluator version", (), _REGISTRATION_SECTIONS
     ),
+    "analyzer.update": _build_view("Analyzer", _ASSET_FIELDS, _ASSET_SECTIONS),
     "cohort.list": _build_view(
         "Cohorts",
         (

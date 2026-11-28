@@ -24,7 +24,7 @@ from kitaru.cli.registration import parse_json_object, validate_script_source
 _OUTPUT_LIMIT = 32 * 1024
 _NAME_SANITIZER = re.compile(r"[^A-Za-z0-9_]+")
 
-_IMPORTER_TEMPLATE = '''"""Kitaru importer scaffold."""
+_IMPORTER_TEMPLATE = """# Add a module docstring or DESCRIPTION = "..." for Kitaru.
 
 from collections.abc import Iterator
 from typing import Any
@@ -35,15 +35,15 @@ from kitaru.task.importer import ImportFailure, ImportedNode, ImportedSession, P
 def parse(
     payload: bytes, params: dict[str, Any]
 ) -> Iterator[ImportedSession | ImportFailure]:
-    """Parse a provider payload into Kitaru sessions or failures."""
+    \"\"\"Parse a provider payload into Kitaru sessions or failures.\"\"\"
     del payload, params
     return iter(())
 
 
 parser: Parser = parse
-'''
+"""
 
-_EVALUATOR_TEMPLATE = '''"""Kitaru evaluator scaffold."""
+_EVALUATOR_TEMPLATE = """# Add a module docstring or DESCRIPTION = "..." for Kitaru.
 
 from typing import Any
 
@@ -53,7 +53,7 @@ from kitaru.task.evaluator import EvaluationResult, SessionView
 def evaluate(
     session: SessionView, **params: Any
 ) -> EvaluationResult | list[EvaluationResult]:
-    """Evaluate one Kitaru session."""
+    \"\"\"Evaluate one Kitaru session.\"\"\"
     del params
     tool_calls = [
         node for node in session.nodes if node.node_type == "tool_call"
@@ -64,7 +64,7 @@ def evaluate(
         passed=True,
         explanation=f"Observed {len(tool_calls)} tool call(s).",
     )
-'''
+"""
 
 
 def scaffold_asset(

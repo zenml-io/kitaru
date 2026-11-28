@@ -61,7 +61,7 @@ kitaru analyzer register session-outcomes \
   --script session_outcomes_analyzer.py --entrypoint analyzer
 ```
 
-Analyzers are versioned like evaluators: registering the next version with `kitaru analyzer version register session-outcomes --script ...` creates version 2, and every insight remembers exactly which version wrote it. There is no `--agent-id` option: analyzers are global plugins, never scoped to one agent.
+Analyzers are versioned like evaluators: registering the next version with `kitaru analyzer version register session-outcomes --script ...` creates version 2, and every insight remembers exactly which version wrote it. There is no `--agent-id` option: analyzers are global plugins, never scoped to one agent. When `--description` is omitted on `kitaru analyzer register --script ...`, Kitaru reads a top-level `DESCRIPTION` string literal or the module docstring; update parent fields later with `kitaru analyzer update`.
 
 ## Run it on an import
 
