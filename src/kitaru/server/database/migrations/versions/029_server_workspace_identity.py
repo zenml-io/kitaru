@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Server workspace identity Alembic revision.
 
-Revision ID: 028_server_workspace_identity
-Revises: 027_session_group
+Revision ID: 029_server_workspace_identity
+Revises: 028_session_sort_indexes
 Create Date: 2026-11-27
 
 """
@@ -23,8 +23,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "028_server_workspace_identity"
-down_revision = "027_session_group"
+revision = "029_server_workspace_identity"
+down_revision = "028_session_sort_indexes"
 branch_labels = None
 depends_on = None
 
