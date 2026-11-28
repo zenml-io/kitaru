@@ -70,7 +70,7 @@ class _RecordingAnalytics(ServerAnalytics):
             properties: Event properties.
         """
         self.tracked.append((user_id, event, properties or {}))
-        self.tracked_contexts.append(dict(self._client.context))
+        self.tracked_contexts.append(dict(self._client._context))
 
     def identify(
         self, user_id: uuid.UUID, traits: dict[str, Any] | None = None
@@ -546,7 +546,7 @@ async def test_authenticate_names_the_workspace_before_the_account_exists(
     client.user = user.model_copy(update={"workspace": renamed})
     await authenticator.authenticate("credential")
 
-    assert analytics._client.context["workspace_name"] == "renamed"
+    assert analytics._client._context["workspace_name"] == "renamed"
     assert server_settings.saved_workspace_identities == [
         workspace,
         workspace,

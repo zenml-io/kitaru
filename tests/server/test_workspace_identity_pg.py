@@ -46,7 +46,7 @@ async def test_restarted_server_names_the_stored_workspace() -> None:
 
         restarted = create_app(settings)
         async with restarted.router.lifespan_context(restarted):
-            context = restarted.state.analytics.context
+            context = restarted.state.analytics._context
     finally:
         await drop_test_database(settings)
 

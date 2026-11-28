@@ -107,15 +107,6 @@ class AnalyticsClient:
         self._context = context
 
     @property
-    def context(self) -> dict[str, Any]:
-        """Context merged into outgoing messages.
-
-        Returns:
-            Context merged into outgoing messages.
-        """
-        return self._context
-
-    @property
     def enabled(self) -> bool:
         """Whether messages are sent.
 
