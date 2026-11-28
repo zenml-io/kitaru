@@ -28,6 +28,7 @@ from kitaru.analytics.environment import get_environment
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.analytics.source import current_event_context
 from kitaru.api_models.v1.info import AuthScheme
+from kitaru.server.application.models.workspace_identity import WorkspaceIdentity
 from kitaru.server.domain.account import Account
 
 _BUFFER_KEY = "kitaru_analytics_buffer"
@@ -182,6 +183,14 @@ class ServerAnalytics:
         self._get_buffer().messages.append(
             _BufferedAlias(user_id=user_id, previous_id=previous_id)
         )
+
+    def set_workspace(self, workspace: WorkspaceIdentity) -> None:
+        """Name a control plane workspace in track properties from now on.
+
+        Args:
+            workspace: Workspace this server serves.
+        """
+        self._client.update_context(workspace.model_dump())
 
     def _get_buffer(self) -> _AnalyticsBuffer:
         """Get the session's buffer, creating it on first use.

@@ -21,6 +21,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kitaru.server.adapters.db.orm.server_settings import ServerSettingsORM
+from kitaru.server.application.models.workspace_identity import WorkspaceIdentity
 
 
 class SQLServerSettingsRepository:
@@ -84,4 +85,41 @@ class SQLServerSettingsRepository:
                 )
             )
             .values(last_user_activity=at)
+        )
+
+    async def get_workspace_identity(self) -> WorkspaceIdentity | None:
+        """Load the stored control plane workspace of this server.
+
+        Returns:
+            Stored workspace identity, or ``None`` when none was stored yet.
+        """
+        row = (
+            await self._session.execute(
+                select(
+                    ServerSettingsORM.organization_id,
+                    ServerSettingsORM.organization_name,
+                    ServerSettingsORM.workspace_name,
+                )
+            )
+        ).one_or_none()
+        if row is None or row.organization_id is None:
+            return None
+        return WorkspaceIdentity(
+            organization_id=row.organization_id,
+            organization_name=row.organization_name or "",
+            workspace_name=row.workspace_name or "",
+        )
+
+    async def save_workspace_identity(self, identity: WorkspaceIdentity) -> None:
+        """Store the control plane workspace of this server.
+
+        Args:
+            identity: Workspace identity to store.
+        """
+        await self._session.execute(
+            update(ServerSettingsORM).values(
+                organization_id=identity.organization_id,
+                organization_name=identity.organization_name,
+                workspace_name=identity.workspace_name,
+            )
         )

@@ -22,6 +22,7 @@ import httpx
 import pytest
 
 from conftest import control_plane_settings
+from kitaru.analytics.client import AnalyticsClient
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.adapters.auth.control_plane import (
     SERVER_ID_HEADER,
@@ -32,11 +33,13 @@ from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneError,
     ControlPlaneUser,
 )
+from kitaru.server.application.models.workspace_identity import WorkspaceIdentity
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru_test_support import (
     FakeAccountRepository,
     FakeControlPlaneClient,
+    FakeServerSettingsRepository,
 )
 
 SERVER_ID = uuid.uuid4()
@@ -47,8 +50,10 @@ class _RecordingAnalytics(ServerAnalytics):
 
     def __init__(self) -> None:
         """Initialize the tracker."""
+        self._client = AnalyticsClient(enabled=False)
         self.identified: list[tuple[uuid.UUID, dict[str, Any]]] = []
         self.tracked: list[tuple[uuid.UUID, str, dict[str, Any]]] = []
+        self.tracked_contexts: list[dict[str, Any]] = []
         self.aliased: list[tuple[uuid.UUID, uuid.UUID]] = []
 
     def track(
@@ -65,6 +70,7 @@ class _RecordingAnalytics(ServerAnalytics):
             properties: Event properties.
         """
         self.tracked.append((user_id, event, properties or {}))
+        self.tracked_contexts.append(dict(self._client._context))
 
     def identify(
         self, user_id: uuid.UUID, traits: dict[str, Any] | None = None
@@ -122,6 +128,7 @@ def build_authenticator(
     account_repository: FakeAccountRepository,
     user: ControlPlaneUser | None,
     analytics: ServerAnalytics | None = None,
+    server_settings_repository: FakeServerSettingsRepository | None = None,
 ) -> tuple[ControlPlaneAuthenticator, FakeControlPlaneClient]:
     """Build an authenticator wired to a fake control plane client.
 
@@ -129,6 +136,7 @@ def build_authenticator(
         account_repository: Fake account repository.
         user: Control plane user returned by the fake client.
         analytics: Analytics tracker, None skips tracking.
+        server_settings_repository: Fake server settings repository.
 
     Returns:
         Authenticator under test and the fake client it calls.
@@ -137,6 +145,8 @@ def build_authenticator(
     authenticator = ControlPlaneAuthenticator(
         client=client,
         account_repository=account_repository,
+        server_settings_repository=server_settings_repository
+        or FakeServerSettingsRepository(),
         server_id=SERVER_ID,
         analytics=analytics,
     )
@@ -496,3 +506,66 @@ async def test_authenticate_service_account_identifies_the_flag(
 
     _, traits = analytics.identified[0]
     assert traits["is_service_account"] is True
+
+
+async def test_authenticate_names_the_workspace_before_the_account_exists(
+    account_repository: FakeAccountRepository,
+) -> None:
+    """Name the workspace in the first events, and store it once per change."""
+    workspace = WorkspaceIdentity(
+        organization_id=uuid.uuid4(), organization_name="acme", workspace_name="ml"
+    )
+    user = control_plane_user().model_copy(update={"workspace": workspace})
+    analytics = _RecordingAnalytics()
+    server_settings = FakeServerSettingsRepository()
+    authenticator, client = build_authenticator(
+        account_repository, user, analytics, server_settings
+    )
+
+    await authenticator.authenticate("credential")
+    await authenticator.authenticate("credential")
+
+    (created_context,) = [
+        context
+        for (_, event, _), context in zip(
+            analytics.tracked, analytics.tracked_contexts, strict=True
+        )
+        if event == AnalyticsEvent.ACCOUNT_CREATED
+    ]
+    assert created_context["organization_id"] == workspace.organization_id
+    assert created_context["organization_name"] == "acme"
+    assert created_context["workspace_name"] == "ml"
+    assert server_settings.saved_workspace_identities == [workspace]
+
+    # A request that failed after the write rolled it back.
+    server_settings.workspace_identity = None
+    await authenticator.authenticate("credential")
+    assert server_settings.saved_workspace_identities == [workspace, workspace]
+
+    renamed = workspace.model_copy(update={"workspace_name": "renamed"})
+    client.user = user.model_copy(update={"workspace": renamed})
+    await authenticator.authenticate("credential")
+
+    assert analytics._client._context["workspace_name"] == "renamed"
+    assert server_settings.saved_workspace_identities == [
+        workspace,
+        workspace,
+        renamed,
+    ]
+
+
+def test_user_without_a_workspace_parses_from_an_older_control_plane() -> None:
+    """Accept a user reply without the workspace, or with unknown fields in it."""
+    assert ControlPlaneUser.model_validate({"id": str(uuid.uuid4())}).workspace is None
+    workspace = ControlPlaneUser.model_validate(
+        {
+            "id": str(uuid.uuid4()),
+            "workspace": {
+                "organization_id": str(uuid.uuid4()),
+                "organization_name": "acme",
+                "workspace_name": "ml",
+                "added_later": True,
+            },
+        }
+    ).workspace
+    assert workspace is not None and workspace.workspace_name == "ml"

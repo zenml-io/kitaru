@@ -38,6 +38,9 @@ from kitaru.server.adapters.db.repositories.api_key_repository import (
 from kitaru.server.adapters.db.repositories.device_repository import (
     SQLDeviceRepository,
 )
+from kitaru.server.adapters.db.repositories.server_settings_repository import (
+    SQLServerSettingsRepository,
+)
 from kitaru.server.adapters.rest.dependencies.request import (
     get_app_settings,
     get_auth_session,
@@ -151,6 +154,7 @@ def get_auth_service(
         control_plane = ControlPlaneAuthenticator(
             client=client,
             account_repository=account_repository,
+            server_settings_repository=SQLServerSettingsRepository(auth_session),
             server_id=settings.SERVER_ID,
             analytics=analytics,
         )

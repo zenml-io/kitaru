@@ -106,6 +106,14 @@ class AnalyticsClient:
         """
         self._context = context
 
+    def update_context(self, fields: dict[str, Any]) -> None:
+        """Merge fields into the context.
+
+        Args:
+            fields: Values to add to or replace in the context.
+        """
+        self._context.update(fields)
+
     @property
     def enabled(self) -> bool:
         """Whether messages are sent.

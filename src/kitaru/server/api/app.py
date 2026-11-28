@@ -342,18 +342,23 @@ def create_app(settings: APISettings) -> FastAPI:
                 settings.EPHEMERAL_WORKER
             )
         async for session in database.get_async_session():
-            server_id = await ensure_server_id(
-                SQLServerSettingsRepository(session), settings.SERVER_ID
-            )
+            server_settings = SQLServerSettingsRepository(session)
+            server_id = await ensure_server_id(server_settings, settings.SERVER_ID)
+            # A warm workspace's server is built without the names, and
+            # stores them when its first user signs in.
+            stored = await server_settings.get_workspace_identity()
             await session.commit()
             app.state.server_id = server_id
             analytics.set_context(
                 build_analytics_context(
                     server_id=server_id,
                     auth_scheme=settings.AUTH_SCHEME,
-                    organization_id=settings.ORGANIZATION_ID,
-                    organization_name=settings.ORGANIZATION_NAME,
-                    workspace_name=settings.WORKSPACE_NAME,
+                    organization_id=settings.ORGANIZATION_ID
+                    or (stored.organization_id if stored else None),
+                    organization_name=settings.ORGANIZATION_NAME
+                    or (stored.organization_name if stored else ""),
+                    workspace_name=settings.WORKSPACE_NAME
+                    or (stored.workspace_name if stored else ""),
                 )
             )
         # The control plane owns every account under its auth scheme, so there
