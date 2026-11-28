@@ -17,6 +17,7 @@ from kitaru.api_models.v1.job import JobResponse, JobStatus
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.api_models.v1.task import TaskResponse
 from kitaru.cli import receipts
+from kitaru.cli.links import resolve_dashboard_links
 from kitaru.cli.output import CLIError, CommandResult, emit_event
 from kitaru.cli.registration import (
     build_list_params,
@@ -30,6 +31,7 @@ from kitaru.cli.session_selection import (
     get_cohort_version,
     parse_session_ids,
 )
+from kitaru.client.dashboard_urls import get_agent_sessions_url, get_job_url
 
 
 async def list_imports(
@@ -48,7 +50,30 @@ async def list_imports(
 async def get_import(client: Any, import_id: uuid.UUID) -> CommandResult:
     """Get one import without remapping its status."""
     import_ = await client.imports.get(import_id)
-    return CommandResult(item=import_.model_dump(mode="json"))
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {
+            "sessions": get_agent_sessions_url(
+                base,
+                import_.agent_id,
+                agent_version_id=import_.agent_version_id,
+            ),
+            **(
+                {"job": get_job_url(base, import_.job_id)}
+                if import_.job_id is not None
+                else {}
+            ),
+        },
+        warning=(
+            "Could not resolve dashboard links because the server info "
+            "request failed. The import read succeeded."
+        ),
+    )
+    return CommandResult(
+        item=import_.model_dump(mode="json"),
+        links=links,
+        warnings=warnings,
+    )
 
 
 def _terminal_analysis_result(

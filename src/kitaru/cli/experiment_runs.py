@@ -27,6 +27,7 @@ from kitaru.api_models.v1.experiment_run import (
     ExperimentRunStatus,
 )
 from kitaru.api_models.v1.replay import BaselineEvaluationMode
+from kitaru.cli.links import resolve_dashboard_links
 from kitaru.cli.output import CLIError, CommandResult, emit_event
 from kitaru.cli.receipts import get_wait_settings
 from kitaru.cli.registration import (
@@ -38,6 +39,7 @@ from kitaru.cli.registration import (
 )
 from kitaru.cli.schema import ParameterSpec
 from kitaru.cli.task_diagnostics import get_task_diagnostics
+from kitaru.client.dashboard_urls import get_experiment_run_url
 
 GET_PARAMETERS = (
     ParameterSpec("RUN", "UUID", "argument", True, "Experiment-run ID."),
@@ -253,9 +255,20 @@ async def start_run(
         receipt["task_diagnostics"] = (
             diagnostics.model_dump(mode="json") if diagnostics else None
         )
+        links, link_warnings = await resolve_dashboard_links(
+            client,
+            lambda base: {
+                "dashboard": get_experiment_run_url(base, run.experiment_id, run.number)
+            },
+            warning=(
+                "Could not resolve a dashboard link because the server info "
+                "request failed. The experiment run was started."
+            ),
+        )
         return CommandResult(
-            warnings=warnings,
+            warnings=[*warnings, *link_warnings],
             item=receipt,
+            links=links,
             event="created",
             next_actions=next_actions,
         )
@@ -276,7 +289,22 @@ async def start_run(
         cohort_version=cohort_version_identity,
         agent_version=agent_version_identity,
     )
-    return _terminal_result(settled, terminal_receipt)
+    result = _terminal_result(settled, terminal_receipt)
+    links, link_warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {
+            "dashboard": get_experiment_run_url(
+                base, settled.experiment_id, settled.number
+            )
+        },
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. The experiment run completed."
+        ),
+    )
+    result.links = links
+    result.warnings.extend(link_warnings)
+    return result
 
 
 async def list_runs(
@@ -305,7 +333,17 @@ async def get_run(
         item["evaluation_aggregates"] = [
             evaluation.model_dump(mode="json") for evaluation in evaluations
         ]
-    return CommandResult(item=item)
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {
+            "dashboard": get_experiment_run_url(base, run.experiment_id, run.number)
+        },
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. The experiment run read succeeded."
+        ),
+    )
+    return CommandResult(item=item, links=links, warnings=warnings)
 
 
 async def list_run_jobs(
@@ -359,7 +397,20 @@ async def watch_run(
         cohort_version=cohort_version_identity,
         agent_version=agent_version_identity,
     )
-    return _terminal_result(run, receipt)
+    result = _terminal_result(run, receipt)
+    links, link_warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {
+            "dashboard": get_experiment_run_url(base, run.experiment_id, run.number)
+        },
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. The experiment run completed."
+        ),
+    )
+    result.links = links
+    result.warnings.extend(link_warnings)
+    return result
 
 
 async def cancel_run(client: Any, run_id: uuid.UUID) -> CommandResult:
@@ -372,7 +423,22 @@ async def cancel_run(client: Any, run_id: uuid.UUID) -> CommandResult:
         if run.status is ExperimentRunStatus.CANCELED
         else f"kitaru experiment run watch {run_id}"
     )
-    return CommandResult(item=item, next_actions=[next_action])
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {
+            "dashboard": get_experiment_run_url(base, run.experiment_id, run.number)
+        },
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. Cancellation was requested."
+        ),
+    )
+    return CommandResult(
+        item=item,
+        links=links,
+        warnings=warnings,
+        next_actions=[next_action],
+    )
 
 
 async def delete_run(client: Any, run_id: uuid.UUID, *, force: bool) -> CommandResult:

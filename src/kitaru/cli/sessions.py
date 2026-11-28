@@ -33,6 +33,7 @@ from kitaru.api_models.v1.imports import (
     ImportSource,
     ImportStats,
 )
+from kitaru.api_models.v1.info import ServerInfoResponse
 from kitaru.api_models.v1.job import JobResponse, JobStatus
 from kitaru.api_models.v1.plugin import AnalyzerConfig, EvaluatorConfig
 from kitaru.api_models.v1.session import (
@@ -51,6 +52,7 @@ from kitaru.api_models.v1.tag import (
 from kitaru.api_models.v1.task import TaskKind, TaskResponse, TaskStatus
 from kitaru.cli import receipts
 from kitaru.cli.filters import list_validation_error, parse_filter_option
+from kitaru.cli.links import resolve_dashboard_links
 from kitaru.cli.output import CLIError, CommandResult, emit_event
 from kitaru.cli.references import (
     ParentKind,
@@ -68,6 +70,11 @@ from kitaru.cli.registration import (
     resolve_evaluator_configs,
 )
 from kitaru.cli.session_selection import get_cohort_version, parse_session_ids
+from kitaru.client.dashboard_urls import (
+    get_agent_sessions_url,
+    get_job_url,
+    get_session_url,
+)
 from kitaru.client.exceptions import APIError
 from kitaru.session_transcript import format_transcripts, read_transcripts
 
@@ -550,10 +557,13 @@ async def import_sessions(
     max_upload_bytes = (
         max_upload_mib * _MIB_BYTES if max_upload_mib is not None else None
     )
+    server_info: ServerInfoResponse | None = None
     if path is not None:
         _check_payload_size(path, max_upload_bytes)
-        info = await client.info.get()
-        server_max_bytes = info.max_blob_size_bytes
+        fetched_info = await client.info.get()
+        if isinstance(fetched_info, ServerInfoResponse):
+            server_info = fetched_info
+        server_max_bytes = fetched_info.max_blob_size_bytes
         if server_max_bytes is not None:
             max_upload_bytes = (
                 min(max_upload_bytes, server_max_bytes)
@@ -708,7 +718,27 @@ async def import_sessions(
         identity=identity,
         next_actions=["kitaru session list"],
     )
+
+    def _build_import_links(base: str) -> dict[str, str]:
+        return {
+            "sessions": get_agent_sessions_url(
+                base, agent_parent.id, agent_version_id=agent_version.id
+            ),
+            "job": get_job_url(base, job.id),
+        }
+
     if wait_settings is None:
+        links, link_warnings = await resolve_dashboard_links(
+            client,
+            _build_import_links,
+            warning=(
+                "Could not resolve dashboard links because the server info "
+                "request failed. The import job was created."
+            ),
+            info=server_info,
+        )
+        created.links = links
+        created.warnings.extend(link_warnings)
         return created
 
     emit_event(
@@ -741,6 +771,17 @@ async def import_sessions(
                 details={"receipt": result.item, "error": type(error).__name__},
                 hint="Retry the import without --tag or apply the tags manually.",
             ) from error
+    links, link_warnings = await resolve_dashboard_links(
+        client,
+        _build_import_links,
+        warning=(
+            "Could not resolve dashboard links because the server info "
+            "request failed. The import completed."
+        ),
+        info=server_info,
+    )
+    result.links = links
+    result.warnings.extend(link_warnings)
     return result
 
 
@@ -842,7 +883,19 @@ async def _get_agent_filter_id(client: Any, reference: str) -> uuid.UUID:
 async def get_session(client: Any, session_id: uuid.UUID) -> CommandResult:
     """Get one session by exact UUID."""
     item = await client.sessions.get(session_id)
-    return CommandResult(item=item.model_dump(mode="json"))
+    links, warnings = await resolve_dashboard_links(
+        client,
+        lambda base: {"dashboard": get_session_url(base, item.id)},
+        warning=(
+            "Could not resolve a dashboard link because the server info "
+            "request failed. The session read succeeded."
+        ),
+    )
+    return CommandResult(
+        item=item.model_dump(mode="json"),
+        links=links,
+        warnings=warnings,
+    )
 
 
 async def list_session_nodes(

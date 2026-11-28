@@ -1,0 +1,1 @@
+- Added dashboard links to CLI command results (`links`) for sessions, imports, experiments, experiment runs, cohorts, investigations, and jobs when the server serves or reports a dashboard.
