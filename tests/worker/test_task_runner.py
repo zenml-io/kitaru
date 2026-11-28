@@ -15,6 +15,9 @@
 
 import asyncio
 import json
+import logging
+import os
+import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -43,7 +46,11 @@ from kitaru.worker import task_runner as task_runner_module
 from kitaru.worker.blob_cache import BlobCache
 from kitaru.worker.context import ExecutionContext
 from kitaru.worker.process import ProcessResult, TaskProcess
-from kitaru.worker.task_runner import MAX_RESULT_BYTES, TaskRunner
+from kitaru.worker.task_runner import (
+    MAX_LOG_TAIL_CHARS,
+    MAX_RESULT_BYTES,
+    TaskRunner,
+)
 
 
 def _ctx(tmp_path: Path, client: FakeKitaruAPIClient) -> ExecutionContext:
@@ -769,3 +776,198 @@ async def test_completion_token_rejection_returns_the_running_task(
 
     assert result == running_task
     assert len(client.tasks.update_calls) == 2
+
+
+async def test_nonzero_exit_logs_tail_summary_and_job_inspect_hint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A nonzero exit logs the stderr tail summary and job inspection command."""
+    tail = (
+        "stdout tail:\n"
+        "booting agent\n"
+        "stderr tail:\n"
+        "Traceback (most recent call last):\n"
+        '  File "agent.py", line 1, in <module>\n'
+        "    import missing_pkg\n"
+        "ModuleNotFoundError: No module named 'missing_pkg'\n"
+    )
+    _patch_run_task_process(monkeypatch, _fake_run_task_process(1, tail=tail))
+    client = FakeKitaruAPIClient()
+    task = make_task(kind=TaskKind.AGENT, attempt=1)
+    spec = make_agent_spec(task.id)
+    running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
+    failed_task = running_task.model_copy(update={"status": TaskStatus.FAILED})
+    client.tasks.update_responses.extend([running_task, failed_task])
+
+    with caplog.at_level(logging.INFO, logger="kitaru.worker.task_runner"):
+        await TaskRunner(_ctx(tmp_path, client)).execute(
+            make_claimed(task, spec), asyncio.Event()
+        )
+
+    failure_logs = [
+        record.getMessage() for record in caplog.records if "failed:" in record.message
+    ]
+    assert len(failure_logs) == 1
+    message = failure_logs[0]
+    assert f"Task {task.id} (job {task.job_id}) failed:" in message
+    assert "Agent process exited with code 1." in message
+    assert (
+        "Last output: import missing_pkg | "
+        "ModuleNotFoundError: No module named 'missing_pkg'"
+    ) in message
+    assert "booting agent" not in message
+    assert f"(inspect with: kitaru job get {task.job_id} --tasks)" in message
+
+
+@pytest.mark.parametrize(
+    ("tail", "expected_fragment", "forbid_last_output"),
+    [
+        (
+            "stdout tail:\nfirst line\nfatal from stdout\nstderr tail:\n   \n",
+            "Last output: first line | fatal from stdout",
+            False,
+        ),
+        (
+            "",
+            "",
+            True,
+        ),
+        (
+            f"stderr tail:\n{'x' * (MAX_LOG_TAIL_CHARS + 50)}\nValueError: bad input\n",
+            "Last output: ValueError: bad input",
+            False,
+        ),
+        (
+            f"stderr tail:\n{'z' * (MAX_LOG_TAIL_CHARS + 50)}\n",
+            f"Last output: {'z' * (MAX_LOG_TAIL_CHARS - 3)}...",
+            False,
+        ),
+    ],
+)
+async def test_nonzero_exit_log_tail_summary_edge_cases(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tail: str,
+    expected_fragment: str,
+    forbid_last_output: bool,
+) -> None:
+    """Failure logs fall back to stdout, bound length, and omit empty tails."""
+    _patch_run_task_process(monkeypatch, _fake_run_task_process(1, tail=tail))
+    client = FakeKitaruAPIClient()
+    task = make_task(kind=TaskKind.AGENT, attempt=1)
+    spec = make_agent_spec(task.id)
+    running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
+    failed_task = running_task.model_copy(update={"status": TaskStatus.FAILED})
+    client.tasks.update_responses.extend([running_task, failed_task])
+
+    with caplog.at_level(logging.INFO, logger="kitaru.worker.task_runner"):
+        await TaskRunner(_ctx(tmp_path, client)).execute(
+            make_claimed(task, spec), asyncio.Event()
+        )
+
+    failure_logs = [
+        record.getMessage() for record in caplog.records if "failed:" in record.message
+    ]
+    assert len(failure_logs) == 1
+    message = failure_logs[0]
+    assert f"(inspect with: kitaru job get {task.job_id} --tasks)" in message
+    if forbid_last_output:
+        assert "Last output:" not in message
+    else:
+        assert expected_fragment in message
+
+
+async def test_timeout_logs_tail_summary_and_job_inspect_hint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A timed-out task logs its tail snippet and job inspection command."""
+    _patch_run_task_process(
+        monkeypatch,
+        _fake_run_task_process(None, tail="stderr tail:\nwaiting on upstream\n"),
+    )
+    client = FakeKitaruAPIClient()
+    task = make_task(kind=TaskKind.AGENT, attempt=1)
+    spec = make_agent_spec(task.id, timeout_seconds=45)
+    running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
+    timed_out_task = running_task.model_copy(update={"status": TaskStatus.TIMED_OUT})
+    client.tasks.update_responses.extend([running_task, timed_out_task])
+
+    with caplog.at_level(logging.INFO, logger="kitaru.worker.task_runner"):
+        await TaskRunner(_ctx(tmp_path, client)).execute(
+            make_claimed(task, spec), asyncio.Event()
+        )
+
+    timeout_logs = [
+        record.getMessage()
+        for record in caplog.records
+        if "timed out after" in record.message
+    ]
+    assert len(timeout_logs) == 1
+    message = timeout_logs[0]
+    assert f"Task {task.id} (job {task.job_id}) timed out after 45 seconds." in message
+    assert "Last output: waiting on upstream" in message
+    assert f"(inspect with: kitaru job get {task.job_id} --tasks)" in message
+
+
+async def test_agent_command_and_working_dir_logged_once_per_agent_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The runner logs each agent version's command and working_dir once."""
+    _patch_run_task_process(monkeypatch, _fake_run_task_process(0))
+    client = FakeKitaruAPIClient()
+    runner = TaskRunner(_ctx(tmp_path, client))
+
+    version_a = uuid.uuid4()
+    version_b = uuid.uuid4()
+
+    async def _run_agent(
+        version_id: uuid.UUID, command: str, working_dir: str | None
+    ) -> None:
+        task = make_task(kind=TaskKind.AGENT, attempt=1, agent_version_id=version_id)
+        spec = make_agent_spec(task.id, command=command, working_dir=working_dir)
+        running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
+        completed_task = running_task.model_copy(
+            update={"status": TaskStatus.COMPLETED}
+        )
+        client.tasks.update_responses.extend([running_task, completed_task])
+        await runner.execute(make_claimed(task, spec), asyncio.Event())
+
+    with caplog.at_level(logging.INFO, logger="kitaru.worker.task_runner"):
+        await _run_agent(version_a, "uv run python agent.py", "/srv/agent")
+        await _run_agent(version_a, "uv run python agent.py", "/srv/agent")
+        await _run_agent(version_a, "python -m agent", "/srv/agent")
+        await _run_agent(version_b, "python other.py", None)
+
+        eval_task = make_task(kind=TaskKind.EVALUATOR, attempt=1)
+        eval_spec = make_evaluator_spec(
+            eval_task.id,
+            plugin=PackagePluginSpec(
+                entrypoint="pkg.mod:evaluate", requirement="pkg==1.0"
+            ),
+        )
+        eval_running = eval_task.model_copy(update={"status": TaskStatus.RUNNING})
+        eval_completed = eval_running.model_copy(
+            update={"status": TaskStatus.COMPLETED}
+        )
+        client.tasks.update_responses.extend([eval_running, eval_completed])
+        await runner.execute(make_claimed(eval_task, eval_spec), asyncio.Event())
+
+    command_logs = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith(("Agent version ", "Agent command:"))
+    ]
+    assert command_logs == [
+        f"Agent version {version_a} command: uv run python agent.py "
+        "(working_dir: /srv/agent)",
+        f"Agent version {version_a} command: python -m agent (working_dir: /srv/agent)",
+        f"Agent version {version_b} command: python other.py "
+        f"(working_dir: {os.getcwd()} (inherited from worker))",
+    ]
